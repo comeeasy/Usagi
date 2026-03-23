@@ -15,7 +15,14 @@
       "WebFetch(domain:medium.com)",
       "WebFetch(domain:enterprise-knowledge.com)",
       "WebFetch(domain:www.mdpi.com)",
-      "WebFetch(domain:thomasthelen.com)"
+      "WebFetch(domain:thomasthelen.com)",
+      "WebFetch(domain:www.ontotext.com)",
+      "WebFetch(domain:ceur-ws.org)",
+      "WebFetch(domain:ontop-vkg.org)",
+      "WebFetch(domain:telicent.io)",
+      "Bash(mkdir -p /Users/joono/projects/backend/api /Users/joono/projects/backend/mcp /Users/joono/projects/backend/services/ingestion /Users/joono/projects/backend/models /Users/joono/projects/backend/workers /Users/joono/projects/backend/tests)",
+      "Bash(mkdir -p /Users/joono/projects/frontend/src/pages/ontology /Users/joono/projects/frontend/src/components/layout /Users/joono/projects/frontend/src/components/graph /Users/joono/projects/frontend/src/components/entities /Users/joono/projects/frontend/src/components/relations /Users/joono/projects/frontend/src/components/provenance /Users/joono/projects/frontend/src/components/sparql /Users/joono/projects/frontend/src/components/reasoner /Users/joono/projects/frontend/src/components/sources /Users/joono/projects/frontend/src/components/shared /Users/joono/projects/frontend/src/hooks /Users/joono/projects/frontend/src/api /Users/joono/projects/frontend/src/types)",
+      "Bash(mkdir -p /Users/joono/projects/nginx)"
     ]
   }
 }
