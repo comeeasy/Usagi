@@ -8,56 +8,59 @@ export type XSDDatatype =
   | 'xsd:date'
   | 'xsd:dateTime'
   | 'xsd:anyURI'
+  | 'xsd:langString'
 
 export type ObjectPropertyCharacteristic =
-  | 'functional'
-  | 'inverseFunctional'
-  | 'transitive'
-  | 'symmetric'
-  | 'asymmetric'
-  | 'reflexive'
-  | 'irreflexive'
+  | 'Functional'
+  | 'InverseFunctional'
+  | 'Transitive'
+  | 'Symmetric'
+  | 'Asymmetric'
+  | 'Reflexive'
+  | 'Irreflexive'
 
 export interface ObjectProperty {
   iri: string
-  label?: string
+  ontologyId: string
+  label: string
   comment?: string
-  ontology_id: string
-  domain_iri?: string
-  range_iri?: string
+  domain: string[]            // Concept IRI 목록
+  range: string[]             // Concept IRI 목록
+  superProperties: string[]   // rdfs:subPropertyOf
+  inverseOf?: string          // owl:inverseOf
   characteristics: ObjectPropertyCharacteristic[]
-  inverse_of?: string
-  is_deprecated: boolean
 }
 
 export interface DataProperty {
   iri: string
-  label?: string
+  ontologyId: string
+  label: string
   comment?: string
-  ontology_id: string
-  domain_iri?: string
-  range_datatype?: XSDDatatype
-  is_functional: boolean
-  is_deprecated: boolean
+  domain: string[]            // Concept IRI 목록
+  range: XSDDatatype[]        // xsd:* 타입 목록
+  superProperties: string[]
+  isFunctional: boolean
 }
 
 export interface ObjectPropertyCreate {
   iri: string
-  label?: string
+  label: string
   comment?: string
-  domain_iri?: string
-  range_iri?: string
+  domain?: string[]
+  range?: string[]
+  superProperties?: string[]
+  inverseOf?: string
   characteristics?: ObjectPropertyCharacteristic[]
-  inverse_of?: string
 }
 
 export interface DataPropertyCreate {
   iri: string
-  label?: string
+  label: string
   comment?: string
-  domain_iri?: string
-  range_datatype?: XSDDatatype
-  is_functional?: boolean
+  domain?: string[]
+  range?: XSDDatatype[]
+  superProperties?: string[]
+  isFunctional?: boolean
 }
 
 export type PropertyCreate = ObjectPropertyCreate | DataPropertyCreate

@@ -1,16 +1,15 @@
-from .ontology import Ontology, OntologyCreate, OntologyUpdate, OntologyStats
+from .ontology import Ontology, OntologyCreate, OntologyUpdate, OntologyStats, PaginatedResponse, ErrorResponse, JobResponse
 from .concept import Concept, ConceptCreate, ConceptUpdate, PropertyRestriction
 from .individual import Individual, IndividualCreate, IndividualUpdate, ProvenanceRecord, DataPropertyValue, ObjectPropertyValue
-from .property import ObjectProperty, DataProperty, ObjectPropertyCreate, DataPropertyCreate, XSDDatatype
-from .source import BackingSource, BackingSourceCreate, PropertyMapping, JDBCConfig, APIConfig, StreamConfig
-from .reasoner import ReasonerResult, ReasonerViolation, InferredAxiom, ReasonerJob
+from .property import ObjectProperty, DataProperty, ObjectPropertyCreate, DataPropertyCreate, ObjectPropertyUpdate, DataPropertyUpdate, XSDDatatype, ObjectPropertyCharacteristic
+from .source import BackingSource, BackingSourceCreate, BackingSourceUpdate, PropertyMapping, JDBCConfig, APIConfig, StreamConfig, SourceType, SourceEvent
+from .reasoner import ReasonerResult, ReasonerViolation, InferredAxiom, ReasonerJob, ReasonerRunRequest
 
 __all__ = [
-    "Ontology", "OntologyCreate", "OntologyUpdate", "OntologyStats",
+    "Ontology", "OntologyCreate", "OntologyUpdate", "OntologyStats", "PaginatedResponse", "ErrorResponse", "JobResponse",
     "Concept", "ConceptCreate", "ConceptUpdate", "PropertyRestriction",
-    "Individual", "IndividualCreate", "IndividualUpdate", "ProvenanceRecord",
-    "DataPropertyValue", "ObjectPropertyValue",
-    "ObjectProperty", "DataProperty", "ObjectPropertyCreate", "DataPropertyCreate", "XSDDatatype",
-    "BackingSource", "BackingSourceCreate", "PropertyMapping", "JDBCConfig", "APIConfig", "StreamConfig",
-    "ReasonerResult", "ReasonerViolation", "InferredAxiom", "ReasonerJob",
+    "Individual", "IndividualCreate", "IndividualUpdate", "ProvenanceRecord", "DataPropertyValue", "ObjectPropertyValue",
+    "ObjectProperty", "DataProperty", "ObjectPropertyCreate", "DataPropertyCreate", "ObjectPropertyUpdate", "DataPropertyUpdate", "XSDDatatype", "ObjectPropertyCharacteristic",
+    "BackingSource", "BackingSourceCreate", "BackingSourceUpdate", "PropertyMapping", "JDBCConfig", "APIConfig", "StreamConfig", "SourceType", "SourceEvent",
+    "ReasonerResult", "ReasonerViolation", "InferredAxiom", "ReasonerJob", "ReasonerRunRequest",
 ]

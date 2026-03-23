@@ -3,52 +3,56 @@ Individual Pydantic models
 """
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
-
 from pydantic import BaseModel
 
 
 class DataPropertyValue(BaseModel):
     property_iri: str
-    value: Any
-    datatype: str | None = None
-    language: str | None = None
+    value: str
+    datatype: str          # xsd:string, xsd:integer, xsd:dateTime 등
+    graph_iri: str
 
 
 class ObjectPropertyValue(BaseModel):
     property_iri: str
     target_iri: str
+    graph_iri: str
 
 
 class ProvenanceRecord(BaseModel):
-    source_id: str
-    source_type: str
-    generated_at: datetime
-    record_id: str | None = None
-    named_graph_iri: str | None = None
+    graph_iri: str         # Named Graph IRI
+    source_id: str         # BackingSource.id
+    source_type: str       # SourceType
+    ingested_at: str       # ISO 8601
+    triple_count: int
 
 
 class Individual(BaseModel):
     iri: str
-    label: str | None = None
     ontology_id: str
-    type_iris: list[str] = []
-    data_properties: list[DataPropertyValue] = []
-    object_properties: list[ObjectPropertyValue] = []
+    label: str | None = None
+    types: list[str] = []                              # rdf:type 대상 Concept IRI 목록
+    data_property_values: list[DataPropertyValue] = []
+    object_property_values: list[ObjectPropertyValue] = []
+    same_as: list[str] = []                            # owl:sameAs
+    different_from: list[str] = []                     # owl:differentFrom
     provenance: list[ProvenanceRecord] = []
 
 
 class IndividualCreate(BaseModel):
     iri: str
     label: str | None = None
-    type_iris: list[str] = []
-    data_properties: list[DataPropertyValue] = []
-    object_properties: list[ObjectPropertyValue] = []
+    types: list[str] = []
+    data_property_values: list[DataPropertyValue] = []
+    object_property_values: list[ObjectPropertyValue] = []
+    same_as: list[str] = []
+    different_from: list[str] = []
 
 
 class IndividualUpdate(BaseModel):
     label: str | None = None
-    type_iris: list[str] | None = None
-    data_properties: list[DataPropertyValue] | None = None
-    object_properties: list[ObjectPropertyValue] | None = None
+    types: list[str] | None = None
+    data_property_values: list[DataPropertyValue] | None = None
+    object_property_values: list[ObjectPropertyValue] | None = None
+    same_as: list[str] | None = None
+    different_from: list[str] | None = None
