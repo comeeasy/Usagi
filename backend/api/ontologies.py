@@ -9,101 +9,225 @@ api/ontologies.py — 온톨로지 CRUD REST 라우터
   DELETE /ontologies/{id}           온톨로지 삭제
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import uuid
+from datetime import datetime, timezone
 from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from models.ontology import (
     Ontology,
     OntologyCreate,
+    OntologyStats,
     OntologyUpdate,
     PaginatedResponse,
 )
 
 router = APIRouter(prefix="/ontologies", tags=["ontologies"])
 
+# OWL/DC 프리픽스
+_PREFIXES = """
+PREFIX owl:  <http://www.w3.org/2002/07/owl#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX dc:   <http://purl.org/dc/terms/>
+PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+"""
+
+
+def _store(request: Request):
+    return request.app.state.ontology_store
+
+
+def _graph_store(request: Request):
+    return request.app.state.graph_store
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _fetch_ontology(store, ontology_id: str) -> dict:
+    """ID(IRI prefix)로 온톨로지 메타데이터 조회. 없으면 None."""
+    rows = await store.sparql_select(f"""
+        {_PREFIXES}
+        SELECT ?iri ?label ?description ?version ?created ?updated WHERE {{
+            ?iri a owl:Ontology .
+            FILTER(CONTAINS(STR(?iri), "{ontology_id}"))
+            OPTIONAL {{ ?iri rdfs:label ?label }}
+            OPTIONAL {{ ?iri dc:description ?description }}
+            OPTIONAL {{ ?iri owl:versionInfo ?version }}
+            OPTIONAL {{ ?iri dc:created ?created }}
+            OPTIONAL {{ ?iri dc:modified ?updated }}
+        }} LIMIT 1
+    """)
+    return rows[0] if rows else None
+
+
+# ── 목록 ──────────────────────────────────────────────────────────────────
 
 @router.get("", response_model=PaginatedResponse)
 async def list_ontologies(
+    request: Request,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> PaginatedResponse:
-    """
-    온톨로지 목록 조회.
+) -> dict:
+    store = _store(request)
+    items_raw, total = await store.list_ontologies(page, page_size)
 
-    구현 세부사항:
-    - OntologyStore.list_ontologies(page, page_size) 호출
-    - SPARQL: SELECT ?id ?iri ?label ?description ?version ?createdAt ?updatedAt
-              WHERE { GRAPH ?g { ?iri a owl:Ontology ; rdfs:label ?label } }
-              ORDER BY ?label LIMIT $pageSize OFFSET $(page-1)*pageSize
-    - 각 온톨로지에 대해 OntologyStore.get_ontology_stats(id) 병렬 호출
-    - PaginatedResponse[Ontology] 반환
-    """
-    pass
+    items = []
+    for raw in items_raw:
+        iri = raw["iri"]
+        ont_id = iri.split("/")[-1]  # IRI 마지막 세그먼트를 ID로 사용
+        tbox_iri = f"{iri}/tbox"
+        stats_dict = await store.get_ontology_stats(tbox_iri)
+        items.append(Ontology(
+            id=ont_id,
+            iri=iri,
+            label=raw.get("label", iri),
+            description=raw.get("description"),
+            version=raw.get("version"),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            stats=OntologyStats(**stats_dict),
+        ))
 
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+# ── 생성 ──────────────────────────────────────────────────────────────────
 
 @router.post("", response_model=Ontology, status_code=201)
-async def create_ontology(body: OntologyCreate) -> Ontology:
-    """
-    새 온톨로지 생성.
+async def create_ontology(request: Request, body: OntologyCreate) -> Ontology:
+    store = _store(request)
 
-    구현 세부사항:
-    - UUID 생성 → 내부 id
-    - body.iri가 이미 존재하면 HTTPException(409, code="ONTOLOGY_IRI_DUPLICATE")
-    - TBox Named Graph IRI: f"{body.iri}/tbox"
-    - SPARQL UPDATE로 owl:Ontology 트리플 삽입:
-        <{body.iri}> a owl:Ontology ;
-          rdfs:label "{body.label}" ;
-          dc:description "{body.description}" ;
-          owl:versionInfo "{body.version}" ;
-          dc:created "{now().isoformat()}"^^xsd:dateTime .
-    - 생성된 Ontology(id=uuid, stats=빈 통계) 반환
-    """
-    pass
+    # 중복 IRI 검사
+    exists = await store.sparql_ask(f"""
+        {_PREFIXES}
+        ASK {{ <{body.iri}> a owl:Ontology }}
+    """)
+    if exists:
+        raise HTTPException(409, detail={"code": "ONTOLOGY_IRI_DUPLICATE", "message": f"IRI already exists: {body.iri}"})
 
+    ont_id = str(uuid.uuid4())
+    now = _now_iso()
+    tbox_iri = f"{body.iri}/tbox"
+
+    desc_triple = f'<{body.iri}> dc:description "{body.description}" .' if body.description else ""
+    ver_triple = f'<{body.iri}> owl:versionInfo "{body.version}" .' if body.version else ""
+
+    await store.sparql_update(f"""
+        {_PREFIXES}
+        INSERT DATA {{
+            GRAPH <{tbox_iri}> {{
+                <{body.iri}> a owl:Ontology ;
+                    rdfs:label "{body.label}" ;
+                    dc:created "{now}"^^xsd:dateTime ;
+                    dc:modified "{now}"^^xsd:dateTime .
+                {desc_triple}
+                {ver_triple}
+            }}
+        }}
+    """)
+
+    return Ontology(
+        id=ont_id,
+        iri=body.iri,
+        label=body.label,
+        description=body.description,
+        version=body.version,
+        created_at=datetime.fromisoformat(now),
+        updated_at=datetime.fromisoformat(now),
+        stats=OntologyStats(),
+    )
+
+
+# ── 상세 조회 ─────────────────────────────────────────────────────────────
 
 @router.get("/{ontology_id}", response_model=Ontology)
-async def get_ontology(ontology_id: str) -> Ontology:
-    """
-    온톨로지 상세 조회 + 통계.
+async def get_ontology(request: Request, ontology_id: str) -> Ontology:
+    store = _store(request)
+    raw = await _fetch_ontology(store, ontology_id)
+    if not raw:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    구현 세부사항:
-    - OntologyStore에서 ontology_id에 해당하는 메타데이터 SPARQL SELECT
-    - 없으면 HTTPException(404, code="ONTOLOGY_NOT_FOUND")
-    - stats: SPARQL COUNT로 concepts(owl:Class 수), individuals(owl:NamedIndividual 수),
-             objectProperties(owl:ObjectProperty 수), dataProperties(owl:DatatypeProperty 수),
-             namedGraphs(Named Graph 수) 조회
-    - Ontology 반환
-    """
-    pass
+    iri = raw["iri"]["value"]
+    tbox_iri = f"{iri}/tbox"
+    stats_dict = await store.get_ontology_stats(tbox_iri)
 
+    return Ontology(
+        id=ontology_id,
+        iri=iri,
+        label=raw.get("label", {}).get("value", iri),
+        description=raw.get("description", {}).get("value"),
+        version=raw.get("version", {}).get("value"),
+        created_at=datetime.fromisoformat(raw["created"]["value"]) if "created" in raw else datetime.now(timezone.utc),
+        updated_at=datetime.fromisoformat(raw["updated"]["value"]) if "updated" in raw else datetime.now(timezone.utc),
+        stats=OntologyStats(**stats_dict),
+    )
+
+
+# ── 수정 ──────────────────────────────────────────────────────────────────
 
 @router.put("/{ontology_id}", response_model=Ontology)
-async def update_ontology(ontology_id: str, body: OntologyUpdate) -> Ontology:
-    """
-    온톨로지 메타데이터 수정.
+async def update_ontology(request: Request, ontology_id: str, body: OntologyUpdate) -> Ontology:
+    store = _store(request)
+    raw = await _fetch_ontology(store, ontology_id)
+    if not raw:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    구현 세부사항:
-    - 기존 값 조회 후 변경된 필드만 SPARQL DELETE/INSERT UPDATE 실행
-    - SPARQL UPDATE 패턴:
-        DELETE { GRAPH <tbox> { <iri> rdfs:label ?old } }
-        INSERT { GRAPH <tbox> { <iri> rdfs:label "{new}" } }
-        WHERE  { GRAPH <tbox> { <iri> rdfs:label ?old } }
-    - dc:modified를 현재 시각으로 업데이트
-    - 수정된 Ontology 반환
-    """
-    pass
+    iri = raw["iri"]["value"]
+    tbox_iri = f"{iri}/tbox"
+    now = _now_iso()
 
+    # 변경 필드만 UPDATE
+    updates = []
+    if body.label is not None:
+        updates.append(("rdfs:label", body.label, "string"))
+    if body.description is not None:
+        updates.append(("dc:description", body.description, "string"))
+    if body.version is not None:
+        updates.append(("owl:versionInfo", body.version, "string"))
+
+    for predicate, value, _ in updates:
+        await store.sparql_update(f"""
+            {_PREFIXES}
+            DELETE {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} ?old }} }}
+            INSERT {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} "{value}" }} }}
+            WHERE  {{ OPTIONAL {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} ?old }} }} }}
+        """)
+
+    await store.sparql_update(f"""
+        {_PREFIXES}
+        DELETE {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified ?old }} }}
+        INSERT {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified "{now}"^^xsd:dateTime }} }}
+        WHERE  {{ OPTIONAL {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified ?old }} }} }}
+    """)
+
+    return await get_ontology(request, ontology_id)
+
+
+# ── 삭제 ──────────────────────────────────────────────────────────────────
 
 @router.delete("/{ontology_id}", status_code=204)
-async def delete_ontology(ontology_id: str) -> None:
-    """
-    온톨로지 + 모든 소속 데이터 삭제.
+async def delete_ontology(request: Request, ontology_id: str) -> None:
+    store = _store(request)
+    graph_store = _graph_store(request)
 
-    구현 세부사항:
-    - 해당 ontology_id에 속한 모든 Named Graph 목록 조회
-      (TBox: <iri>/tbox, ABox: <source_id>/*, inferred: <iri>/inferred)
-    - OntologyStore.delete_graph(graph_iri) 반복 호출
-    - GraphStore.delete_ontology_data(ontology_id) 호출 → Neo4j 데이터 정리
-    - 204 No Content 반환
-    """
-    pass
+    raw = await _fetch_ontology(store, ontology_id)
+    if not raw:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
+
+    iri = raw["iri"]["value"]
+
+    # 해당 온톨로지 관련 모든 Named Graph 조회
+    graph_rows = await store.sparql_select(f"""
+        SELECT DISTINCT ?g WHERE {{
+            GRAPH ?g {{ ?s ?p ?o }}
+            FILTER(STRSTARTS(STR(?g), "{iri}") || STRSTARTS(STR(?g), "urn:source:"))
+        }}
+    """)
+
+    for row in graph_rows:
+        await store.delete_graph(row["g"]["value"])
+
+    await graph_store.delete_ontology_data(ontology_id)
