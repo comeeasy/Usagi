@@ -3,7 +3,19 @@
     "allow": [
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "WebSearch",
+      "WebFetch(domain:protegeproject.github.io)",
+      "WebFetch(domain:neo4j.com)",
+      "WebFetch(domain:www.palantir.com)",
+      "WebFetch(domain:graphaware.com)",
+      "WebFetch(domain:flur.ee)",
+      "WebFetch(domain:datawalk.com)",
+      "WebFetch(domain:dorians.medium.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:enterprise-knowledge.com)",
+      "WebFetch(domain:www.mdpi.com)",
+      "WebFetch(domain:thomasthelen.com)"
     ]
   }
 }
