@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+:root {
+  --color-bg-base: #0D1117;
+  --color-bg-surface: #161B22;
+  --color-bg-elevated: #21262D;
+  --color-border: #30363D;
+  --color-text-primary: #E6EDF3;
+  --color-text-secondary: #8B949E;
+  --color-text-muted: #484F58;
+  --color-primary: #2F81F7;
+  --color-primary-hover: #388BFD;
+  --color-success: #3FB950;
+  --color-warning: #D29922;
+  --color-error: #F85149;
+  --color-info: #79C0FF;
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: 'Inter', sans-serif;
+}
