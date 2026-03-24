@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from services.ontology_store import OntologyStore
 from services.graph_store import GraphStore
+from services.reasoner_service import ReasonerService
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.graph_store = GraphStore(
         settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password
     )
+    app.state.reasoner_service = ReasonerService(app.state.ontology_store)
 
     # 백그라운드 태스크
     from workers.sync_worker import run_sync_worker

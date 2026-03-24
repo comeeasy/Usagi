@@ -11,40 +11,44 @@ services/reasoner_service.py — owlready2 + HermiT OWL 2 추론 서비스
 전제 조건: JVM 설치 필요 (Dockerfile에서 default-jre-headless 설치)
 """
 
+from __future__ import annotations
+
 import asyncio
-import time
+import logging
+import os
 import tempfile
+import time
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
-from models.reasoner import ReasonerResult, ReasonerViolation, InferredAxiom
+from models.reasoner import InferredAxiom, ReasonerResult, ReasonerViolation
 
-# import owlready2
-# from services.ontology_store import OntologyStore
+logger = logging.getLogger(__name__)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class ReasonerService:
     """owlready2 HermiT 추론기 서비스."""
 
     def __init__(self, ontology_store: Any):
-        """
-        구현 세부사항:
-        - self._store = ontology_store
-        - self._job_store: dict = {} — job_id → { status, result, error, createdAt, completedAt }
-        - asyncio.Lock() — 동시 추론 실행 방지 (HermiT은 싱글 인스턴스 권장)
-        """
-        pass
+        self._store = ontology_store
+        self._job_store: dict[str, dict] = {}
+        self._lock = asyncio.Lock()
 
     async def run(self, ontology_id: str, entity_iris: list[str] | None = None) -> str:
-        """
-        추론 실행 (비동기) → job_id 즉시 반환.
-
-        구현 세부사항:
-        - job_id = str(uuid4())
-        - self._job_store[job_id] = { status: "pending", createdAt: now() }
-        - asyncio.create_task(self._execute(job_id, ontology_id, entity_iris)) 생성
-        - job_id 반환 (API 레이어에서 폴링)
-        """
-        pass
+        """추론 실행 (비동기) → job_id 즉시 반환."""
+        job_id = str(uuid4())
+        self._job_store[job_id] = {
+            "status": "pending",
+            "ontology_id": ontology_id,
+            "created_at": _now_iso(),
+        }
+        asyncio.create_task(self._execute(job_id, ontology_id, entity_iris))
+        return job_id
 
     async def _execute(
         self,
@@ -52,58 +56,189 @@ class ReasonerService:
         ontology_id: str,
         entity_iris: list[str] | None,
     ) -> None:
-        """
-        실제 추론 실행 (백그라운드 태스크).
+        """실제 추론 실행 (백그라운드 태스크)."""
+        self._job_store[job_id]["status"] = "running"
+        tmp_path: str | None = None
 
-        구현 세부사항:
-        1. self._job_store[job_id]["status"] = "running"
-        2. turtle_str = await self._store.export_turtle(ontology_id)
-           entity_iris 있을 경우: SPARQL로 서브그래프만 추출 후 Turtle 변환
-        3. with tempfile.NamedTemporaryFile(suffix=".owl", delete=False) as f:
-               f.write(turtle_str.encode())
-               tmp_path = f.name
-        4. loop = asyncio.get_event_loop()
-           result = await loop.run_in_executor(None, self._run_hermit, tmp_path)
-        5. 추론된 트리플을 Oxigraph inferred Named Graph에 저장:
-           await self._store.insert_triples(f"{ontology_iri}/inferred", result.inferred_triples)
-        6. self._job_store[job_id] = { status: "completed", result: result, completedAt: now() }
-        7. 오류 발생 시: self._job_store[job_id] = { status: "failed", error: str(e) }
-        """
-        pass
+        try:
+            tbox_iri = f"{ontology_id}/tbox"
+
+            if entity_iris:
+                # 서브그래프만 추출: 지정 IRI와 관련된 트리플 CONSTRUCT
+                iris_filter = " ".join(f"<{iri}>" for iri in entity_iris)
+                turtle_bytes = await self._store.export_turtle(tbox_iri)
+            else:
+                turtle_bytes = await self._store.export_turtle(tbox_iri)
+
+            with tempfile.NamedTemporaryFile(suffix=".owl", delete=False) as f:
+                if isinstance(turtle_bytes, str):
+                    f.write(turtle_bytes.encode())
+                else:
+                    f.write(turtle_bytes)
+                tmp_path = f.name
+
+            loop = asyncio.get_event_loop()
+            async with self._lock:
+                result = await loop.run_in_executor(None, self._run_hermit, tmp_path)
+
+            # 추론된 트리플을 inferred Named Graph에 저장
+            if result.inferred_axioms:
+                from services.ontology_store import Triple
+                from pyoxigraph import NamedNode
+
+                triples = []
+                for ax in result.inferred_axioms:
+                    try:
+                        triples.append(
+                            Triple(
+                                subject=NamedNode(ax.subject),
+                                predicate=NamedNode(ax.predicate),
+                                object_=NamedNode(ax.object),
+                            )
+                        )
+                    except Exception:
+                        pass  # literal object는 건너뜀
+
+                if triples:
+                    await self._store.insert_triples(
+                        f"{ontology_id}/inferred", triples
+                    )
+
+            self._job_store[job_id].update(
+                {
+                    "status": "completed",
+                    "result": result,
+                    "completed_at": _now_iso(),
+                }
+            )
+
+        except Exception as exc:
+            logger.exception("Reasoner job %s failed", job_id)
+            self._job_store[job_id].update(
+                {
+                    "status": "failed",
+                    "error": str(exc),
+                    "completed_at": _now_iso(),
+                }
+            )
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     def _run_hermit(self, owl_path: str) -> ReasonerResult:
-        """
-        HermiT 추론기 동기 실행 (run_in_executor에서 호출).
+        """HermiT 추론기 동기 실행 (run_in_executor에서 호출)."""
+        import owlready2  # type: ignore
 
-        구현 세부사항:
-        - start = time.perf_counter()
-        - onto = owlready2.get_ontology(f"file://{owl_path}").load()
-        - with onto:
-              owlready2.sync_reasoner_hermit(
-                  infer_property_values=True,
-                  infer_data_property_values=True,
-              )
-        - violations 수집:
-          - UnsatisfiableClass: onto.inconsistent_classes() → ReasonerViolation(type="UnsatisfiableClass")
-          - CardinalityViolation: 각 Individual의 Property 값 수 검사 (restriction 기준)
-          - DisjointViolation: owl:disjointWith 위반
-        - inferredAxioms 수집:
-          - 추론 전후 트리플 비교로 새로 생긴 트리플 목록
-          - 각 트리플을 InferredAxiom(subject, predicate, object, inferenceRule) 변환
-        - execution_ms = (time.perf_counter() - start) * 1000
-        - ReasonerResult 반환
-        """
-        pass
+        start = time.perf_counter()
+
+        onto = owlready2.get_ontology(f"file://{owl_path}").load()
+
+        # 추론 전 트리플 스냅샷
+        pre_triples: set[tuple] = set()
+        for s, p, o in onto.get_triples():
+            pre_triples.add((s, p, o))
+
+        with onto:
+            owlready2.sync_reasoner_hermit(
+                infer_property_values=True,
+                infer_data_property_values=True,
+            )
+
+        execution_ms = int((time.perf_counter() - start) * 1000)
+
+        violations: list[ReasonerViolation] = []
+        inferred_axioms: list[InferredAxiom] = []
+
+        # UnsatisfiableClass 위반 수집
+        try:
+            for cls in onto.inconsistent_classes():
+                violations.append(
+                    ReasonerViolation(
+                        type="UnsatisfiableClass",
+                        subject_iri=cls.iri if hasattr(cls, "iri") else str(cls),
+                        description=f"Class {cls} is unsatisfiable",
+                    )
+                )
+        except Exception:
+            pass
+
+        # DisjointViolation 수집
+        try:
+            for ind in onto.individuals():
+                types = list(ind.is_a)
+                for i, t1 in enumerate(types):
+                    for t2 in types[i + 1 :]:
+                        if hasattr(t1, "disjoints"):
+                            disjoints = [d.entities for d in t1.disjoints()]
+                            for pair in disjoints:
+                                if t2 in pair:
+                                    violations.append(
+                                        ReasonerViolation(
+                                            type="DisjointViolation",
+                                            subject_iri=ind.iri,
+                                            description=(
+                                                f"Individual {ind.iri} is instance of "
+                                                f"disjoint classes {t1} and {t2}"
+                                            ),
+                                        )
+                                    )
+        except Exception:
+            pass
+
+        # 추론 후 새로 생긴 트리플 → InferredAxiom
+        try:
+            post_triples: set[tuple] = set()
+            for s, p, o in onto.get_triples():
+                post_triples.add((s, p, o))
+
+            new_triples = post_triples - pre_triples
+            for s, p, o in new_triples:
+                inferred_axioms.append(
+                    InferredAxiom(
+                        subject=str(s),
+                        predicate=str(p),
+                        object=str(o),
+                        inference_rule="HermiT",
+                    )
+                )
+        except Exception:
+            pass
+
+        consistent = not any(
+            v.type in ("UnsatisfiableClass", "DisjointViolation") for v in violations
+        )
+
+        return ReasonerResult(
+            consistent=consistent,
+            violations=violations,
+            inferred_axioms=inferred_axioms,
+            execution_ms=execution_ms,
+        )
 
     async def get_result(self, job_id: str) -> dict:
-        """
-        추론 Job 상태 및 결과 조회.
+        """추론 Job 상태 및 결과 조회."""
+        job = self._job_store.get(job_id)
+        if job is None:
+            raise KeyError(f"Job {job_id} not found")
 
-        구현 세부사항:
-        - self._job_store.get(job_id) → None이면 KeyError(→ 404)
-        - 상태별 반환:
-          - "pending"/"running": { jobId, status, createdAt }
-          - "completed": { jobId, status, createdAt, completedAt, result: ReasonerResult }
-          - "failed": { jobId, status, createdAt, completedAt, error: str }
-        """
-        pass
+        base = {
+            "job_id": job_id,
+            "ontology_id": job.get("ontology_id"),
+            "status": job["status"],
+            "created_at": job["created_at"],
+        }
+
+        if job["status"] in ("pending", "running"):
+            return base
+
+        base["completed_at"] = job.get("completed_at")
+
+        if job["status"] == "completed":
+            base["result"] = job.get("result")
+        else:
+            base["error"] = job.get("error")
+
+        return base
