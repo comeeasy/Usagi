@@ -422,11 +422,12 @@ E2E 테스트는 로컬 환경 또는 dedicated E2E CI 파이프라인에서 실
 | Phase | 대상 | 결과 | 통과 | 실패 | xfail |
 |-------|------|------|------|------|-------|
 | Phase 1 | 백엔드 통합 (API) | ✅ 완료 | 16 | 0 | 0 |
-| Phase 2 | 서비스 레이어 단위 | ✅ 완료 | 34 | 0 | 3 |
-| Phase 3 | MCP 도구 | ✅ 완료 | 25 | 0 | 1 |
+| Phase 2 | 서비스 레이어 단위 | ✅ 완료 | 37 | 0 | 0 |
+| Phase 3 | MCP 도구 | ✅ 완료 | 26 | 0 | 0 |
 | Phase 4 | 프론트엔드 컴포넌트 | ✅ 완료 | 42 | 0 | 0 |
-| Phase 5 | E2E | ⚠️ 파일 작성 완료 | — | — | — |
-| **합계** | — | — | **117** | **0** | **4** |
+| Phase 5 | E2E | ⚠️ 실행 대기 (Docker Compose) | — | — | — |
+| 통합 시나리오 | HR 도메인 온톨로지 | ✅ 완료 | 18 | 0 | 0 |
+| **합계** | — | — | **139** | **0** | **0** |
 
 ### Phase별 주요 내용
 
@@ -438,16 +439,16 @@ E2E 테스트는 로컬 환경 또는 dedicated E2E CI 파이프라인에서 실
   - `api/concepts.py`: `_resolve_tbox()` 헬퍼로 UUID → tbox IRI 변환
   - `services/ontology_store.py`: `list_ontologies` SPARQL에 `dc:identifier ?id` 포함
 
-#### Phase 2 (서비스 레이어 단위 — 37 tests, 3 xfail)
+#### Phase 2 (서비스 레이어 단위 — 37 tests)
 - `test_service_ontology_store.py`: OntologyStore 12개 테스트 통과
-- `test_service_iri_generator.py`: IRI 생성기 11개 테스트 통과 (BUG-006 문서화)
+- `test_service_iri_generator.py`: IRI 생성기 11개 테스트 통과 (BUG-006 수정 완료)
 - `test_service_rdf_transformer.py`: RDF 변환기 10개 테스트 통과
-- `test_service_search.py`: 3개 xfail (BUG-007: SearchService 미구현)
+- `test_service_search.py`: 10개 테스트 통과 (BUG-007 수정 완료 — SPARQL 기반 재구현)
 
-#### Phase 3 (MCP 도구 — 26 tests, 1 xfail)
+#### Phase 3 (MCP 도구 — 26 tests)
 - 7종 MCP 도구 26개 테스트 통과
 - `run_reasoner` 비동기 sleep 패치 (`asyncio.sleep` mock)
-- 1개 xfail: BUG-008 (Individual 검색 GRAPH 절 누락)
+- BUG-008 수정 완료 — Individual 검색에 `GRAPH ?g` 추가
 
 #### Phase 4 (프론트엔드 컴포넌트 — 42 tests)
 - 7개 테스트 파일, 42개 테스트 전부 통과
@@ -457,18 +458,37 @@ E2E 테스트는 로컬 환경 또는 dedicated E2E CI 파이프라인에서 실
 #### Phase 5 (E2E — 4개 시나리오 파일)
 - Playwright 설치 완료 (`@playwright/test`)
 - 4개 E2E 테스트 파일 작성 완료
-- **실행 미수행**: Docker Compose 전체 스택 구동 환경 필요
+- **실행 대기 중**: Docker Compose 전체 스택 구동 후 실행 예정
 - 실행 방법: `docker compose up -d && cd frontend && npm run test:e2e`
 
-### 미해결 버그 (추후 수정 필요)
+#### 통합 시나리오 (HR 도메인 온톨로지 — 18 tests)
+- `tests/test_integration_hr_ontology.py`: 18/18 PASSED (0.63s)
+- 온톨로지 생성 → Concept 계층 → Property → Individual → 검색 → SPARQL → 통계 → 삭제
 
-| 버그 ID | 내용 | 심각도 | 파일 |
-|---------|------|--------|------|
-| BUG-006 | `validate_iri("urn:...")` → False (URN 스킴 미지원) | 🟡 Medium | `iri_generator.py` |
-| BUG-007 | `SearchService` 미구현 (`NotImplementedError`) | 🟠 High | `search_service.py` |
-| BUG-008 | Individual 검색 SPARQL — GRAPH 절 누락 | 🟠 High | `app_mcp/tools.py` |
-| WARNING-001 | `export_turtle` deprecated API 경고 | 🟢 Low | `ontology_store.py` |
+### 전체 백엔드 최종 결과
+
+```
+$ python -m pytest --tb=short -q
+============================== 103 passed in 2.17s ==============================
+```
+
+### 수정 완료된 버그
+
+| 버그 ID | 내용 | 심각도 | 수정 파일 | 커밋 |
+|---------|------|--------|----------|------|
+| BUG-006 | `validate_iri("urn:...")` → False | 🟡 Medium | `iri_generator.py` | b46e075 |
+| BUG-007 | `SearchService` 미구현 | 🟠 High | `search_service.py` | b46e075 |
+| BUG-008 | MCP Individual 검색 GRAPH 절 누락 | 🟠 High | `app_mcp/tools.py` | b46e075 |
+| BUG-009 | `UUID/tbox` IRI 형식 오류 (`properties.py`, `search.py`) | 🟠 High | `api/properties.py`, `api/search.py` | 731e201 |
+| BUG-010 | Individual 목록/검색 GRAPH 절 누락 | 🟠 High | `api/individuals.py`, `api/search.py` | 731e201 |
+| WARNING-001 | `export_turtle` deprecated API 경고 | 🟢 Low | `ontology_store.py` | b46e075 |
+
+### 미해결 항목
+
+| ID | 내용 | 비고 |
+|----|------|------|
+| Phase 5 | E2E 테스트 실제 실행 | Docker Compose 구동 후 실행 예정 |
 
 ---
 
-*테스트 완료 보고서 작성일: 2026-03-25*
+*테스트 완료 보고서 최종 업데이트: 2026-03-25*
