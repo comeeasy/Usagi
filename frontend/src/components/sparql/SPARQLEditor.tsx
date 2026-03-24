@@ -3,15 +3,7 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirro
 import { EditorState } from '@codemirror/state'
 import { Play } from 'lucide-react'
 
-// Lazy-load SPARQL language
-let sparqlLang: (() => import('@codemirror/state').Extension) | null = null
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require('@codemirror/lang-sparql')
-  sparqlLang = mod.sparql ?? null
-} catch {
-  sparqlLang = null
-}
+const sparqlLang: (() => import('@codemirror/state').Extension) | null = null
 
 interface SPARQLEditorProps {
   value?: string
