@@ -262,9 +262,16 @@ class OntologyStore:
             FILTER(STRSTARTS(STR(?g), "{tbox_iri.replace('/tbox', '')}")) }}
         """
 
+        # Individuals는 tbox가 아닌 abox(manual/source) 그래프에 저장되므로
+        # GRAPH ?g로 전체 그래프에서 조회
+        individual_count_q = """
+            PREFIX owl: <http://www.w3.org/2002/07/owl#>
+            SELECT (COUNT(DISTINCT ?x) AS ?cnt) WHERE { GRAPH ?g { ?x a owl:NamedIndividual } }
+        """
+
         results = await asyncio.gather(
             self.sparql_select(_count_q("owl:Class")),
-            self.sparql_select(_count_q("owl:NamedIndividual")),
+            self.sparql_select(individual_count_q),
             self.sparql_select(_count_q("owl:ObjectProperty")),
             self.sparql_select(_count_q("owl:DatatypeProperty")),
             self.sparql_select(named_graphs_q),

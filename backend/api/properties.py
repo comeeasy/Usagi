@@ -55,8 +55,18 @@ _CHAR_FULL = {
 }
 
 
-def _tbox(ontology_id: str) -> str:
-    return f"{ontology_id}/tbox"
+async def _resolve_tbox(store, ontology_id: str) -> str | None:
+    """UUID(dc:identifier)로 온톨로지 IRI 조회 후 tbox IRI 반환. 없으면 None."""
+    rows = await store.sparql_select(f"""
+        PREFIX owl: <http://www.w3.org/2002/07/owl#>
+        PREFIX dc:  <http://purl.org/dc/terms/>
+        SELECT ?iri WHERE {{
+            GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }}
+        }} LIMIT 1
+    """)
+    if not rows:
+        return None
+    return f"{rows[0]['iri']['value']}/tbox"
 
 
 def _esc(s: str) -> str:
@@ -166,7 +176,9 @@ async def list_properties(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
     store = request.app.state.ontology_store
-    tbox = _tbox(ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     offset = (page - 1) * page_size
 
     domain_f = f"?iri rdfs:domain <{domain}> ." if domain else ""
@@ -211,7 +223,9 @@ async def create_property(
     body: Union[ObjectPropertyCreate, DataPropertyCreate],
 ):
     store = request.app.state.ontology_store
-    tbox = _tbox(ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     dup = await store.sparql_ask(f"""{_P}
 ASK {{ GRAPH <{tbox}> {{
@@ -264,7 +278,9 @@ INSERT DATA {{ GRAPH <{tbox}> {{
 async def get_property(request: Request, ontology_id: str, iri: str):
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = _tbox(ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     is_obj = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:ObjectProperty }} }}")
     is_data = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:DatatypeProperty }} }}")
@@ -288,7 +304,9 @@ async def update_property(
 ):
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = _tbox(ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     is_obj = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:ObjectProperty }} }}")
     is_data = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:DatatypeProperty }} }}")
@@ -370,7 +388,9 @@ WHERE  {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty }} }}""")
 async def delete_property(request: Request, ontology_id: str, iri: str) -> None:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = _tbox(ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     exists = await store.sparql_ask(f"""{_P}
 ASK {{ GRAPH <{tbox}> {{

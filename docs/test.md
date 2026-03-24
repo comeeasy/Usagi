@@ -516,3 +516,87 @@ npx playwright test --headed
 ---
 
 *이 문서는 테스트 구현을 진행하면서 계속 업데이트됩니다.*
+
+---
+
+## 11. 통합 테스트 시나리오: HR 도메인 온톨로지
+
+**파일:** `backend/tests/test_integration_hr_ontology.py`
+**작성일:** 2026-03-25
+**실행 결과:** **18/18 PASSED** (0.63s)
+
+### 11.1 시나리오 개요
+
+HR(인사) 도메인의 온톨로지를 처음부터 끝까지 API로 구축하는 전 과정을 10단계로 검증한다.
+
+```
+https://hr.example.org/onto (BASE IRI)
+```
+
+### 11.2 단계별 시나리오
+
+| 단계 | 설명 | 엔드포인트 | 기대 결과 |
+|------|------|-----------|----------|
+| Step 1 | 온톨로지 생성 | POST /ontologies | 201, id/iri/label 반환 |
+| Step 2a | Person Concept 생성 | POST /ontologies/{id}/concepts | 201, iri 일치 |
+| Step 2b | Employee 생성 (Person 서브클래스) | POST /ontologies/{id}/concepts | 201, super_classes에 Person 포함 |
+| Step 2c | Manager 생성 (Employee 서브클래스) | POST /ontologies/{id}/concepts | 201, super_classes에 Employee 포함 |
+| Step 2d | Concept 목록 조회 (3개) | GET /ontologies/{id}/concepts | total=3, Person/Employee/Manager 포함 |
+| Step 3 | worksFor ObjectProperty 생성 | POST /ontologies/{id}/properties | 201, domain/range/characteristics 반환 |
+| Step 4 | age DataProperty 생성 | POST /ontologies/{id}/properties | 201, range에 xsd:integer 포함 |
+| Step 5a | Alice Individual 생성 (Manager 타입) | POST /ontologies/{id}/individuals | 201, types에 Manager 포함 |
+| Step 5b | Bob Individual 생성 (Employee 타입) | POST /ontologies/{id}/individuals | 201, types에 Employee 포함 |
+| Step 5c | Individual 목록 조회 (2개) | GET /ontologies/{id}/individuals | total=2, Alice/Bob 포함 |
+| Step 6a | "employ" 키워드 Concept 검색 | GET /search/entities?q=employ&kind=concept | Employee 반환, Person 미반환 |
+| Step 6b | kind=all 통합 검색 | GET /search/entities?kind=all | concept + individual 종류 포함 |
+| Step 7a | SPARQL SELECT (NamedIndividual 전체) | POST /sparql | Alice/Bob IRI 결과에 포함 |
+| Step 7b | SPARQL UPDATE 차단 | POST /sparql (INSERT) | 400 SPARQL_UPDATE_FORBIDDEN |
+| Step 8 | 통계 확인 | GET /ontologies/{id} (stats 필드) | concepts=3, individuals=2, object_properties≥1, data_properties≥1 |
+| Step 9 | Employee comment 업데이트 | PUT /ontologies/{id}/concepts/{iri} | 200, 변경된 comment 반환 |
+| Step 10a | 온톨로지 삭제 | DELETE /ontologies/{id} | 204 → 이후 GET 404 |
+| Step 10b | 삭제 후 Concept 소멸 확인 | DELETE → GET /concepts | 온톨로지 404로 Concept 접근 불가 |
+
+### 11.3 테스트 실행 결과
+
+```
+$ python -m pytest tests/test_integration_hr_ontology.py -v
+
+tests/test_integration_hr_ontology.py::test_step1_create_ontology                     PASSED
+tests/test_integration_hr_ontology.py::test_step2a_create_concept_person              PASSED
+tests/test_integration_hr_ontology.py::test_step2b_create_concept_employee_subclass_of_person PASSED
+tests/test_integration_hr_ontology.py::test_step2c_create_concept_manager_subclass_of_employee PASSED
+tests/test_integration_hr_ontology.py::test_step2d_list_concepts_returns_three        PASSED
+tests/test_integration_hr_ontology.py::test_step3_create_object_property              PASSED
+tests/test_integration_hr_ontology.py::test_step4_create_data_property                PASSED
+tests/test_integration_hr_ontology.py::test_step5a_create_individual_alice_manager    PASSED
+tests/test_integration_hr_ontology.py::test_step5b_create_individual_bob_employee     PASSED
+tests/test_integration_hr_ontology.py::test_step5c_list_individuals_returns_two       PASSED
+tests/test_integration_hr_ontology.py::test_step6_search_entities_by_keyword          PASSED
+tests/test_integration_hr_ontology.py::test_step6_search_entities_all_kinds           PASSED
+tests/test_integration_hr_ontology.py::test_step7_sparql_select_all_individuals       PASSED
+tests/test_integration_hr_ontology.py::test_step7_sparql_update_blocked               PASSED
+tests/test_integration_hr_ontology.py::test_step8_ontology_stats                      PASSED
+tests/test_integration_hr_ontology.py::test_step9_update_concept_comment              PASSED
+tests/test_integration_hr_ontology.py::test_step10_delete_ontology                    PASSED
+tests/test_integration_hr_ontology.py::test_step10_delete_also_removes_concepts       PASSED
+
+============================== 18 passed in 0.63s ==============================
+```
+
+### 11.4 전체 백엔드 테스트 결과
+
+```
+$ python -m pytest --tb=short -q
+============================== 103 passed in 2.17s ==============================
+```
+
+### 11.5 버그 수정 이력 (통합 테스트 과정에서 발견)
+
+| 버그 ID | 파일 | 내용 | 수정 방법 |
+|---------|------|------|----------|
+| BUG-006 | `services/ingestion/iri_generator.py` | `urn:` 형식 IRI를 유효하지 않다고 판단 | 정규식 `^[a-zA-Z][a-zA-Z0-9+\-.]*:` 으로 수정 (슬래시 제거) |
+| BUG-007 | `services/search_service.py` | `NotImplementedError` 발생 | SPARQL 기반 키워드 검색으로 완전 구현 |
+| BUG-008 | `app_mcp/tools.py` | Individual MCP 검색 시 `GRAPH ?g` 절 누락 | Named Graph 전체 탐색으로 수정 |
+| BUG-009 | `api/properties.py`, `api/search.py` | `UUID/tbox` IRI 형식 오류 (dc:identifier lookup 없이 직접 UUID 사용) | `_resolve_tbox()` 헬퍼로 UUID→IRI 변환 후 TBox 경로 생성 |
+| BUG-010 | `api/individuals.py`, `api/search.py` | Individual SPARQL 쿼리에 `GRAPH ?g` 절 누락으로 조회 결과 0건 | 모든 Individual 쿼리에 `GRAPH ?g {}` 추가 |
+| WARNING-001 | `services/ontology_store.py` | `RdfFormat` 미임포트로 Turtle 직렬화 실패 | `pyoxigraph.RdfFormat` 임포트 + `dump()` API 수정 |

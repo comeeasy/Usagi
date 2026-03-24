@@ -91,13 +91,13 @@ async def list_individuals(
 
     count_rows = await store.sparql_select(f"""{_P}
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
-    ?iri a owl:NamedIndividual . OPTIONAL {{ ?iri rdfs:label ?label }} {extra}
+    GRAPH ?g {{ ?iri a owl:NamedIndividual . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
 }}""")
     total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
 
     rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label WHERE {{
-    ?iri a owl:NamedIndividual . OPTIONAL {{ ?iri rdfs:label ?label }} {extra}
+    GRAPH ?g {{ ?iri a owl:NamedIndividual . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
 }} ORDER BY ?label LIMIT {page_size} OFFSET {offset}""")
 
     items = []
@@ -105,8 +105,8 @@ SELECT DISTINCT ?iri ?label WHERE {{
         ind_iri = _v(row.get("iri"))
         type_rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?type WHERE {{
-    <{ind_iri}> rdf:type ?type .
-    FILTER(?type != owl:NamedIndividual) FILTER(isIRI(?type))
+    GRAPH ?g {{ <{ind_iri}> rdf:type ?type .
+    FILTER(?type != owl:NamedIndividual) FILTER(isIRI(?type)) }}
 }}""")
         items.append(Individual(
             iri=ind_iri,

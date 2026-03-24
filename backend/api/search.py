@@ -29,6 +29,20 @@ def _v(term: dict | None, default: str = "") -> str:
     return str(term)
 
 
+async def _resolve_tbox(store, ontology_id: str) -> str | None:
+    """UUID(dc:identifier)로 온톨로지 IRI 조회 후 tbox IRI 반환. 없으면 None."""
+    rows = await store.sparql_select(f"""
+        PREFIX owl: <http://www.w3.org/2002/07/owl#>
+        PREFIX dc:  <http://purl.org/dc/terms/>
+        SELECT ?iri WHERE {{
+            GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }}
+        }} LIMIT 1
+    """)
+    if not rows:
+        return None
+    return f"{rows[0]['iri']['value']}/tbox"
+
+
 def _esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
@@ -53,7 +67,9 @@ async def search_entities(
     kind: concept(owl:Class) / individual(owl:NamedIndividual) / all
     """
     store = request.app.state.ontology_store
-    tbox = f"{ontology_id}/tbox"
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        return []
 
     q_filter = f'FILTER(CONTAINS(LCASE(STR(?label)), "{_esc(q.lower())}"))' if q else ""
 
@@ -82,13 +98,15 @@ SELECT DISTINCT ?iri ?label WHERE {{
         if remaining > 0:
             rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label WHERE {{
-    ?iri a owl:NamedIndividual .
-    OPTIONAL {{ ?iri rdfs:label ?label }}
+    GRAPH ?g {{
+        ?iri a owl:NamedIndividual .
+        OPTIONAL {{ ?iri rdfs:label ?label }}
+    }}
     {q_filter}
 }} ORDER BY ?label LIMIT {remaining}""")
             for r in rows:
                 type_rows = await store.sparql_select(f"""{_P}
-SELECT ?t WHERE {{ <{_v(r.get("iri"))}> rdf:type ?t . FILTER(?t != owl:NamedIndividual) FILTER(isIRI(?t)) }}""")
+SELECT ?t WHERE {{ GRAPH ?g {{ <{_v(r.get("iri"))}> rdf:type ?t . FILTER(?t != owl:NamedIndividual) FILTER(isIRI(?t)) }} }}""")
                 results.append({
                     "iri": _v(r.get("iri")),
                     "label": _v(r.get("label")) or _v(r.get("iri")),
@@ -112,7 +130,9 @@ async def search_relations(
 ) -> list[dict]:
     """ObjectProperty + DataProperty 키워드 검색."""
     store = request.app.state.ontology_store
-    tbox = f"{ontology_id}/tbox"
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        return []
 
     q_filter = f'FILTER(CONTAINS(LCASE(STR(?label)), "{_esc(q.lower())}"))' if q else ""
     domain_filter = f"?iri rdfs:domain <{domain_iri}> ." if domain_iri else ""
