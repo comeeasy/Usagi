@@ -14,8 +14,10 @@ import {
   listDataProperties,
   createObjectProperty,
   createDataProperty,
+  updateObjectProperty,
+  updateDataProperty,
 } from '@/api/relations'
-import type { ObjectProperty, DataProperty } from '@/types/property'
+import type { ObjectProperty, DataProperty, ObjectPropertyCreate, DataPropertyCreate } from '@/types/property'
 
 type RelTab = 'object' | 'data'
 
@@ -28,6 +30,7 @@ export default function RelationsPage() {
   const [selectedIri, setSelectedIri] = useState<string | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [editingProperty, setEditingProperty] = useState<ObjectProperty | DataProperty | null>(null)
   const PAGE_SIZE = 20
 
   const objectQuery = useQuery({
@@ -55,6 +58,24 @@ export default function RelationsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['data-properties', ontologyId] })
       setShowCreateForm(false)
+    },
+  })
+
+  const updateObjectMutation = useMutation({
+    mutationFn: ({ iri, data }: { iri: string; data: Partial<ObjectPropertyCreate> }) =>
+      updateObjectProperty(ontologyId!, iri, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['object-properties', ontologyId] })
+      setEditingProperty(null)
+    },
+  })
+
+  const updateDataMutation = useMutation({
+    mutationFn: ({ iri, data }: { iri: string; data: Partial<DataPropertyCreate> }) =>
+      updateDataProperty(ontologyId!, iri, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['data-properties', ontologyId] })
+      setEditingProperty(null)
     },
   })
 
@@ -110,7 +131,7 @@ export default function RelationsPage() {
               </button>
             </div>
 
-            <RelationSearchBar onSearch={() => {}} />
+            <RelationSearchBar onSearch={(q) => { setSearchQuery(q); setPage(1) }} />
 
             {showCreateForm && (
               <div
@@ -161,12 +182,67 @@ export default function RelationsPage() {
             )}
           </div>
 
-          {selectedIri && (
+          {selectedIri && !editingProperty && (
             <RelationDetailPanel
               property={selectedProperty ?? null}
               iri={selectedIri}
               onClose={() => setSelectedIri(null)}
+              onEdit={() => selectedProperty ? setEditingProperty(selectedProperty) : undefined}
             />
+          )}
+
+          {editingProperty && (
+            <aside
+              className="w-96 flex flex-col border-l overflow-hidden"
+              style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}
+            >
+              <div
+                className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                <h3 className="font-semibold text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                  Edit {'characteristics' in editingProperty ? 'Object' : 'Data'} Property
+                </h3>
+                <button
+                  onClick={() => setEditingProperty(null)}
+                  className="p-1 rounded hover:opacity-80"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4">
+                <PropertyForm
+                  propertyType={'characteristics' in editingProperty ? 'object' : 'data'}
+                  mode="edit"
+                  initialValues={{
+                    iri: editingProperty.iri,
+                    label: editingProperty.label,
+                    comment: editingProperty.comment,
+                    domain: editingProperty.domain,
+                    range: editingProperty.range as string[],
+                    ...('characteristics' in editingProperty
+                      ? { characteristics: editingProperty.characteristics, inverseOf: editingProperty.inverseOf }
+                      : { isFunctional: editingProperty.isFunctional }),
+                  }}
+                  onSubmit={(v) => {
+                    const vals = v as { iri: string; label: string; comment?: string; domain: string[]; range: string[]; characteristics: ObjectProperty['characteristics']; inverseOf: string; isFunctional: boolean; propertyType: string }
+                    if (vals.propertyType === 'object') {
+                      updateObjectMutation.mutate({
+                        iri: editingProperty.iri,
+                        data: { label: vals.label, comment: vals.comment, domain: vals.domain, range: vals.range, characteristics: vals.characteristics, inverseOf: vals.inverseOf },
+                      })
+                    } else {
+                      updateDataMutation.mutate({
+                        iri: editingProperty.iri,
+                        data: { label: vals.label, comment: vals.comment, domain: vals.domain, range: vals.range as DataProperty['range'], isFunctional: vals.isFunctional },
+                      })
+                    }
+                  }}
+                  onCancel={() => setEditingProperty(null)}
+                />
+              </div>
+            </aside>
           )}
         </div>
       </div>
