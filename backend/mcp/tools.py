@@ -10,136 +10,279 @@ MCP 도구 목록:
   6. sparql_query          — SPARQL 실행 (SELECT/ASK only)
   7. run_reasoner          — OWL 추론 실행
 """
+from __future__ import annotations
 
-# from fastmcp import FastMCP
-# from mcp import mcp  # 공유 인스턴스
-# from services.ontology_store import OntologyStore
-# from services.graph_store import GraphStore
-# from services.search_service import SearchService
-# from services.reasoner_service import ReasonerService
+import asyncio
+import logging
+from typing import Any
+
+from fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
+
+mcp = FastMCP("Ontology Platform")
+
+# Module-level service holders; populated during app startup via init_services()
+_services: dict[str, Any] = {}
 
 
-# @mcp.tool()
+def init_services(store: Any, graph_store: Any, reasoner: Any) -> None:
+    """앱 lifespan에서 호출하여 서비스 인스턴스를 등록."""
+    _services["store"] = store
+    _services["graph_store"] = graph_store
+    _services["reasoner"] = reasoner
+    logger.info("MCP tools: services registered")
+
+
+@mcp.tool()
 async def list_ontologies() -> list[dict]:
+    """온톨로지 목록 조회 MCP 도구.
+
+    Returns:
+        온톨로지 목록 (iri, label, version 포함)
     """
-    온톨로지 목록 조회 MCP 도구.
-
-    구현 세부사항:
-    - OntologyStore.list_ontologies(page=1, page_size=100) 호출
-    - 반환: [{ id, iri, label, stats: { concepts, individuals, objectProperties, dataProperties } }]
-    - AI 에이전트가 작업할 온톨로지를 선택하는 첫 단계로 사용
-    """
-    pass
+    store = _services.get("store")
+    if store is None:
+        return []
+    items, _total = await store.list_ontologies(1, 50)
+    return items
 
 
-# @mcp.tool()
+@mcp.tool()
 async def get_ontology_summary(ontology_id: str) -> dict:
+    """온톨로지 요약 및 통계 조회.
+
+    Args:
+        ontology_id: 온톨로지 IRI
+
+    Returns:
+        통계 딕셔너리 (concepts, individuals, object_properties, data_properties, named_graphs)
     """
-    온톨로지 요약 및 통계 조회.
-
-    구현 세부사항:
-    - OntologyStore.get_ontology_stats(ontology_id) 호출
-    - 반환: { iri, label, description, stats: { concepts, individuals, objectProperties, dataProperties } }
-    - AI 에이전트가 온톨로지 구조를 파악하는 용도
-    """
-    pass
+    store = _services.get("store")
+    if store is None:
+        return {"error": "store not available"}
+    tbox_iri = f"{ontology_id}/tbox"
+    stats = await store.get_ontology_stats(tbox_iri)
+    return {"ontology_id": ontology_id, "stats": stats}
 
 
-# @mcp.tool()
+@mcp.tool()
 async def search_entities(
     ontology_id: str,
     query: str,
     kind: str = "all",
     limit: int = 10,
 ) -> list[dict]:
+    """Entity 검색 MCP 도구 (키워드).
+
+    Args:
+        ontology_id: 대상 온톨로지 IRI
+        query: 검색 키워드
+        kind: "concept" | "individual" | "all"
+        limit: 최대 결과 수
+
+    Returns:
+        [{ iri, label, kind }]
     """
-    Entity 검색 MCP 도구 (키워드 또는 자연어).
+    store = _services.get("store")
+    if store is None:
+        return []
 
-    구현 세부사항:
-    - SearchService.keyword_search_entities(ontology_id, query, kind, limit) 호출
-    - query: 키워드 또는 자연어 (현재는 키워드 검색, 향후 NL2SPARQL 확장 가능)
-    - kind: "concept" | "individual" | "all"
-    - 반환: [{ iri, label, kind, types?, matchScore }]
-    - AI 에이전트가 특정 엔티티를 찾을 때 사용
-    """
-    pass
+    tbox_iri = f"{ontology_id}/tbox"
+    results: list[dict] = []
+
+    if kind in ("concept", "all"):
+        sparql = f"""
+            PREFIX owl: <http://www.w3.org/2002/07/owl#>
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+            SELECT ?iri ?label WHERE {{
+                GRAPH <{tbox_iri}> {{
+                    ?iri a owl:Class .
+                    OPTIONAL {{ ?iri rdfs:label ?label }}
+                }}
+                FILTER(CONTAINS(LCASE(STR(?iri)), LCASE("{query}"))
+                       || CONTAINS(LCASE(STR(?label)), LCASE("{query}")))
+            }}
+            LIMIT {limit}
+        """
+        rows = await store.sparql_select(sparql)
+        for row in rows:
+            iri = row.get("iri", {}).get("value", "")
+            label = row.get("label", {}).get("value", iri)
+            if iri:
+                results.append({"iri": iri, "label": label, "kind": "concept"})
+
+    if kind in ("individual", "all"):
+        remaining = limit - len(results)
+        if remaining > 0:
+            sparql = f"""
+                PREFIX owl: <http://www.w3.org/2002/07/owl#>
+                PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                SELECT ?iri ?label WHERE {{
+                    ?iri a owl:NamedIndividual .
+                    OPTIONAL {{ ?iri rdfs:label ?label }}
+                    FILTER(CONTAINS(LCASE(STR(?iri)), LCASE("{query}"))
+                           || CONTAINS(LCASE(STR(?label)), LCASE("{query}")))
+                }}
+                LIMIT {remaining}
+            """
+            rows = await store.sparql_select(sparql)
+            for row in rows:
+                iri = row.get("iri", {}).get("value", "")
+                label = row.get("label", {}).get("value", iri)
+                if iri:
+                    results.append({"iri": iri, "label": label, "kind": "individual"})
+
+    return results[:limit]
 
 
-# @mcp.tool()
+@mcp.tool()
 async def search_relations(
     ontology_id: str,
-    query: str | None = None,
-    domain_iri: str | None = None,
-    range_iri: str | None = None,
-    kind: str = "all",
+    query: str = "",
     limit: int = 10,
 ) -> list[dict]:
+    """Property(Relation) 검색 MCP 도구.
+
+    Args:
+        ontology_id: 대상 온톨로지 IRI
+        query: 검색 키워드 (빈 문자열이면 전체 조회)
+        limit: 최대 결과 수
+
+    Returns:
+        [{ iri, label, kind }]
     """
-    Property(Relation) 검색 MCP 도구.
+    store = _services.get("store")
+    if store is None:
+        return []
 
-    구현 세부사항:
-    - SearchService.keyword_search_relations() 호출
-    - 반환: [{ iri, label, kind, domain, range, characteristics }]
-    - AI 에이전트가 도메인/레인지로 관계를 탐색할 때 사용
+    tbox_iri = f"{ontology_id}/tbox"
+    filter_clause = ""
+    if query:
+        filter_clause = (
+            f'FILTER(CONTAINS(LCASE(STR(?iri)), LCASE("{query}")) '
+            f'|| CONTAINS(LCASE(STR(?label)), LCASE("{query}")))'
+        )
+
+    sparql = f"""
+        PREFIX owl: <http://www.w3.org/2002/07/owl#>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        SELECT ?iri ?label ?kind WHERE {{
+            GRAPH <{tbox_iri}> {{
+                {{ ?iri a owl:ObjectProperty . BIND("object" AS ?kind) }}
+                UNION
+                {{ ?iri a owl:DatatypeProperty . BIND("data" AS ?kind) }}
+                OPTIONAL {{ ?iri rdfs:label ?label }}
+            }}
+            {filter_clause}
+        }}
+        LIMIT {limit}
     """
-    pass
+
+    rows = await store.sparql_select(sparql)
+    results = []
+    for row in rows:
+        iri = row.get("iri", {}).get("value", "")
+        label = row.get("label", {}).get("value", iri)
+        kind = row.get("kind", {}).get("value", "unknown")
+        if iri:
+            results.append({"iri": iri, "label": label, "kind": kind})
+    return results
 
 
-# @mcp.tool()
+@mcp.tool()
 async def get_subgraph(
     ontology_id: str,
     entity_iris: list[str],
     depth: int = 2,
 ) -> dict:
+    """서브그래프 조회 MCP 도구.
+
+    Args:
+        ontology_id: 대상 온톨로지 IRI
+        entity_iris: 시작 엔티티 IRI 목록
+        depth: 탐색 깊이 (1-5, 기본 2)
+
+    Returns:
+        { nodes: [...], edges: [...] }
     """
-    서브그래프 조회 MCP 도구.
-
-    구현 세부사항:
-    - GraphStore.get_subgraph(ontology_id, entity_iris, depth) 호출
-    - depth: 1-5 (기본값 2)
-    - 반환: {
-        nodes: [{ iri, label, kind, types }],
-        edges: [{ source, target, propertyIri, propertyLabel, kind }]
-      }
-    - AI 에이전트가 엔티티 주변 관계를 탐색할 때 사용
-    """
-    pass
+    graph_store = _services.get("graph_store")
+    if graph_store is None:
+        return {"nodes": [], "edges": [], "error": "graph_store not available"}
+    depth = max(1, min(depth, 5))
+    return await graph_store.get_subgraph(ontology_id, entity_iris, depth)
 
 
-# @mcp.tool()
+@mcp.tool()
 async def sparql_query(ontology_id: str, query: str) -> dict:
+    """SPARQL 쿼리 실행 MCP 도구 (SELECT / ASK만 허용).
+
+    Args:
+        ontology_id: 대상 온톨로지 IRI (컨텍스트용)
+        query: SPARQL SELECT 또는 ASK 쿼리
+
+    Returns:
+        { results: [...] } 또는 오류 딕셔너리
     """
-    SPARQL 쿼리 실행 MCP 도구 (SELECT / ASK만 허용).
+    store = _services.get("store")
+    if store is None:
+        return {"error": "store not available"}
 
-    구현 세부사항:
-    - UPDATE/INSERT/DELETE 키워드 감지 시 오류 반환 (보안)
-    - OntologyStore.sparql_select(ontology_id, query) 호출
-    - 반환: {
-        variables: [str, ...],
-        bindings: [{ var: { type, value, datatype? } }, ...]
-      }
-    - AI 에이전트가 복잡한 온톨로지 질의를 수행할 때 사용
-    """
-    pass
+    # Block mutating queries
+    upper = query.upper()
+    for forbidden in ("UPDATE", "INSERT", "DELETE", "DROP", "CREATE", "LOAD", "CLEAR"):
+        if forbidden in upper:
+            return {"error": f"Mutating SPARQL operation '{forbidden}' is not allowed"}
+
+    rows = await store.sparql_select(query)
+    return {"results": rows}
 
 
-# @mcp.tool()
+@mcp.tool()
 async def run_reasoner(
     ontology_id: str,
     entity_iris: list[str] | None = None,
 ) -> dict:
-    """
-    OWL 2 추론 실행 MCP 도구.
+    """OWL 2 추론 실행 MCP 도구.
 
-    구현 세부사항:
-    - ReasonerService.run(ontology_id, entity_iris) 동기적으로 await
-      (MCP 도구는 결과를 직접 반환해야 하므로 Job 폴링 없이 완료까지 대기)
-    - 반환: {
-        consistent: bool,
-        violations: [{ type, subjectIri, description }],
-        inferredAxiomsCount: int
-      }
-    - AI 에이전트가 온톨로지 정합성을 검증할 때 사용
-    - 타임아웃: 120초 (대형 온톨로지의 경우 entity_iris로 범위 제한 권장)
+    Args:
+        ontology_id: 대상 온톨로지 IRI
+        entity_iris: 범위를 제한할 엔티티 IRI 목록 (None이면 전체)
+
+    Returns:
+        { consistent, violations, inferred_axioms_count, job_id } 또는 오류 딕셔너리
     """
-    pass
+    reasoner = _services.get("reasoner")
+    if reasoner is None:
+        return {"error": "reasoner not available"}
+
+    # Start reasoner job and poll until completion (max 120s)
+    job_id = await reasoner.run(ontology_id, entity_iris)
+
+    timeout = 120.0
+    poll_interval = 1.0
+    elapsed = 0.0
+
+    while elapsed < timeout:
+        await asyncio.sleep(poll_interval)
+        elapsed += poll_interval
+
+        job = await reasoner.get_result(job_id)
+        status = job.get("status")
+
+        if status == "completed":
+            result = job.get("result")
+            if result is None:
+                return {"job_id": job_id, "status": "completed", "error": "no result"}
+            return {
+                "job_id": job_id,
+                "consistent": result.consistent,
+                "violations": [v.model_dump() for v in result.violations],
+                "inferred_axioms_count": len(result.inferred_axioms),
+                "execution_ms": result.execution_ms,
+            }
+
+        if status == "failed":
+            return {"job_id": job_id, "status": "failed", "error": job.get("error")}
+
+    return {"job_id": job_id, "status": "timeout", "error": "Reasoner timed out after 120s"}

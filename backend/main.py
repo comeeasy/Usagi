@@ -29,6 +29,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     app.state.reasoner_service = ReasonerService(app.state.ontology_store)
 
+    # MCP 서비스 등록
+    from mcp.tools import init_services as _init_mcp_services
+    _init_mcp_services(
+        app.state.ontology_store,
+        app.state.graph_store,
+        app.state.reasoner_service,
+    )
+
     # 백그라운드 태스크
     from workers.sync_worker import run_sync_worker
     from workers.kafka_worker import run_kafka_worker

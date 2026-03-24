@@ -1,20 +1,28 @@
-"""
-RDF Transformer — 소스 이벤트 → RDF Triple 변환
-"""
+"""RDF Transformer — 소스 이벤트 → RDF Triple 변환"""
 from __future__ import annotations
 
 from typing import Any
 
-# TODO: import internal models
-# from backend.models.source import BackingSource, SourceEvent
-# from backend.models.ontology import Triple
-# from backend.services.ingestion.iri_generator import generate as generate_iri
+from pyoxigraph import NamedNode, Literal as RDFLiteral
+
+from services.ontology_store import Triple
+from services.ingestion.iri_generator import generate
+
+RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+PROV_GENERATED_AT_TIME = "http://www.w3.org/ns/prov#generatedAtTime"
+PROV_WAS_ATTRIBUTED_TO = "http://www.w3.org/ns/prov#wasAttributedTo"
+XSD_STRING = "http://www.w3.org/2001/XMLSchema#string"
+
+
+def build_named_graph_iri(source_id: str, timestamp: str) -> str:
+    """urn:source:{source_id}/{timestamp} 형식으로 Named Graph IRI 생성."""
+    return f"urn:source:{source_id}/{timestamp}"
 
 
 class RDFTransformer:
     """소스 이벤트 레코드를 RDF Triple로 변환."""
 
-    def transform(self, event: Any, source: Any) -> list:
+    def transform(self, event: Any, source: Any) -> list[Triple]:
         """
         소스 이벤트를 RDF Triple 목록으로 변환.
 
@@ -23,44 +31,56 @@ class RDFTransformer:
         2. rdf:type 트리플: {iri} rdf:type {conceptIri}
         3. propertyMappings 순회: DataProperty → Literal, ObjectProperty → NamedNode
         4. provenance 메타데이터 트리플: prov:generatedAtTime, prov:wasAttributedTo
-
-        Args:
-            event: SourceEvent — 변환할 소스 이벤트
-            source: BackingSource — 소스 설정 (property mappings 포함)
-
-        Returns:
-            list[Triple]: 변환된 Triple 목록
         """
-        # TODO: implement
-        # triples = []
-        # for record in event.records:
-        #     iri = generate_iri(source.iri_template, record)
-        #     triples.append(Triple(subject=iri, predicate=RDF_TYPE, object=source.concept_iri))
-        #     for mapping in source.property_mappings:
-        #         value = record.get(mapping.source_field)
-        #         if value is None:
-        #             continue
-        #         if mapping.property_type == "data":
-        #             triples.append(Triple(subject=iri, predicate=mapping.property_iri, object=Literal(value)))
-        #         else:
-        #             triples.append(Triple(subject=iri, predicate=mapping.property_iri, object=NamedNode(value)))
-        #     graph_iri = self.build_named_graph_iri(event.source_id, event.timestamp)
-        #     triples.append(Triple(subject=iri, predicate=PROV_GENERATED_AT_TIME, object=Literal(event.timestamp)))
-        #     triples.append(Triple(subject=iri, predicate=PROV_WAS_ATTRIBUTED_TO, object=NamedNode(event.source_id)))
-        # return triples
-        raise NotImplementedError
+        triples: list[Triple] = []
 
-    def build_named_graph_iri(self, source_id: str, timestamp: str) -> str:
-        """
-        "{source_id}/{timestamp}" 형식으로 Named Graph IRI 생성.
+        for record in event.records:
+            try:
+                iri = generate(source.iri_template, record)
+            except (KeyError, ValueError):
+                continue
 
-        Args:
-            source_id: 소스 ID
-            timestamp: ISO 8601 타임스탬프
+            subject = NamedNode(iri)
 
-        Returns:
-            str: Named Graph IRI
-        """
-        # TODO: implement
-        # return f"{source_id}/{timestamp}"
-        raise NotImplementedError
+            # rdf:type triple
+            triples.append(Triple(
+                subject=subject,
+                predicate=NamedNode(RDF_TYPE),
+                object_=NamedNode(source.concept_iri),
+            ))
+
+            # Property mappings
+            for mapping in source.property_mappings:
+                value = record.get(mapping.source_field)
+                if value is None:
+                    continue
+
+                value_str = str(value)
+
+                # Determine if this is an object property (IRI value) or data property
+                if value_str.startswith("http") or value_str.startswith("urn"):
+                    obj: NamedNode | RDFLiteral = NamedNode(value_str)
+                elif mapping.datatype:
+                    obj = RDFLiteral(value_str, datatype=NamedNode(mapping.datatype))
+                else:
+                    obj = RDFLiteral(value_str, datatype=NamedNode(XSD_STRING))
+
+                triples.append(Triple(
+                    subject=subject,
+                    predicate=NamedNode(mapping.property_iri),
+                    object_=obj,
+                ))
+
+            # Provenance triples
+            triples.append(Triple(
+                subject=subject,
+                predicate=NamedNode(PROV_GENERATED_AT_TIME),
+                object_=RDFLiteral(event.timestamp, datatype=NamedNode(XSD_STRING)),
+            ))
+            triples.append(Triple(
+                subject=subject,
+                predicate=NamedNode(PROV_WAS_ATTRIBUTED_TO),
+                object_=RDFLiteral(event.source_id, datatype=NamedNode(XSD_STRING)),
+            ))
+
+        return triples
