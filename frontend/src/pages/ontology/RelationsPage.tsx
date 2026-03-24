@@ -27,17 +27,18 @@ export default function RelationsPage() {
   const [page, setPage] = useState(1)
   const [selectedIri, setSelectedIri] = useState<string | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const PAGE_SIZE = 20
 
   const objectQuery = useQuery({
-    queryKey: ['object-properties', ontologyId, page],
-    queryFn: () => listObjectProperties(ontologyId!, { page, pageSize: PAGE_SIZE }),
+    queryKey: ['object-properties', ontologyId, page, searchQuery],
+    queryFn: () => listObjectProperties(ontologyId!, { page, pageSize: PAGE_SIZE, ...(searchQuery ? { search: searchQuery } : {}) }),
     enabled: !!ontologyId && tab === 'object',
   })
 
   const dataQuery = useQuery({
-    queryKey: ['data-properties', ontologyId, page],
-    queryFn: () => listDataProperties(ontologyId!, { page, pageSize: PAGE_SIZE }),
+    queryKey: ['data-properties', ontologyId, page, searchQuery],
+    queryFn: () => listDataProperties(ontologyId!, { page, pageSize: PAGE_SIZE, ...(searchQuery ? { search: searchQuery } : {}) }),
     enabled: !!ontologyId && tab === 'data',
   })
 

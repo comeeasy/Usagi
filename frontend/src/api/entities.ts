@@ -7,11 +7,12 @@ import type { PaginatedResponse } from '@/types/ontology'
 
 export function listConcepts(
   ontologyId: string,
-  params?: { page?: number; pageSize?: number },
+  params?: { page?: number; pageSize?: number; search?: string },
 ): Promise<PaginatedResponse<Concept>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
+  if (params?.search) qs.set('search', params.search)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies/${ontologyId}/concepts${query}`)
 }
@@ -34,11 +35,12 @@ export function deleteConcept(ontologyId: string, iri: string): Promise<void> {
 
 export function listIndividuals(
   ontologyId: string,
-  params?: { page?: number; pageSize?: number },
+  params?: { page?: number; pageSize?: number; search?: string },
 ): Promise<PaginatedResponse<Individual>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
+  if (params?.search) qs.set('search', params.search)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies/${ontologyId}/individuals${query}`)
 }

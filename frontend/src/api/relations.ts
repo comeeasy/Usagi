@@ -6,22 +6,24 @@ import type { PaginatedResponse } from '@/types/ontology'
 
 export function listObjectProperties(
   ontologyId: string,
-  params?: { page?: number; pageSize?: number },
+  params?: { page?: number; pageSize?: number; search?: string },
 ): Promise<PaginatedResponse<ObjectProperty>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
+  if (params?.search) qs.set('search', params.search)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies/${ontologyId}/properties/object${query}`)
 }
 
 export function listDataProperties(
   ontologyId: string,
-  params?: { page?: number; pageSize?: number },
+  params?: { page?: number; pageSize?: number; search?: string },
 ): Promise<PaginatedResponse<DataProperty>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
+  if (params?.search) qs.set('search', params.search)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies/${ontologyId}/properties/data${query}`)
 }

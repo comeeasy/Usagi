@@ -10,9 +10,9 @@ import IndividualForm from '@/components/entities/IndividualForm'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import ErrorBoundary from '@/components/shared/ErrorBoundary'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { listConcepts, listIndividuals, createConcept, createIndividual, getConcept, getIndividual } from '@/api/entities'
-import type { Concept } from '@/types/concept'
-import type { Individual } from '@/types/individual'
+import { listConcepts, listIndividuals, createConcept, createIndividual, getConcept, getIndividual, updateConcept, updateIndividual } from '@/api/entities'
+import type { Concept, ConceptUpdate } from '@/types/concept'
+import type { Individual, IndividualUpdate } from '@/types/individual'
 
 type EntityTab = 'concepts' | 'individuals'
 type EntityKind = Concept | Individual
@@ -25,18 +25,19 @@ export default function EntitiesPage() {
   const [page, setPage] = useState(1)
   const [selectedIri, setSelectedIri] = useState<string | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [_searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [editingEntity, setEditingEntity] = useState<EntityKind | null>(null)
   const PAGE_SIZE = 20
 
   const conceptsQuery = useQuery({
-    queryKey: ['concepts', ontologyId, page],
-    queryFn: () => listConcepts(ontologyId!, { page, pageSize: PAGE_SIZE }),
+    queryKey: ['concepts', ontologyId, page, searchQuery],
+    queryFn: () => listConcepts(ontologyId!, { page, pageSize: PAGE_SIZE, ...(searchQuery ? { search: searchQuery } : {}) }),
     enabled: !!ontologyId && tab === 'concepts',
   })
 
   const individualsQuery = useQuery({
-    queryKey: ['individuals', ontologyId, page],
-    queryFn: () => listIndividuals(ontologyId!, { page, pageSize: PAGE_SIZE }),
+    queryKey: ['individuals', ontologyId, page, searchQuery],
+    queryFn: () => listIndividuals(ontologyId!, { page, pageSize: PAGE_SIZE, ...(searchQuery ? { search: searchQuery } : {}) }),
     enabled: !!ontologyId && tab === 'individuals',
   })
 
@@ -61,6 +62,24 @@ export default function EntitiesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
       setShowCreateForm(false)
+    },
+  })
+
+  const updateConceptMutation = useMutation({
+    mutationFn: ({ iri, data }: { iri: string; data: ConceptUpdate }) => updateConcept(ontologyId!, iri, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['concepts', ontologyId] })
+      queryClient.invalidateQueries({ queryKey: ['entity', ontologyId] })
+      setEditingEntity(null)
+    },
+  })
+
+  const updateIndividualMutation = useMutation({
+    mutationFn: ({ iri, data }: { iri: string; data: IndividualUpdate }) => updateIndividual(ontologyId!, iri, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
+      queryClient.invalidateQueries({ queryKey: ['entity', ontologyId] })
+      setEditingEntity(null)
     },
   })
 
@@ -190,12 +209,79 @@ export default function EntitiesPage() {
           </div>
 
           {/* Detail panel */}
-          {selectedIri && (
+          {selectedIri && !editingEntity && (
             <EntityDetailPanel
               entity={selectedEntityQuery.data as EntityKind | null}
               iri={selectedIri}
               onClose={() => setSelectedIri(null)}
+              onEdit={() => selectedEntityQuery.data ? setEditingEntity(selectedEntityQuery.data as EntityKind) : undefined}
             />
+          )}
+
+          {/* Edit form panel */}
+          {editingEntity && (
+            <aside
+              className="w-96 flex flex-col border-l overflow-hidden"
+              style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}
+            >
+              <div
+                className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                <h3 className="font-semibold text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                  Edit {tab === 'concepts' ? 'Concept' : 'Individual'}
+                </h3>
+                <button
+                  onClick={() => setEditingEntity(null)}
+                  className="p-1 rounded hover:opacity-80"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4">
+                {tab === 'concepts' ? (
+                  <ConceptForm
+                    mode="edit"
+                    initialValues={{
+                      iri: editingEntity.iri,
+                      label: editingEntity.label,
+                      comment: (editingEntity as Concept).comment,
+                      parentIris: (editingEntity as Concept).parent_iris,
+                    }}
+                    onSubmit={(v) => updateConceptMutation.mutate({
+                      iri: editingEntity.iri,
+                      data: { label: v.label, comment: v.comment, parent_iris: v.parentIris },
+                    })}
+                    onCancel={() => setEditingEntity(null)}
+                  />
+                ) : (
+                  <IndividualForm
+                    mode="edit"
+                    initialValues={{
+                      iri: editingEntity.iri,
+                      label: editingEntity.label,
+                      typeIris: (editingEntity as Individual).type_iris,
+                      dataProperties: (editingEntity as Individual).data_properties,
+                      objectProperties: (editingEntity as Individual).object_properties,
+                    }}
+                    onSubmit={(v) => {
+                      const vals = v as { iri: string; label: string; typeIris: string[]; dataProperties: Individual['data_properties']; objectProperties: Individual['object_properties'] }
+                      updateIndividualMutation.mutate({
+                        iri: editingEntity.iri,
+                        data: {
+                          label: vals.label,
+                          type_iris: vals.typeIris,
+                          data_properties: vals.dataProperties,
+                          object_properties: vals.objectProperties,
+                        },
+                      })
+                    }}
+                    onCancel={() => setEditingEntity(null)}
+                  />
+                )}
+              </div>
+            </aside>
           )}
         </div>
       </div>
