@@ -274,3 +274,54 @@ please use a RdfFormat object instead.
 | SearchService 테스트 | ⚠️ xfail | BUG-007: 미구현 |
 
 ---
+
+---
+
+## Phase 3 추가 발견 이슈
+
+### [BUG-008] `search_entities` MCP 도구 — Individual 검색 GRAPH 절 누락
+
+**발견 시점:** Phase 3 — `test_mcp_tools.py::test_mcp_search_entities_all`
+**심각도:** 🟠 High (Individual 검색 결과 항상 빈 리스트)
+**파일:** `backend/app_mcp/tools.py:118-134`
+
+**증상:**
+```python
+result = await search_entities(ONT_IRI, "", kind="individual")
+# → [] (빈 리스트, 데이터 있어도)
+```
+
+**원인 분석:**
+Concept 검색 SPARQL: `GRAPH <{tbox_iri}> { ?iri a owl:Class ... }` ← Named Graph 명시 ✅
+Individual 검색 SPARQL: `{ ?iri a owl:NamedIndividual ... }` ← GRAPH 절 없음 ❌
+
+SPARQL 1.1 스펙: GRAPH 절 없으면 default graph에서만 조회.
+데이터는 Named Graph(`{tbox_iri}`)에 저장되므로 Individual이 매칭되지 않음.
+
+**할 일:**
+Individual 검색 SPARQL에 `GRAPH <{tbox_iri}>` 절 추가:
+```sparql
+SELECT ?iri ?label WHERE {
+    GRAPH <{tbox_iri}> {         ← 추가 필요
+        ?iri a owl:NamedIndividual .
+        OPTIONAL { ?iri rdfs:label ?label }
+    }
+    FILTER(...)
+}
+```
+
+---
+
+## Phase 3 진행 상태
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| list_ontologies 도구 (3개) | ✅ 통과 | — |
+| get_ontology_summary 도구 (3개) | ✅ 통과 | — |
+| search_entities 도구 (5개) | ✅ 25/25 (1 xfail) | BUG-008 문서화 |
+| search_relations 도구 (4개) | ✅ 통과 | — |
+| get_subgraph 도구 (3개) | ✅ 통과 | — |
+| sparql_query 도구 (4개) | ✅ 통과 | — |
+| run_reasoner 도구 (4개) | ✅ 통과 | asyncio.sleep 패치 사용 |
+
+---
