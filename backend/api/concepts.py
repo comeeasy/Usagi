@@ -24,11 +24,22 @@ PREFIX owl:  <http://www.w3.org/2002/07/owl#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+PREFIX dc:   <http://purl.org/dc/terms/>
 """
 
 
-def _tbox(ontology_id: str) -> str:
-    return f"{ontology_id}/tbox"
+async def _resolve_tbox(store, ontology_id: str) -> str | None:
+    """UUID(dc:identifier)로 온톨로지 IRI 조회 후 tbox IRI 반환. 없으면 None."""
+    rows = await store.sparql_select(f"""
+        PREFIX owl: <http://www.w3.org/2002/07/owl#>
+        PREFIX dc:  <http://purl.org/dc/terms/>
+        SELECT ?iri WHERE {{
+            GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }}
+        }} LIMIT 1
+    """)
+    if not rows:
+        return None
+    return f"{rows[0]['iri']['value']}/tbox"
 
 
 def _esc(s: str) -> str:
@@ -71,13 +82,15 @@ def _restriction_triples(iri: str, restrictions: list[PropertyRestriction], pref
 async def list_concepts(
     request: Request,
     ontology_id: str,
-    q: str | None = Query(None),
+    q: str | None = Query(None, alias="search"),
     super_class: str | None = Query(None, alias="superClass"),
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
     store = request.app.state.ontology_store
-    tbox = _tbox(ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     offset = (page - 1) * page_size
 
     extra = ""
@@ -123,7 +136,9 @@ ORDER BY ?label LIMIT {page_size} OFFSET {offset}""")
 async def create_concept(request: Request, ontology_id: str, body: ConceptCreate) -> Concept:
     store = request.app.state.ontology_store
     graph_store = request.app.state.graph_store
-    tbox = _tbox(ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     if await store.sparql_ask(f"{_P} ASK {{ GRAPH <{tbox}> {{ <{body.iri}> a owl:Class }} }}"):
         raise HTTPException(409, detail={"code": "CONCEPT_IRI_DUPLICATE", "message": f"IRI exists: {body.iri}"})
@@ -163,7 +178,9 @@ INSERT DATA {{ GRAPH <{tbox}> {{
 async def get_concept(request: Request, ontology_id: str, iri: str) -> Concept:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = _tbox(ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:Class }} }}"):
         raise HTTPException(404, detail={"code": "CONCEPT_NOT_FOUND", "message": f"Not found: {iri}"})
@@ -241,7 +258,9 @@ async def update_concept(request: Request, ontology_id: str, iri: str, body: Con
     store = request.app.state.ontology_store
     graph_store = request.app.state.graph_store
     iri = unquote(iri)
-    tbox = _tbox(ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:Class }} }}"):
         raise HTTPException(404, detail={"code": "CONCEPT_NOT_FOUND", "message": f"Not found: {iri}"})
@@ -290,7 +309,9 @@ WHERE  {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn a owl:Restriction 
 async def delete_concept(request: Request, ontology_id: str, iri: str) -> None:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = _tbox(ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:Class }} }}"):
         raise HTTPException(404, detail={"code": "CONCEPT_NOT_FOUND", "message": f"Not found: {iri}"})

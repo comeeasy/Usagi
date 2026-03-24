@@ -57,13 +57,13 @@ def _now_iso() -> str:
 
 
 async def _fetch_ontology(store, ontology_id: str) -> dict:
-    """ID(IRI prefix)로 온톨로지 메타데이터 조회. 없으면 None."""
+    """UUID(dc:identifier)로 온톨로지 메타데이터 조회. 없으면 None."""
     rows = await store.sparql_select(f"""
         {_PREFIXES}
         SELECT ?iri ?label ?description ?version ?created ?updated WHERE {{
             GRAPH ?g {{
-                ?iri a owl:Ontology .
-                FILTER(CONTAINS(STR(?iri), "{ontology_id}"))
+                ?iri a owl:Ontology ;
+                     dc:identifier "{ontology_id}" .
                 OPTIONAL {{ ?iri rdfs:label ?label }}
                 OPTIONAL {{ ?iri dc:description ?description }}
                 OPTIONAL {{ ?iri owl:versionInfo ?version }}
@@ -89,7 +89,7 @@ async def list_ontologies(
     items = []
     for raw in items_raw:
         iri = raw["iri"]
-        ont_id = iri.split("/")[-1]  # IRI 마지막 세그먼트를 ID로 사용
+        ont_id = raw.get("id", "")  # UUID (dc:identifier)
         tbox_iri = f"{iri}/tbox"
         stats_dict = await store.get_ontology_stats(tbox_iri)
         items.append(Ontology(
@@ -133,6 +133,7 @@ async def create_ontology(request: Request, body: OntologyCreate) -> Ontology:
             GRAPH <{tbox_iri}> {{
                 <{body.iri}> a owl:Ontology ;
                     rdfs:label "{body.label}" ;
+                    dc:identifier "{ont_id}" ;
                     dc:created "{now}"^^xsd:dateTime ;
                     dc:modified "{now}"^^xsd:dateTime .
                 {desc_triple}

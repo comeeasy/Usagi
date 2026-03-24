@@ -9,8 +9,6 @@ api/sources.py — Backing Source 관리 + 수동 Sync 라우터
   DELETE /ontologies/{id}/sources/{source_id}          Source 삭제
   POST   /ontologies/{id}/sources/{source_id}/sync     수동 즉시 동기화 트리거
 """
-from __future__ import annotations
-
 import logging
 from uuid import uuid4
 

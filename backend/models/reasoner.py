@@ -45,3 +45,13 @@ class ReasonerJob(BaseModel):
 
 class ReasonerRunRequest(BaseModel):
     subgraph_entity_iris: list[str] | None = None  # None이면 전체 온톨로지
+
+
+class JobResponse(BaseModel):
+    """범용 백그라운드 Job 응답 (Reasoner, Import, Merge 등에서 공통 사용)."""
+    job_id: str
+    status: Literal["pending", "running", "completed", "failed"]
+    created_at: str
+    completed_at: str | None = None
+    result: dict | None = None
+    error: str | None = None
