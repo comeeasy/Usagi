@@ -1,0 +1,112 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - img [ref=e6]
+      - generic [ref=e9]: Ontology Platform
+    - generic [ref=e10]:
+      - generic [ref=e11]: Ontology
+      - combobox [ref=e12]:
+        - option "Select ontology..."
+        - option [selected]
+        - option
+        - option
+    - navigation [ref=e13]:
+      - link "Graph" [ref=e14] [cursor=pointer]:
+        - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/graph
+        - img [ref=e15]
+        - text: Graph
+      - link "Entities" [ref=e20] [cursor=pointer]:
+        - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/entities
+        - img [ref=e21]
+        - text: Entities
+      - link "Relations" [ref=e26] [cursor=pointer]:
+        - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/relations
+        - img [ref=e27]
+        - text: Relations
+      - link "SPARQL" [ref=e31] [cursor=pointer]:
+        - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/sparql
+        - img [ref=e32]
+        - text: SPARQL
+      - link "Sources" [ref=e36] [cursor=pointer]:
+        - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/sources
+        - img [ref=e37]
+        - text: Sources
+      - link "Import" [ref=e41] [cursor=pointer]:
+        - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/import
+        - img [ref=e42]
+        - text: Import
+      - link "Merge" [ref=e45] [cursor=pointer]:
+        - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/merge
+        - img [ref=e46]
+        - text: Merge
+      - link "Reasoner" [ref=e50] [cursor=pointer]:
+        - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/reasoner
+        - img [ref=e51]
+        - text: Reasoner
+    - link "MCP Debug" [ref=e62] [cursor=pointer]:
+      - /url: /mcp-debug
+      - img [ref=e63]
+      - text: MCP Debug
+  - generic [ref=e72]:
+    - banner [ref=e73]:
+      - link "Ontologies" [ref=e74] [cursor=pointer]:
+        - /url: /
+        - img [ref=e75]
+        - generic [ref=e78]: Ontologies
+      - img [ref=e79]
+      - link:
+        - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/graph
+      - img [ref=e81]
+      - generic [ref=e83]: Entities
+    - main [ref=e84]:
+      - generic [ref=e85]:
+        - navigation [ref=e86]:
+          - link "Graph" [ref=e87] [cursor=pointer]:
+            - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/graph
+          - link "Entities" [ref=e88] [cursor=pointer]:
+            - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/entities
+          - link "Relations" [ref=e89] [cursor=pointer]:
+            - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/relations
+          - link "SPARQL" [ref=e90] [cursor=pointer]:
+            - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/sparql
+          - link "Sources" [ref=e91] [cursor=pointer]:
+            - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/sources
+          - link "Import" [ref=e92] [cursor=pointer]:
+            - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/import
+          - link "Merge" [ref=e93] [cursor=pointer]:
+            - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/merge
+          - link "Reasoner" [ref=e94] [cursor=pointer]:
+            - /url: /1ff6cd0b-c1bb-4c52-84b2-b8a3a96687c7/reasoner
+        - generic [ref=e96]:
+          - generic [ref=e97]:
+            - generic [ref=e98]:
+              - button "concepts" [ref=e99]
+              - button "individuals" [ref=e100]
+            - button "New Concept" [ref=e101]:
+              - img [ref=e102]
+              - text: New Concept
+          - generic [ref=e103]:
+            - generic [ref=e104]:
+              - img
+              - textbox "Search entities..." [active] [ref=e105]: Person
+              - button [ref=e106]:
+                - img [ref=e107]
+            - combobox [ref=e110]:
+              - option "All types" [selected]
+              - option "Concepts"
+              - option "Individuals"
+            - generic [ref=e114] [cursor=pointer]: Vector
+          - table [ref=e118]:
+            - rowgroup [ref=e119]:
+              - row "IRI Label Type Properties" [ref=e120]:
+                - columnheader "IRI" [ref=e121]
+                - columnheader "Label" [ref=e122]
+                - columnheader "Type" [ref=e123]
+                - columnheader "Properties" [ref=e124]
+            - rowgroup [ref=e125]:
+              - row "No entities found" [ref=e126]:
+                - cell "No entities found" [ref=e127]
+```

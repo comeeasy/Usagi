@@ -16,11 +16,20 @@ export function getOntology(id: string): Promise<Ontology> {
 }
 
 export function createOntology(data: OntologyCreate): Promise<Ontology> {
-  return apiPost(`/ontologies`, data)
+  return apiPost(`/ontologies`, {
+    label: data.name,
+    iri: data.base_iri,
+    description: data.description,
+    version: data.version,
+  })
 }
 
 export function updateOntology(id: string, data: OntologyUpdate): Promise<Ontology> {
-  return apiPut(`/ontologies/${id}`, data)
+  return apiPut(`/ontologies/${id}`, {
+    label: data.name,
+    description: data.description,
+    version: data.version,
+  })
 }
 
 export function deleteOntology(id: string): Promise<void> {

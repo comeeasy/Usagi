@@ -51,7 +51,7 @@ class GraphStore:
     ) -> None:
         """Concept 노드 upsert + SUBCLASS_OF 관계 동기화."""
         async with self._session() as session:
-            async with session.begin_transaction() as tx:
+            async with await session.begin_transaction() as tx:
                 # 노드 생성/갱신
                 await tx.run(
                     """
@@ -86,7 +86,7 @@ class GraphStore:
     ) -> None:
         """Individual 노드 upsert + TYPE 관계 설정."""
         async with self._session() as session:
-            async with session.begin_transaction() as tx:
+            async with await session.begin_transaction() as tx:
                 await tx.run(
                     """
                     MERGE (i:Individual {iri: $iri})

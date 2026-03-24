@@ -8,40 +8,38 @@ export function listObjectProperties(
   ontologyId: string,
   params?: { page?: number; pageSize?: number; search?: string },
 ): Promise<PaginatedResponse<ObjectProperty>> {
-  const qs = new URLSearchParams()
+  const qs = new URLSearchParams({ kind: 'object' })
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
   if (params?.search) qs.set('search', params.search)
-  const query = qs.toString() ? `?${qs.toString()}` : ''
-  return apiGet(`/ontologies/${ontologyId}/properties/object${query}`)
+  return apiGet(`/ontologies/${ontologyId}/properties?${qs.toString()}`)
 }
 
 export function listDataProperties(
   ontologyId: string,
   params?: { page?: number; pageSize?: number; search?: string },
 ): Promise<PaginatedResponse<DataProperty>> {
-  const qs = new URLSearchParams()
+  const qs = new URLSearchParams({ kind: 'data' })
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
   if (params?.search) qs.set('search', params.search)
-  const query = qs.toString() ? `?${qs.toString()}` : ''
-  return apiGet(`/ontologies/${ontologyId}/properties/data${query}`)
+  return apiGet(`/ontologies/${ontologyId}/properties?${qs.toString()}`)
 }
 
 export function createObjectProperty(ontologyId: string, data: ObjectPropertyCreate): Promise<ObjectProperty> {
-  return apiPost(`/ontologies/${ontologyId}/properties/object`, data)
+  return apiPost(`/ontologies/${ontologyId}/properties`, data)
 }
 
 export function updateObjectProperty(ontologyId: string, iri: string, data: Partial<ObjectPropertyCreate>): Promise<ObjectProperty> {
-  return apiPut(`/ontologies/${ontologyId}/properties/object/${encodeURIComponent(iri)}`, data)
+  return apiPut(`/ontologies/${ontologyId}/properties/${encodeURIComponent(iri)}`, data)
 }
 
 export function createDataProperty(ontologyId: string, data: DataPropertyCreate): Promise<DataProperty> {
-  return apiPost(`/ontologies/${ontologyId}/properties/data`, data)
+  return apiPost(`/ontologies/${ontologyId}/properties`, data)
 }
 
 export function updateDataProperty(ontologyId: string, iri: string, data: Partial<DataPropertyCreate>): Promise<DataProperty> {
-  return apiPut(`/ontologies/${ontologyId}/properties/data/${encodeURIComponent(iri)}`, data)
+  return apiPut(`/ontologies/${ontologyId}/properties/${encodeURIComponent(iri)}`, data)
 }
 
 export function deleteProperty(ontologyId: string, iri: string): Promise<void> {

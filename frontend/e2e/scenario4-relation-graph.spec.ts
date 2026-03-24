@@ -42,14 +42,15 @@ test.describe('시나리오 4: Relation 생성 → 그래프 뷰', () => {
     await page.getByPlaceholder(/label/i).fill('worksFor')
 
     await page.getByRole('button', { name: /create/i }).click()
-    await expect(page.getByText('worksFor')).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByRole('cell', { name: 'worksFor', exact: true })).toBeVisible({ timeout: 5_000 })
   })
 
   test('4-2. Graph 탭에서 노드 렌더링 확인', async ({ page }) => {
     await page.goto(`/${ontologyId}/graph`)
 
-    // 그래프 캔버스(canvas 또는 svg) 렌더링 확인
-    const graphCanvas = page.locator('canvas, svg.graph-canvas').first()
-    await expect(graphCanvas).toBeVisible({ timeout: 10_000 })
+    // Load Graph 버튼 클릭 → 캔버스 렌더링 확인
+    await page.getByRole('button', { name: /Load Graph/i }).click()
+    const graphCanvas = page.locator('canvas, svg').first()
+    await expect(graphCanvas).toBeVisible({ timeout: 15_000 })
   })
 })

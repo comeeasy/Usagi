@@ -1,0 +1,95 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Ontology Platform" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Manage your ontologies
+    - button "New Ontology" [ref=e8]:
+      - img [ref=e9]
+      - text: New Ontology
+  - generic [ref=e10]:
+    - generic [ref=e11] [cursor=pointer]:
+      - generic [ref=e12]:
+        - generic:
+          - heading [level=3]
+          - paragraph
+        - generic [ref=e13]: v1.0.0
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - img [ref=e16]
+          - text: classes
+        - generic [ref=e18]:
+          - img [ref=e19]
+          - text: individuals
+        - generic [ref=e24]:
+          - img [ref=e25]
+          - text: properties
+        - generic [ref=e29]:
+          - img [ref=e30]
+          - text: 3/25/2026
+    - generic [ref=e33] [cursor=pointer]:
+      - generic [ref=e34]:
+        - generic:
+          - heading [level=3]
+          - paragraph
+      - generic [ref=e35]:
+        - generic [ref=e36]:
+          - img [ref=e37]
+          - text: classes
+        - generic [ref=e39]:
+          - img [ref=e40]
+          - text: individuals
+        - generic [ref=e45]:
+          - img [ref=e46]
+          - text: properties
+        - generic [ref=e50]:
+          - img [ref=e51]
+          - text: 3/25/2026
+    - generic [ref=e54] [cursor=pointer]:
+      - generic [ref=e55]:
+        - generic:
+          - heading [level=3]
+          - paragraph
+        - generic [ref=e56]: v1.0.0
+      - generic [ref=e57]:
+        - generic [ref=e58]:
+          - img [ref=e59]
+          - text: classes
+        - generic [ref=e61]:
+          - img [ref=e62]
+          - text: individuals
+        - generic [ref=e67]:
+          - img [ref=e68]
+          - text: properties
+        - generic [ref=e72]:
+          - img [ref=e73]
+          - text: 3/25/2026
+    - generic [ref=e76] [cursor=pointer]:
+      - generic [ref=e77]:
+        - generic:
+          - heading [level=3]
+          - paragraph
+      - generic [ref=e78]:
+        - generic [ref=e79]:
+          - img [ref=e80]
+          - text: classes
+        - generic [ref=e82]:
+          - img [ref=e83]
+          - text: individuals
+        - generic [ref=e88]:
+          - img [ref=e89]
+          - text: properties
+        - generic [ref=e93]:
+          - img [ref=e94]
+          - text: 3/25/2026
+  - generic [ref=e97]:
+    - generic [ref=e98]: 1–3 / 3
+    - generic [ref=e99]:
+      - button "Previous page" [disabled] [ref=e100]:
+        - img [ref=e101]
+      - generic [ref=e103]: 1 / 1
+      - button "Next page" [disabled] [ref=e104]:
+        - img [ref=e105]
+```

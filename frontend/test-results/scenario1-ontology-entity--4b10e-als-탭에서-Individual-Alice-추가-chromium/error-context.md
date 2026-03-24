@@ -1,0 +1,58 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Ontology Platform" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Manage your ontologies
+    - button "New Ontology" [ref=e8]:
+      - img [ref=e9]
+      - text: New Ontology
+  - generic [ref=e10]:
+    - generic [ref=e11] [cursor=pointer]:
+      - generic [ref=e12]:
+        - generic:
+          - heading [level=3]
+          - paragraph
+        - generic [ref=e13]: v1.0.0
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - img [ref=e16]
+          - text: classes
+        - generic [ref=e18]:
+          - img [ref=e19]
+          - text: individuals
+        - generic [ref=e24]:
+          - img [ref=e25]
+          - text: properties
+        - generic [ref=e29]:
+          - img [ref=e30]
+          - text: 3/25/2026
+    - generic [ref=e33] [cursor=pointer]:
+      - generic [ref=e34]:
+        - generic:
+          - heading [level=3]
+          - paragraph
+      - generic [ref=e35]:
+        - generic [ref=e36]:
+          - img [ref=e37]
+          - text: classes
+        - generic [ref=e39]:
+          - img [ref=e40]
+          - text: individuals
+        - generic [ref=e45]:
+          - img [ref=e46]
+          - text: properties
+        - generic [ref=e50]:
+          - img [ref=e51]
+          - text: 3/25/2026
+  - generic [ref=e54]:
+    - generic [ref=e55]: 1–2 / 2
+    - generic [ref=e56]:
+      - button "Previous page" [disabled] [ref=e57]:
+        - img [ref=e58]
+      - generic [ref=e60]: 1 / 1
+      - button "Next page" [disabled] [ref=e61]:
+        - img [ref=e62]
+```

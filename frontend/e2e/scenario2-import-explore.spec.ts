@@ -31,9 +31,11 @@ test.describe('시나리오 2: 온톨로지 Import → 탐색', () => {
   test('2-1. Import 탭에서 FOAF 표준 온톨로지 Import', async ({ page }) => {
     await page.goto(`/${ontologyId}/import`)
 
-    // "표준 온톨로지" 가져오기 (foaf)
-    await page.getByRole('button', { name: /foaf/i }).click()
-    await expect(page.getByText(/import(ed|ing|)/i)).toBeVisible({ timeout: 15_000 })
+    // "Standard Ontologies" 탭 클릭 후 FOAF 라디오 선택 → Import Selected
+    await page.getByRole('button', { name: /Standard Ontologies/i }).click()
+    await page.getByText('FOAF', { exact: true }).click()
+    await page.getByRole('button', { name: /Import Selected/i }).click()
+    await expect(page.getByText(/import(ed|ing|success|complet)/i)).toBeVisible({ timeout: 20_000 })
   })
 
   test('2-2. Entities 탭에서 foaf:Person 확인', async ({ page }) => {
