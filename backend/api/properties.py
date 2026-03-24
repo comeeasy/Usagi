@@ -9,93 +9,379 @@ api/properties.py — ObjectProperty / DataProperty CRUD 라우터
   DELETE /ontologies/{id}/properties/{iri}     Property 삭제
 """
 
-from fastapi import APIRouter, HTTPException, Query
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Union
+from urllib.parse import unquote
 
-from models.property import ObjectProperty, DataProperty, PropertyCreate, PropertyUpdate
+from fastapi import APIRouter, HTTPException, Query, Request
+
 from models.ontology import PaginatedResponse
-
-router = APIRouter(
-    prefix="/ontologies/{ontology_id}/properties",
-    tags=["properties"],
+from models.property import (
+    DataProperty,
+    DataPropertyCreate,
+    DataPropertyUpdate,
+    ObjectProperty,
+    ObjectPropertyCreate,
+    ObjectPropertyUpdate,
 )
 
+router = APIRouter(prefix="/ontologies/{ontology_id}/properties", tags=["properties"])
+
+_P = """
+PREFIX owl:  <http://www.w3.org/2002/07/owl#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+"""
+
+_XSD_BASE = "http://www.w3.org/2001/XMLSchema#"
+
+_CHAR_MAP = {
+    "Functional": "owl:FunctionalProperty",
+    "InverseFunctional": "owl:InverseFunctionalProperty",
+    "Transitive": "owl:TransitiveProperty",
+    "Symmetric": "owl:SymmetricProperty",
+    "Asymmetric": "owl:AsymmetricProperty",
+    "Reflexive": "owl:ReflexiveProperty",
+    "Irreflexive": "owl:IrreflexiveProperty",
+}
+_CHAR_FULL = {
+    "http://www.w3.org/2002/07/owl#FunctionalProperty": "Functional",
+    "http://www.w3.org/2002/07/owl#InverseFunctionalProperty": "InverseFunctional",
+    "http://www.w3.org/2002/07/owl#TransitiveProperty": "Transitive",
+    "http://www.w3.org/2002/07/owl#SymmetricProperty": "Symmetric",
+    "http://www.w3.org/2002/07/owl#AsymmetricProperty": "Asymmetric",
+    "http://www.w3.org/2002/07/owl#ReflexiveProperty": "Reflexive",
+    "http://www.w3.org/2002/07/owl#IrreflexiveProperty": "Irreflexive",
+}
+
+
+def _tbox(ontology_id: str) -> str:
+    return f"{ontology_id}/tbox"
+
+
+def _esc(s: str) -> str:
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def _v(term: dict | None, default: str = "") -> str:
+    if term is None:
+        return default
+    if isinstance(term, dict):
+        return term.get("value", default)
+    return str(term)
+
+
+def _xsd_full(xsd: str) -> str:
+    if xsd.startswith("xsd:"):
+        return _XSD_BASE + xsd[4:]
+    return xsd if xsd.startswith("http") else _XSD_BASE + xsd
+
+
+def _xsd_short(full: str) -> str:
+    if full.startswith(_XSD_BASE):
+        return "xsd:" + full[len(_XSD_BASE):]
+    return full
+
+
+# ── 내부 fetch 헬퍼 ──────────────────────────────────────────────────────
+
+async def _fetch_object_property(store, iri: str, ontology_id: str, tbox: str) -> ObjectProperty:
+    basic = await store.sparql_select(f"""{_P}
+SELECT ?label ?comment ?inv WHERE {{
+    GRAPH <{tbox}> {{ <{iri}> a owl:ObjectProperty .
+        OPTIONAL {{ <{iri}> rdfs:label ?label }}
+        OPTIONAL {{ <{iri}> rdfs:comment ?comment }}
+        OPTIONAL {{ <{iri}> owl:inverseOf ?inv }}
+    }}
+}} LIMIT 1""")
+    b = basic[0] if basic else {}
+    label = _v(b.get("label")) or iri
+    comment = _v(b.get("comment")) or None
+    inverse_of = _v(b.get("inv")) or None
+
+    domain = [_v(r.get("d")) for r in await store.sparql_select(
+        f"{_P}\nSELECT ?d WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} }}")]
+    range_ = [_v(r.get("r")) for r in await store.sparql_select(
+        f"{_P}\nSELECT ?r WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?r . FILTER(isIRI(?r)) }} }}")]
+    super_props = [_v(r.get("sp")) for r in await store.sparql_select(
+        f"{_P}\nSELECT ?sp WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subPropertyOf ?sp . FILTER(isIRI(?sp)) }} }}")]
+
+    char_rows = await store.sparql_select(f"""{_P}
+SELECT ?t WHERE {{
+    GRAPH <{tbox}> {{
+        <{iri}> a ?t .
+        FILTER(?t IN (owl:FunctionalProperty, owl:InverseFunctionalProperty,
+                      owl:TransitiveProperty, owl:SymmetricProperty,
+                      owl:AsymmetricProperty, owl:ReflexiveProperty, owl:IrreflexiveProperty))
+    }}
+}}""")
+    characteristics = [_CHAR_FULL[_v(r.get("t"))] for r in char_rows if _v(r.get("t")) in _CHAR_FULL]
+
+    return ObjectProperty(
+        iri=iri, ontology_id=ontology_id, label=label, comment=comment,
+        domain=domain, range=range_, super_properties=super_props,
+        inverse_of=inverse_of, characteristics=characteristics,
+    )
+
+
+async def _fetch_data_property(store, iri: str, ontology_id: str, tbox: str) -> DataProperty:
+    basic = await store.sparql_select(f"""{_P}
+SELECT ?label ?comment WHERE {{
+    GRAPH <{tbox}> {{ <{iri}> a owl:DatatypeProperty .
+        OPTIONAL {{ <{iri}> rdfs:label ?label }}
+        OPTIONAL {{ <{iri}> rdfs:comment ?comment }}
+    }}
+}} LIMIT 1""")
+    b = basic[0] if basic else {}
+
+    domain = [_v(r.get("d")) for r in await store.sparql_select(
+        f"{_P}\nSELECT ?d WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} }}")]
+    range_ = [_xsd_short(_v(r.get("r"))) for r in await store.sparql_select(
+        f"{_P}\nSELECT ?r WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?r }} }}")
+               if r.get("r")]
+    super_props = [_v(r.get("sp")) for r in await store.sparql_select(
+        f"{_P}\nSELECT ?sp WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subPropertyOf ?sp . FILTER(isIRI(?sp)) }} }}")]
+    is_functional = await store.sparql_ask(
+        f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty }} }}")
+
+    return DataProperty(
+        iri=iri, ontology_id=ontology_id,
+        label=_v(b.get("label")) or iri,
+        comment=_v(b.get("comment")) or None,
+        domain=domain, range=range_, super_properties=super_props,
+        is_functional=is_functional,
+    )
+
+
+# ── 목록 ──────────────────────────────────────────────────────────────────
 
 @router.get("", response_model=PaginatedResponse)
 async def list_properties(
+    request: Request,
     ontology_id: str,
-    kind: Literal["object", "data"] | None = Query(None, description="object 또는 data"),
-    domain: str | None = Query(None, description="rdfs:domain IRI 필터"),
-    range_: str | None = Query(None, alias="range", description="rdfs:range IRI 필터"),
+    kind: Literal["object", "data"] | None = Query(None),
+    domain: str | None = Query(None),
+    range_: str | None = Query(None, alias="range"),
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> PaginatedResponse:
-    """
-    Property 목록 조회.
+) -> dict:
+    store = request.app.state.ontology_store
+    tbox = _tbox(ontology_id)
+    offset = (page - 1) * page_size
 
-    구현 세부사항:
-    - kind="object": owl:ObjectProperty SPARQL SELECT
-    - kind="data": owl:DatatypeProperty SPARQL SELECT
-    - kind=None: 두 쿼리 실행 후 결과 합산 (UNION)
-    - domain 필터: rdfs:domain <$domain> 조건
-    - range 필터: rdfs:range <$range> 조건
-    - 각 Property의 characteristics(ObjectProperty) 또는 isFunctional(DataProperty) 포함
-    - PaginatedResponse[ObjectProperty | DataProperty] 반환
-    """
-    pass
+    domain_f = f"?iri rdfs:domain <{domain}> ." if domain else ""
+    range_f = f"?iri rdfs:range <{range_}> ." if range_ else ""
 
+    async def fetch_type(owl_type: str) -> tuple[int, list]:
+        cnt = await store.sparql_select(f"""{_P}
+SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
+    GRAPH <{tbox}> {{ ?iri a {owl_type} . {domain_f} {range_f} }}
+}}""")
+        total = int(_v(cnt[0].get("total"), "0")) if cnt else 0
+        rows = await store.sparql_select(f"""{_P}
+SELECT DISTINCT ?iri WHERE {{
+    GRAPH <{tbox}> {{ ?iri a {owl_type} . {domain_f} {range_f} }}
+}} ORDER BY ?iri LIMIT {page_size} OFFSET {offset}""")
+        return total, rows
+
+    items: list = []
+    total = 0
+
+    if kind != "data":
+        obj_total, obj_rows = await fetch_type("owl:ObjectProperty")
+        total += obj_total
+        for r in obj_rows:
+            items.append(await _fetch_object_property(store, _v(r.get("iri")), ontology_id, tbox))
+
+    if kind != "object":
+        data_total, data_rows = await fetch_type("owl:DatatypeProperty")
+        total += data_total
+        for r in data_rows:
+            items.append(await _fetch_data_property(store, _v(r.get("iri")), ontology_id, tbox))
+
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+# ── 생성 ──────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
-async def create_property(ontology_id: str, body: PropertyCreate):
-    """
-    새 Property 생성.
+async def create_property(
+    request: Request,
+    ontology_id: str,
+    body: Union[ObjectPropertyCreate, DataPropertyCreate],
+):
+    store = request.app.state.ontology_store
+    tbox = _tbox(ontology_id)
 
-    구현 세부사항:
-    - body.kind="object": owl:ObjectProperty 트리플 삽입
-      특성(Transitive, Symmetric 등)은 해당 OWL 클래스로 선언:
-      <iri> a owl:TransitiveProperty, owl:ObjectProperty .
-    - body.kind="data": owl:DatatypeProperty 트리플 삽입
-      body.isFunctional=True이면 a owl:FunctionalProperty 추가
-    - rdfs:domain, rdfs:range 트리플 삽입 (복수 허용)
-    - SyncService.trigger_tbox_sync(ontology_id) 호출
-    """
-    pass
+    dup = await store.sparql_ask(f"""{_P}
+ASK {{ GRAPH <{tbox}> {{
+    {{ <{body.iri}> a owl:ObjectProperty }} UNION {{ <{body.iri}> a owl:DatatypeProperty }}
+}} }}""")
+    if dup:
+        raise HTTPException(409, detail={"code": "PROPERTY_IRI_DUPLICATE", "message": f"IRI exists: {body.iri}"})
 
+    triples = []
+    if isinstance(body, ObjectPropertyCreate):
+        types = ["owl:ObjectProperty"] + [_CHAR_MAP[c] for c in body.characteristics if c in _CHAR_MAP]
+        triples.append(f"    <{body.iri}> a {', '.join(types)} .")
+        triples.append(f'    <{body.iri}> rdfs:label "{_esc(body.label)}" .')
+        if body.comment:
+            triples.append(f'    <{body.iri}> rdfs:comment "{_esc(body.comment)}" .')
+        for d in body.domain:
+            triples.append(f"    <{body.iri}> rdfs:domain <{d}> .")
+        for r in body.range:
+            triples.append(f"    <{body.iri}> rdfs:range <{r}> .")
+        for sp in body.super_properties:
+            triples.append(f"    <{body.iri}> rdfs:subPropertyOf <{sp}> .")
+        if body.inverse_of:
+            triples.append(f"    <{body.iri}> owl:inverseOf <{body.inverse_of}> .")
+    else:
+        types = ["owl:DatatypeProperty"] + (["owl:FunctionalProperty"] if body.is_functional else [])
+        triples.append(f"    <{body.iri}> a {', '.join(types)} .")
+        triples.append(f'    <{body.iri}> rdfs:label "{_esc(body.label)}" .')
+        if body.comment:
+            triples.append(f'    <{body.iri}> rdfs:comment "{_esc(body.comment)}" .')
+        for d in body.domain:
+            triples.append(f"    <{body.iri}> rdfs:domain <{d}> .")
+        for r in body.range:
+            triples.append(f"    <{body.iri}> rdfs:range <{_xsd_full(r)}> .")
+        for sp in body.super_properties:
+            triples.append(f"    <{body.iri}> rdfs:subPropertyOf <{sp}> .")
+
+    await store.sparql_update(f"""{_P}
+INSERT DATA {{ GRAPH <{tbox}> {{
+{chr(10).join(triples)}
+}} }}""")
+
+    if isinstance(body, ObjectPropertyCreate):
+        return await _fetch_object_property(store, body.iri, ontology_id, tbox)
+    return await _fetch_data_property(store, body.iri, ontology_id, tbox)
+
+
+# ── 상세 조회 ─────────────────────────────────────────────────────────────
 
 @router.get("/{iri:path}")
-async def get_property(ontology_id: str, iri: str):
-    """
-    Property 상세 조회.
+async def get_property(request: Request, ontology_id: str, iri: str):
+    store = request.app.state.ontology_store
+    iri = unquote(iri)
+    tbox = _tbox(ontology_id)
 
-    구현 세부사항:
-    - SPARQL SELECT로 iri의 rdf:type 확인 (owl:ObjectProperty vs owl:DatatypeProperty)
-    - 타입에 따라 ObjectProperty 또는 DataProperty 모델 반환
-    - domain, range, superProperties, inverseOf (Object만), characteristics/isFunctional
-    """
-    pass
+    is_obj = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:ObjectProperty }} }}")
+    is_data = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:DatatypeProperty }} }}")
 
+    if not is_obj and not is_data:
+        raise HTTPException(404, detail={"code": "PROPERTY_NOT_FOUND", "message": f"Not found: {iri}"})
+
+    return (await _fetch_object_property(store, iri, ontology_id, tbox)
+            if is_obj else
+            await _fetch_data_property(store, iri, ontology_id, tbox))
+
+
+# ── 수정 ──────────────────────────────────────────────────────────────────
 
 @router.put("/{iri:path}")
-async def update_property(ontology_id: str, iri: str, body: PropertyUpdate):
-    """
-    Property 수정.
+async def update_property(
+    request: Request,
+    ontology_id: str,
+    iri: str,
+    body: Union[ObjectPropertyUpdate, DataPropertyUpdate],
+):
+    store = request.app.state.ontology_store
+    iri = unquote(iri)
+    tbox = _tbox(ontology_id)
 
-    구현 세부사항:
-    - 변경된 필드만 SPARQL DELETE/INSERT UPDATE
-    - characteristics 변경: 기존 OWL 특성 선언 삭제 후 새로 삽입
-    - SyncService.trigger_tbox_sync(ontology_id) 호출
-    """
-    pass
+    is_obj = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:ObjectProperty }} }}")
+    is_data = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:DatatypeProperty }} }}")
+    if not is_obj and not is_data:
+        raise HTTPException(404, detail={"code": "PROPERTY_NOT_FOUND", "message": f"Not found: {iri}"})
 
+    async def _replace(pred: str, new_val: str | None):
+        if new_val is None:
+            return
+        await store.sparql_update(f"""{_P}
+DELETE {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }}
+INSERT {{ GRAPH <{tbox}> {{ <{iri}> {pred} "{_esc(new_val)}" }} }}
+WHERE  {{ OPTIONAL {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }} }}""")
+
+    async def _replace_iris(pred: str, iris: list[str] | None):
+        if iris is None:
+            return
+        await store.sparql_update(f"""{_P}
+DELETE {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }}
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }}""")
+        if iris:
+            triples = "\n".join([f"    <{iri}> {pred} <{v}> ." for v in iris])
+            await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{triples}\n}} }}")
+
+    await _replace("rdfs:label", body.label)
+    await _replace("rdfs:comment", body.comment)
+    await _replace_iris("rdfs:domain", body.domain)
+    await _replace_iris("rdfs:subPropertyOf", body.super_properties)
+
+    if body.range is not None:
+        await store.sparql_update(f"""{_P}
+DELETE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?o }} }}
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?o }} }}""")
+        if body.range:
+            if is_obj:
+                triples = "\n".join([f"    <{iri}> rdfs:range <{r}> ." for r in body.range])
+            else:
+                triples = "\n".join([f"    <{iri}> rdfs:range <{_xsd_full(r)}> ." for r in body.range])
+            await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{triples}\n}} }}")
+
+    if is_obj and isinstance(body, ObjectPropertyUpdate):
+        if body.inverse_of is not None:
+            await store.sparql_update(f"""{_P}
+DELETE {{ GRAPH <{tbox}> {{ <{iri}> owl:inverseOf ?o }} }}
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> owl:inverseOf ?o }} }}""")
+            if body.inverse_of:
+                await store.sparql_update(
+                    f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{ <{iri}> owl:inverseOf <{body.inverse_of}> . }} }}")
+
+        if body.characteristics is not None:
+            await store.sparql_update(f"""{_P}
+DELETE {{ GRAPH <{tbox}> {{ <{iri}> a ?t }} }}
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> a ?t .
+    FILTER(?t IN (owl:FunctionalProperty, owl:InverseFunctionalProperty,
+                  owl:TransitiveProperty, owl:SymmetricProperty,
+                  owl:AsymmetricProperty, owl:ReflexiveProperty, owl:IrreflexiveProperty)) }} }}""")
+            if body.characteristics:
+                triples = "\n".join([
+                    f"    <{iri}> a {_CHAR_MAP[c]} ."
+                    for c in body.characteristics if c in _CHAR_MAP
+                ])
+                await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{triples}\n}} }}")
+
+    if is_data and isinstance(body, DataPropertyUpdate) and body.is_functional is not None:
+        if body.is_functional:
+            await store.sparql_update(
+                f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty . }} }}")
+        else:
+            await store.sparql_update(f"""{_P}
+DELETE {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty }} }}
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty }} }}""")
+
+    return await get_property(request, ontology_id, iri)
+
+
+# ── 삭제 ──────────────────────────────────────────────────────────────────
 
 @router.delete("/{iri:path}", status_code=204)
-async def delete_property(ontology_id: str, iri: str) -> None:
-    """
-    Property 삭제.
+async def delete_property(request: Request, ontology_id: str, iri: str) -> None:
+    store = request.app.state.ontology_store
+    iri = unquote(iri)
+    tbox = _tbox(ontology_id)
 
-    구현 세부사항:
-    - TBox에서 해당 IRI의 모든 트리플 삭제
-    - 해당 Property를 사용한 Individual 값 트리플도 정리 (또는 정책: 값 유지)
-    - 204 반환
-    """
-    pass
+    exists = await store.sparql_ask(f"""{_P}
+ASK {{ GRAPH <{tbox}> {{
+    {{ <{iri}> a owl:ObjectProperty }} UNION {{ <{iri}> a owl:DatatypeProperty }}
+}} }}""")
+    if not exists:
+        raise HTTPException(404, detail={"code": "PROPERTY_NOT_FOUND", "message": f"Not found: {iri}"})
+
+    await store.sparql_update(f"""{_P}
+DELETE {{ GRAPH <{tbox}> {{ <{iri}> ?p ?o }} }}
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> ?p ?o }} }}""")
+    await store.sparql_update(f"""{_P}
+DELETE {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}
+WHERE  {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}""")
