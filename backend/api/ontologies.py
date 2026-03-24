@@ -25,6 +25,16 @@ from models.ontology import (
 
 router = APIRouter(prefix="/ontologies", tags=["ontologies"])
 
+
+def _v(term: dict | None, default: str = "") -> str:
+    """SPARQL 결과 term → str 변환 헬퍼."""
+    if term is None:
+        return default
+    if isinstance(term, dict):
+        return term.get("value", default)
+    return str(term)
+
+
 # OWL/DC 프리픽스
 _PREFIXES = """
 PREFIX owl:  <http://www.w3.org/2002/07/owl#>
@@ -228,6 +238,6 @@ async def delete_ontology(request: Request, ontology_id: str) -> None:
     """)
 
     for row in graph_rows:
-        await store.delete_graph(row["g"]["value"])
+        await store.delete_graph(_v(row.get("g")))
 
     await graph_store.delete_ontology_data(ontology_id)

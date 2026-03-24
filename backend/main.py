@@ -14,6 +14,7 @@ from config import settings
 from services.ontology_store import OntologyStore
 from services.graph_store import GraphStore
 from services.reasoner_service import ReasonerService
+from services.ingestion.kafka_producer import KafkaProducer
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password
     )
     app.state.reasoner_service = ReasonerService(app.state.ontology_store)
+    app.state.kafka_producer = KafkaProducer(settings.kafka_brokers)
 
     # MCP 서비스 등록
     from mcp.tools import init_services as _init_mcp_services
@@ -50,6 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     sync_task.cancel()
     kafka_task.cancel()
     await asyncio.gather(sync_task, kafka_task, return_exceptions=True)
+    app.state.kafka_producer.close()
     await app.state.graph_store.close()
 
     logger.info("Ontology Platform shut down.")
