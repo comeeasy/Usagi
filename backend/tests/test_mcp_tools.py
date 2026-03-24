@@ -161,12 +161,8 @@ async def test_mcp_search_entities_concept(populated_store):
     assert f"{ONT_IRI}#Person" in iris
 
 
-@pytest.mark.xfail(
-    reason="BUG-008: search_entities Individual 검색에 GRAPH 절 누락 — Named Graph 조회 불가",
-    strict=True,
-)
 async def test_mcp_search_entities_all(populated_store):
-    """kind='all' → Concept + Individual 혼합 (BUG-008: Individual 미반환)."""
+    """kind='all' → Concept + Individual 혼합 (BUG-008 수정됨: GRAPH 절 추가)."""
     init_services(populated_store, MagicMock(), MagicMock())
     result = await search_entities(ONT_IRI, "", kind="all", limit=10)
     kinds = {r["kind"] for r in result}

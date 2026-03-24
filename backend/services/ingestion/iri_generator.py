@@ -2,7 +2,7 @@
 from urllib.parse import quote
 import re
 
-_IRI_SCHEME = re.compile(r'^[a-zA-Z][a-zA-Z0-9+\-.]*://')
+_IRI_SCHEME = re.compile(r'^[a-zA-Z][a-zA-Z0-9+\-.]*:')
 
 
 def generate(template: str, record: dict) -> str:

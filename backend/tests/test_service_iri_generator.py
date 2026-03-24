@@ -37,9 +37,8 @@ def test_validate_iri_http():
 
 
 def test_validate_iri_urn():
-    # BUG-006: validate_iri는 `://`를 요구하므로 `urn:` 스킴을 거부함
-    # 실제 동작 문서화 — 수정 전까지는 False
-    assert validate_iri("urn:example:123") is False
+    # BUG-006 수정됨: 정규식에서 `://` 요구사항 제거 → urn: 스킴도 유효
+    assert validate_iri("urn:example:123") is True
 
 
 def test_validate_iri_no_scheme():

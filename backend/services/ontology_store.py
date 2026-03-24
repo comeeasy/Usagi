@@ -20,6 +20,7 @@ from pyoxigraph import (
     BlankNode,
     Quad,
     Store,
+    RdfFormat,
 )
 
 from config import settings
@@ -188,7 +189,7 @@ class OntologyStore:
 
         def _exec():
             buf = io.BytesIO()
-            self._store.dump(buf, "text/turtle", from_graph=graph_node)
+            self._store.dump(buf, RdfFormat.TURTLE, from_graph=graph_node)
             return buf.getvalue().decode("utf-8")
 
         return await self._run(_exec)

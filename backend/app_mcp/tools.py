@@ -119,8 +119,10 @@ async def search_entities(
                 PREFIX owl: <http://www.w3.org/2002/07/owl#>
                 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
                 SELECT ?iri ?label WHERE {{
-                    ?iri a owl:NamedIndividual .
-                    OPTIONAL {{ ?iri rdfs:label ?label }}
+                    GRAPH <{tbox_iri}> {{
+                        ?iri a owl:NamedIndividual .
+                        OPTIONAL {{ ?iri rdfs:label ?label }}
+                    }}
                     FILTER(CONTAINS(LCASE(STR(?iri)), LCASE("{query}"))
                            || CONTAINS(LCASE(STR(?label)), LCASE("{query}")))
                 }}
