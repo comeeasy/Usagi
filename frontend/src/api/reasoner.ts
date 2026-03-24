@@ -1,29 +1,19 @@
-// Reasoner API client stubs
+// Reasoner API client
 
 import { apiGet, apiPost } from './client'
-import type { ReasonerResult, ReasonerJob } from '@/types/reasoner'
-
-// TODO: implement all functions
+import type { ReasonerResult, ReasonerJob, ReasonerRunRequest } from '@/types/reasoner'
 
 export function runReasoner(
   ontologyId: string,
-  request: {
-    subgraph_iris?: string[]
-    include_inferences?: boolean
-    check_consistency?: boolean
-    reasoner_profile?: string
-  },
+  request: ReasonerRunRequest,
 ): Promise<ReasonerJob> {
-  // TODO: return apiPost(`/ontologies/${ontologyId}/reasoner/run`, request)
-  throw new Error('Not implemented')
+  return apiPost(`/ontologies/${ontologyId}/reasoner/run`, request)
 }
 
 export function getReasonerResult(jobId: string): Promise<ReasonerResult> {
-  // TODO: return apiGet(`/reasoner/jobs/${jobId}`)
-  throw new Error('Not implemented')
+  return apiGet(`/reasoner/jobs/${jobId}`)
 }
 
 export function listReasonerJobs(ontologyId: string): Promise<ReasonerJob[]> {
-  // TODO: return apiGet(`/ontologies/${ontologyId}/reasoner/jobs`)
-  throw new Error('Not implemented')
+  return apiGet(`/ontologies/${ontologyId}/reasoner/jobs`)
 }

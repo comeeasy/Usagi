@@ -1,8 +1,5 @@
-// TODO: React Error Boundary 컴포넌트
-// 에러 캐치 후 폴백 UI 표시
-// 재시도 버튼
-
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { AlertTriangle } from 'lucide-react'
 
 interface ErrorBoundaryProps {
   children: ReactNode
@@ -25,17 +22,39 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    // TODO: log to error reporting service
     console.error('ErrorBoundary caught:', error, info)
   }
 
   render() {
     if (this.state.hasError) {
-      return this.props.fallback ?? (
-        <div className="p-4 text-error border border-error rounded">
-          <p>Something went wrong.</p>
+      if (this.props.fallback) return this.props.fallback
+
+      return (
+        <div
+          className="flex flex-col items-center justify-center p-8 rounded-lg border gap-3"
+          style={{
+            borderColor: 'var(--color-error)',
+            backgroundColor: 'var(--color-bg-surface)',
+          }}
+        >
+          <AlertTriangle size={32} style={{ color: 'var(--color-error)' }} />
+          <div className="text-center">
+            <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+              Something went wrong
+            </p>
+            {this.state.error && (
+              <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                {this.state.error.message}
+              </p>
+            )}
+          </div>
           <button
-            className="mt-2 text-sm underline"
+            className="px-4 py-1.5 text-sm rounded transition-opacity hover:opacity-80"
+            style={{
+              backgroundColor: 'var(--color-bg-elevated)',
+              color: 'var(--color-text-primary)',
+              border: '1px solid var(--color-border)',
+            }}
             onClick={() => this.setState({ hasError: false })}
           >
             Try again

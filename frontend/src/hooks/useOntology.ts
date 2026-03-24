@@ -1,28 +1,43 @@
-// TODO: useQuery로 온톨로지 목록/상세 조회
-// useOntologies(): 전체 목록 + 페이지네이션
-// useOntology(id): 단건 조회
-// useOntologyStats(id): 통계 조회
-
-import { useQuery } from '@tanstack/react-query'
-// TODO: import { listOntologies, getOntology } from '@/api/ontologies'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  listOntologies,
+  getOntology,
+  createOntology,
+  deleteOntology,
+} from '@/api/ontologies'
+import type { OntologyCreate } from '@/types/ontology'
 
 export function useOntologies(page = 1, pageSize = 20) {
   return useQuery({
     queryKey: ['ontologies', page, pageSize],
-    queryFn: async () => {
-      // TODO: return listOntologies({ page, pageSize })
-      throw new Error('Not implemented')
-    },
+    queryFn: () => listOntologies({ page, pageSize }),
   })
 }
 
 export function useOntology(id: string | undefined) {
   return useQuery({
     queryKey: ['ontologies', id],
-    queryFn: async () => {
-      // TODO: return getOntology(id!)
-      throw new Error('Not implemented')
-    },
+    queryFn: () => getOntology(id!),
     enabled: !!id,
+  })
+}
+
+export function useCreateOntology() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: OntologyCreate) => createOntology(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ontologies'] })
+    },
+  })
+}
+
+export function useDeleteOntology() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => deleteOntology(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ontologies'] })
+    },
   })
 }

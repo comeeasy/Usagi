@@ -1,4 +1,4 @@
-// SPARQL API client stubs
+// SPARQL API client
 
 import { apiPost } from './client'
 
@@ -15,11 +15,9 @@ export interface SparqlResults {
 }
 
 export function executeSparql(ontologyId: string, query: string): Promise<SparqlResults> {
-  // TODO: return apiPost(`/ontologies/${ontologyId}/sparql`, { query })
-  throw new Error('Not implemented')
+  return apiPost(`/ontologies/${ontologyId}/sparql`, { query })
 }
 
 export function executeSparqlUpdate(ontologyId: string, update: string): Promise<void> {
-  // TODO: return apiPost(`/ontologies/${ontologyId}/sparql/update`, { update })
-  throw new Error('Not implemented')
+  return apiPost(`/ontologies/${ontologyId}/sparql/update`, { update })
 }

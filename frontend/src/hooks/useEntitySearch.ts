@@ -1,10 +1,6 @@
-// TODO: useQuery + debounce로 Entity 검색
-// 키워드 debounce (300ms), kind 필터, 벡터 검색 모드 토글
-// searchEntities / vectorSearch API 호출
-
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-// TODO: import { searchEntities, vectorSearch } from '@/api/entities'
+import { searchEntities, vectorSearch } from '@/api/entities'
 
 export function useEntitySearch(
   ontologyId: string | undefined,
@@ -15,18 +11,38 @@ export function useEntitySearch(
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery)
 
   useEffect(() => {
-    // TODO: implement debounce
-    // const timer = setTimeout(() => setDebouncedQuery(initialQuery), 300)
-    // return () => clearTimeout(timer)
-    setDebouncedQuery(initialQuery)
+    const timer = setTimeout(() => setDebouncedQuery(initialQuery), 300)
+    return () => clearTimeout(timer)
   }, [initialQuery])
 
   return useQuery({
     queryKey: ['entities', ontologyId, debouncedQuery, kind, useVector],
+    queryFn: () => {
+      if (useVector) return vectorSearch(ontologyId!, debouncedQuery)
+      return searchEntities(ontologyId!, debouncedQuery, kind)
+    },
+    enabled: !!ontologyId && debouncedQuery.length > 0,
+  })
+}
+
+export function useSearchRelations(
+  ontologyId: string | undefined,
+  query: string,
+  domainIri?: string,
+  rangeIri?: string,
+) {
+  const [debouncedQuery, setDebouncedQuery] = useState(query)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  return useQuery({
+    queryKey: ['relations-search', ontologyId, debouncedQuery, domainIri, rangeIri],
     queryFn: async () => {
-      // TODO: if (useVector) return vectorSearch(ontologyId!, debouncedQuery)
-      // TODO: return searchEntities(ontologyId!, debouncedQuery, kind)
-      throw new Error('Not implemented')
+      const { searchRelations } = await import('@/api/relations')
+      return searchRelations(ontologyId!, debouncedQuery, domainIri, rangeIri)
     },
     enabled: !!ontologyId && debouncedQuery.length > 0,
   })

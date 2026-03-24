@@ -1,31 +1,45 @@
-// Relations (ObjectProperty / DataProperty) API client stubs
+// Relations (ObjectProperty / DataProperty) API client
 
 import { apiGet, apiPost, apiPut, apiDelete } from './client'
 import type { ObjectProperty, DataProperty, ObjectPropertyCreate, DataPropertyCreate } from '@/types/property'
 import type { PaginatedResponse } from '@/types/ontology'
 
-// TODO: implement all functions
-
 export function listObjectProperties(
   ontologyId: string,
   params?: { page?: number; pageSize?: number },
 ): Promise<PaginatedResponse<ObjectProperty>> {
-  return apiGet(`/ontologies/${ontologyId}/properties/object`)
+  const qs = new URLSearchParams()
+  if (params?.page) qs.set('page', String(params.page))
+  if (params?.pageSize) qs.set('page_size', String(params.pageSize))
+  const query = qs.toString() ? `?${qs.toString()}` : ''
+  return apiGet(`/ontologies/${ontologyId}/properties/object${query}`)
 }
 
 export function listDataProperties(
   ontologyId: string,
   params?: { page?: number; pageSize?: number },
 ): Promise<PaginatedResponse<DataProperty>> {
-  return apiGet(`/ontologies/${ontologyId}/properties/data`)
+  const qs = new URLSearchParams()
+  if (params?.page) qs.set('page', String(params.page))
+  if (params?.pageSize) qs.set('page_size', String(params.pageSize))
+  const query = qs.toString() ? `?${qs.toString()}` : ''
+  return apiGet(`/ontologies/${ontologyId}/properties/data${query}`)
 }
 
 export function createObjectProperty(ontologyId: string, data: ObjectPropertyCreate): Promise<ObjectProperty> {
   return apiPost(`/ontologies/${ontologyId}/properties/object`, data)
 }
 
+export function updateObjectProperty(ontologyId: string, iri: string, data: Partial<ObjectPropertyCreate>): Promise<ObjectProperty> {
+  return apiPut(`/ontologies/${ontologyId}/properties/object/${encodeURIComponent(iri)}`, data)
+}
+
 export function createDataProperty(ontologyId: string, data: DataPropertyCreate): Promise<DataProperty> {
   return apiPost(`/ontologies/${ontologyId}/properties/data`, data)
+}
+
+export function updateDataProperty(ontologyId: string, iri: string, data: Partial<DataPropertyCreate>): Promise<DataProperty> {
+  return apiPut(`/ontologies/${ontologyId}/properties/data/${encodeURIComponent(iri)}`, data)
 }
 
 export function deleteProperty(ontologyId: string, iri: string): Promise<void> {
@@ -38,7 +52,9 @@ export function searchRelations(
   domainIri?: string,
   rangeIri?: string,
   limit = 20,
-): Promise<unknown[]> {
-  // TODO: return apiGet(`/ontologies/${ontologyId}/search/relations?q=${q}&...`)
-  throw new Error('Not implemented')
+): Promise<Array<ObjectProperty | DataProperty>> {
+  const qs = new URLSearchParams({ q, limit: String(limit) })
+  if (domainIri) qs.set('domain_iri', domainIri)
+  if (rangeIri) qs.set('range_iri', rangeIri)
+  return apiGet(`/ontologies/${ontologyId}/search/relations?${qs.toString()}`)
 }

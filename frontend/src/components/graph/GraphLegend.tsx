@@ -1,11 +1,41 @@
-// TODO: 노드/엣지 색상 범례 표시
-// Concept (파란색), Individual (초록색)
-// ObjectProperty edge (보라색), DataProperty edge (주황색)
-
 export default function GraphLegend() {
+  const items = [
+    { color: '#2F81F7', label: 'Concept', shape: 'rect' },
+    { color: '#3FB950', label: 'Individual', shape: 'circle' },
+    { color: '#A371F7', label: 'Object Property', shape: 'line' },
+    { color: '#D29922', label: 'Data Property', shape: 'line' },
+    { color: '#30363D', label: 'Subclass', shape: 'line' },
+  ]
+
   return (
-    <div className="flex flex-col gap-1 p-2 bg-bg-elevated border border-border rounded text-sm">
-      {/* TODO: legend items */}
+    <div
+      className="flex flex-col gap-1.5 p-3 rounded-lg border text-xs"
+      style={{
+        backgroundColor: 'var(--color-bg-surface)',
+        borderColor: 'var(--color-border)',
+      }}
+    >
+      <p className="font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
+        Legend
+      </p>
+      {items.map(({ color, label, shape }) => (
+        <div key={label} className="flex items-center gap-2">
+          {shape === 'rect' ? (
+            <div
+              className="w-4 h-3 rounded-sm flex-shrink-0"
+              style={{ backgroundColor: color }}
+            />
+          ) : shape === 'circle' ? (
+            <div
+              className="w-3 h-3 rounded-full flex-shrink-0"
+              style={{ backgroundColor: color }}
+            />
+          ) : (
+            <div className="w-4 h-0.5 flex-shrink-0" style={{ backgroundColor: color }} />
+          )}
+          <span style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+        </div>
+      ))}
     </div>
   )
 }
