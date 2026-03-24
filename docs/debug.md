@@ -190,3 +190,87 @@ tools = await mcp.list_tools()
 ---
 
 *이 파일은 테스트 진행 중 계속 업데이트됩니다.*
+
+---
+
+## Phase 1 완료 후 추가 발견 이슈
+
+### [BUG-006] `iri_generator.validate_iri` — `urn:` 스킴 거부
+
+**발견 시점:** Phase 2 — `test_service_iri_generator.py`
+**심각도:** 🟡 Medium
+**파일:** `backend/services/ingestion/iri_generator.py`
+
+**증상:**
+```python
+validate_iri("urn:example:123")  # → False (예상: True)
+```
+
+**원인 분석:**
+```python
+_IRI_SCHEME = re.compile(r'^[a-zA-Z][a-zA-Z0-9+\-.]*://')
+```
+`://`를 요구하므로 `urn:example:123` (`:` 뒤에 `//` 없음) 등 authority 없는 URI 스킴을 거부.
+RFC 3986에서는 `urn:`, `mailto:`, `tel:` 등도 유효한 URI.
+
+**영향:**
+- `rdf_transformer.py`의 `build_named_graph_iri`는 `urn:source:...` 형식을 생성하는데,
+  만약 이 IRI가 `validate_iri`를 통과해야 한다면 항상 실패
+
+**할 일:**
+정규식을 `r'^[a-zA-Z][a-zA-Z0-9+\-.]*:'`로 수정 (authority `//` 선택사항)
+
+---
+
+### [BUG-007] `SearchService` — 미구현 (NotImplementedError)
+
+**발견 시점:** Phase 2 — `test_service_search.py`
+**심각도:** 🟠 High (API /search 엔드포인트 비정상)
+**파일:** `backend/services/search_service.py`
+
+**증상:**
+```python
+await search_entities("ont-001", "Person")
+# NotImplementedError
+```
+
+**원인 분석:**
+`search_service.py`의 `search_entities`, `search_relations`, `vector_search` 모두 stub 상태.
+`api/search.py`가 이 서비스를 호출하면 500 에러 발생.
+
+**할 일:**
+`search_service.py` 구현:
+- `search_entities`: OntologyStore에서 `FILTER(CONTAINS(LCASE(?label), ...))` SPARQL 실행
+- `search_relations`: ObjectProperty + DataProperty 검색
+- `vector_search`: 구현 전까지 `search_entities`로 폴백
+
+---
+
+### [WARNING-001] `OntologyStore.export_turtle` — deprecated API 경고
+
+**발견 시점:** Phase 2 — `test_service_ontology_store.py`
+**심각도:** 🟢 Low (기능 정상, 경고만)
+**파일:** `backend/services/ontology_store.py:191`
+
+**증상:**
+```
+DeprecationWarning: Using string to specify a RDF format is deprecated,
+please use a RdfFormat object instead.
+```
+
+**할 일:**
+`self._store.dump(buf, "text/turtle", ...)` →
+`from pyoxigraph import RdfFormat; self._store.dump(buf, RdfFormat.TURTLE, ...)`
+
+---
+
+## Phase 2 진행 상태
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| OntologyStore 단위 테스트 (12개) | ✅ 통과 | — |
+| IRI Generator 테스트 (11개) | ✅ 통과 | BUG-006 문서화 |
+| RDF Transformer 테스트 (10개) | ✅ 통과 | — |
+| SearchService 테스트 | ⚠️ xfail | BUG-007: 미구현 |
+
+---
