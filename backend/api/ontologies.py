@@ -61,13 +61,15 @@ async def _fetch_ontology(store, ontology_id: str) -> dict:
     rows = await store.sparql_select(f"""
         {_PREFIXES}
         SELECT ?iri ?label ?description ?version ?created ?updated WHERE {{
-            ?iri a owl:Ontology .
-            FILTER(CONTAINS(STR(?iri), "{ontology_id}"))
-            OPTIONAL {{ ?iri rdfs:label ?label }}
-            OPTIONAL {{ ?iri dc:description ?description }}
-            OPTIONAL {{ ?iri owl:versionInfo ?version }}
-            OPTIONAL {{ ?iri dc:created ?created }}
-            OPTIONAL {{ ?iri dc:modified ?updated }}
+            GRAPH ?g {{
+                ?iri a owl:Ontology .
+                FILTER(CONTAINS(STR(?iri), "{ontology_id}"))
+                OPTIONAL {{ ?iri rdfs:label ?label }}
+                OPTIONAL {{ ?iri dc:description ?description }}
+                OPTIONAL {{ ?iri owl:versionInfo ?version }}
+                OPTIONAL {{ ?iri dc:created ?created }}
+                OPTIONAL {{ ?iri dc:modified ?updated }}
+            }}
         }} LIMIT 1
     """)
     return rows[0] if rows else None
@@ -113,7 +115,7 @@ async def create_ontology(request: Request, body: OntologyCreate) -> Ontology:
     # 중복 IRI 검사
     exists = await store.sparql_ask(f"""
         {_PREFIXES}
-        ASK {{ <{body.iri}> a owl:Ontology }}
+        ASK {{ GRAPH ?g {{ <{body.iri}> a owl:Ontology }} }}
     """)
     if exists:
         raise HTTPException(409, detail={"code": "ONTOLOGY_IRI_DUPLICATE", "message": f"IRI already exists: {body.iri}"})

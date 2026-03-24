@@ -60,7 +60,6 @@ export default function RelationsPage() {
   const activeQuery = tab === 'object' ? objectQuery : dataQuery
   const items = (activeQuery.data?.items ?? []).map((item) => {
     const op = item as ObjectProperty
-    const dp = item as DataProperty
     return {
       iri: item.iri,
       label: item.label,

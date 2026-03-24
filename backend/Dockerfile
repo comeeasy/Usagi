@@ -1,6 +1,6 @@
-FROM python:3.12-slim
+FROM --platform=linux/amd64 python:3.12-slim
 
-# Install Java runtime for owlready2 + HermiT reasoner
+# Install Java runtime (owlready2 + HermiT) and build tools (pyoxigraph Rust build)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     default-jre-headless \
     && rm -rf /var/lib/apt/lists/*

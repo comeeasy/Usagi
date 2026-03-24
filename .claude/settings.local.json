@@ -22,7 +22,20 @@
       "WebFetch(domain:telicent.io)",
       "Bash(mkdir -p /Users/joono/projects/backend/api /Users/joono/projects/backend/mcp /Users/joono/projects/backend/services/ingestion /Users/joono/projects/backend/models /Users/joono/projects/backend/workers /Users/joono/projects/backend/tests)",
       "Bash(mkdir -p /Users/joono/projects/frontend/src/pages/ontology /Users/joono/projects/frontend/src/components/layout /Users/joono/projects/frontend/src/components/graph /Users/joono/projects/frontend/src/components/entities /Users/joono/projects/frontend/src/components/relations /Users/joono/projects/frontend/src/components/provenance /Users/joono/projects/frontend/src/components/sparql /Users/joono/projects/frontend/src/components/reasoner /Users/joono/projects/frontend/src/components/sources /Users/joono/projects/frontend/src/components/shared /Users/joono/projects/frontend/src/hooks /Users/joono/projects/frontend/src/api /Users/joono/projects/frontend/src/types)",
-      "Bash(mkdir -p /Users/joono/projects/nginx)"
+      "Bash(mkdir -p /Users/joono/projects/nginx)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|json\\)$\")",
+      "Bash(find /Users/joono/projects -name docker-compose*.yml -o -name Dockerfile* -o -name nginx*.conf)",
+      "Bash(docker version:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker pull:*)",
+      "Bash(docker build:*)",
+      "Bash(docker run:*)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s http://localhost/api/v1/ontologies)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -v http://localhost/api/v1/ontologies)",
+      "Bash(curl -s -X POST http://localhost/api/v1/ontologies -H \"Content-Type: application/json\" -d '{\"\"iri\"\":\"\"https://example.org/test\"\",\"\"label\"\":\"\"Test Ontology\"\",\"\"description\"\":\"\"테스트\"\"}')"
     ]
   }
 }

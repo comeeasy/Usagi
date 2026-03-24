@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.kafka_producer = KafkaProducer(settings.kafka_brokers)
 
     # MCP 서비스 등록
-    from mcp.tools import init_services as _init_mcp_services
+    from app_mcp.tools import init_services as _init_mcp_services
     _init_mcp_services(
         app.state.ontology_store,
         app.state.graph_store,
@@ -90,9 +90,9 @@ app.include_router(merge.router, prefix=API_PREFIX)
 app.include_router(reasoner.router, prefix=API_PREFIX)
 app.include_router(sources.router, prefix=API_PREFIX)
 
-from mcp.tools import mcp
+from app_mcp.tools import mcp
 
-app.mount("/mcp", mcp.get_asgi_app())
+app.mount("/mcp", mcp.sse_app())
 
 
 @app.get("/health")

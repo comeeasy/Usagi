@@ -40,9 +40,9 @@ export default function EntitiesPage() {
     enabled: !!ontologyId && tab === 'individuals',
   })
 
-  const selectedEntityQuery = useQuery({
+  const selectedEntityQuery = useQuery<Concept | Individual>({
     queryKey: ['entity', ontologyId, selectedIri, tab],
-    queryFn: () => tab === 'concepts'
+    queryFn: (): Promise<Concept | Individual> => tab === 'concepts'
       ? getConcept(ontologyId!, selectedIri!)
       : getIndividual(ontologyId!, selectedIri!),
     enabled: !!ontologyId && !!selectedIri,
@@ -121,7 +121,7 @@ export default function EntitiesPage() {
             </div>
 
             <EntitySearchBar
-              onSearch={(q, kind, vector) => setSearchQuery(q)}
+              onSearch={(q) => setSearchQuery(q)}
             />
 
             {/* Create form */}

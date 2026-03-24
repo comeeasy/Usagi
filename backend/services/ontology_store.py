@@ -98,13 +98,15 @@ class OntologyStore:
         """
         def _exec():
             results = self._store.query(query)
+            # variables는 results에 있음; 변수명에서 앞의 '?' 제거
+            var_names = [str(v).lstrip("?") for v in results.variables]
             rows = []
             for solution in results:
                 row = {}
-                for var in solution.variables:
-                    term = solution[var]
+                for i, name in enumerate(var_names):
+                    term = solution[i]
                     if term is not None:
-                        row[str(var.value)] = _term_to_dict(term)
+                        row[name] = _term_to_dict(term)
                 rows.append(row)
             return rows
 
@@ -202,15 +204,19 @@ class OntologyStore:
 
         count_q = """
             PREFIX owl: <http://www.w3.org/2002/07/owl#>
-            SELECT (COUNT(?o) AS ?cnt) WHERE { ?o a owl:Ontology }
+            SELECT (COUNT(DISTINCT ?o) AS ?cnt) WHERE {
+                GRAPH ?g { ?o a owl:Ontology }
+            }
         """
         select_q = f"""
             PREFIX owl: <http://www.w3.org/2002/07/owl#>
             PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-            SELECT ?iri ?label ?version WHERE {{
-                ?iri a owl:Ontology .
-                OPTIONAL {{ ?iri rdfs:label ?label }}
-                OPTIONAL {{ ?iri owl:versionInfo ?version }}
+            SELECT DISTINCT ?iri ?label ?version WHERE {{
+                GRAPH ?g {{
+                    ?iri a owl:Ontology .
+                    OPTIONAL {{ ?iri rdfs:label ?label }}
+                    OPTIONAL {{ ?iri owl:versionInfo ?version }}
+                }}
             }}
             ORDER BY ?iri
             LIMIT {page_size} OFFSET {offset}

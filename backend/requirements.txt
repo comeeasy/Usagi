@@ -1,10 +1,10 @@
 # Web framework
-fastapi==0.115.0
+fastapi>=0.115.12
 uvicorn[standard]==0.30.6
 
 # Data validation & settings
-pydantic==2.8.2
-pydantic-settings==2.4.0
+pydantic>=2.8.2
+pydantic-settings>=2.5.2
 
 # RDF / Ontology
 pyoxigraph==0.4.0
