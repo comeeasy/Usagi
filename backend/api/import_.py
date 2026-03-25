@@ -30,6 +30,20 @@ def _fmt_from_filename(name: str) -> str:
     return "xml"
 
 
+async def _resolve_tbox(store, ontology_id: str) -> str | None:
+    """UUID(dc:identifier)로 온톨로지 IRI 조회 후 tbox IRI 반환. 없으면 None."""
+    rows = await store.sparql_select(f"""
+        PREFIX owl: <http://www.w3.org/2002/07/owl#>
+        PREFIX dc:  <http://purl.org/dc/terms/>
+        SELECT ?iri WHERE {{
+            GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }}
+        }} LIMIT 1
+    """)
+    if not rows:
+        return None
+    return f"{rows[0]['iri']['value']}/tbox"
+
+
 class ImportURLRequest(BaseModel):
     url: str
 
@@ -48,9 +62,12 @@ async def import_file(
 ) -> dict:
     """OWL/TTL/RDF/JSON-LD 파일 업로드 후 파싱해 TBox Named Graph에 삽입."""
     store = request.app.state.ontology_store
+    tbox_iri = await _resolve_tbox(store, ontology_id)
+    if tbox_iri is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
+
     content = await file.read()
     fmt = _fmt_from_filename(file.filename or "")
-    tbox_iri = f"{ontology_id}/tbox"
 
     try:
         triples = await import_svc.parse_file(content, fmt)
@@ -67,7 +84,9 @@ async def import_file(
 async def import_url(request: Request, ontology_id: str, body: ImportURLRequest) -> dict:
     """URL에서 온톨로지를 다운로드하여 TBox Named Graph에 삽입."""
     store = request.app.state.ontology_store
-    tbox_iri = f"{ontology_id}/tbox"
+    tbox_iri = await _resolve_tbox(store, ontology_id)
+    if tbox_iri is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     try:
         triples = await import_svc.parse_url(body.url)
@@ -84,7 +103,9 @@ async def import_url(request: Request, ontology_id: str, body: ImportURLRequest)
 async def import_standard(request: Request, ontology_id: str, body: ImportStandardRequest) -> dict:
     """사전 등록된 표준 온톨로지(schema.org, FOAF 등)를 TBox에 삽입."""
     store = request.app.state.ontology_store
-    tbox_iri = f"{ontology_id}/tbox"
+    tbox_iri = await _resolve_tbox(store, ontology_id)
+    if tbox_iri is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     try:
         triples = await import_svc.import_standard(body.name)

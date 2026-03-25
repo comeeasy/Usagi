@@ -483,12 +483,101 @@ $ python -m pytest --tb=short -q
 | BUG-010 | Individual 목록/검색 GRAPH 절 누락 | 🟠 High | `api/individuals.py`, `api/search.py` | 731e201 |
 | WARNING-001 | `export_turtle` deprecated API 경고 | 🟢 Low | `ontology_store.py` | b46e075 |
 
-### 미해결 항목
-
-| ID | 내용 | 비고 |
-|----|------|------|
-| Phase 5 | E2E 테스트 실제 실행 | Docker Compose 구동 후 실행 예정 |
+### E2E 테스트 과정에서 추가 발견된 버그 (2026-03-26)
 
 ---
 
-*테스트 완료 보고서 최종 업데이트: 2026-03-25*
+### [BUG-011] `services/graph_store.py` — `begin_transaction()` 코루틴 오용
+
+**발견 시점:** E2E 테스트 실행 중 500 에러
+**심각도:** 🔴 Critical
+**파일:** `backend/services/graph_store.py`
+
+**증상:**
+```
+TypeError: 'coroutine' object does not support the asynchronous context manager protocol
+```
+
+**원인:** `session.begin_transaction()`은 `async def`이므로 코루틴을 반환. `async with session.begin_transaction()` 형태로 직접 사용 불가.
+
+**수정:** `async with await session.begin_transaction() as tx:` (await 후 async with)
+
+---
+
+### [BUG-012] `frontend/src/api/ontologies.ts` — 백엔드 응답 필드명 불일치
+
+**발견 시점:** E2E 테스트 — 홈페이지 카드에 온톨로지 이름 미표시
+**심각도:** 🟠 High
+**파일:** `frontend/src/api/ontologies.ts`
+
+**증상:** 온톨로지 카드에 이름이 표시되지 않음 (빈 카드)
+
+**원인:** 백엔드는 `{label, iri}`를 반환하지만, 프론트엔드 타입은 `{name, base_iri}` 사용. `listOntologies`, `getOntology` 응답에 매핑 로직 없음.
+
+**수정:** `mapOntology()` 헬퍼 추가 — `label→name`, `iri→base_iri` 매핑
+
+---
+
+### [BUG-013] `frontend/src/api/relations.ts` — 존재하지 않는 엔드포인트 호출
+
+**발견 시점:** E2E 테스트 — Relations 탭 500 에러
+**심각도:** 🟠 High
+**파일:** `frontend/src/api/relations.ts`
+
+**증상:** Relations 페이지 로드 시 500 에러
+
+**원인:** `/properties/object`, `/properties/data` 엔드포인트 비존재. 백엔드는 `/properties?kind=object` 형태.
+
+**수정:** `kind` 쿼리파라미터 사용하도록 변경
+
+---
+
+### [BUG-014] `frontend/src/api/ontologies.ts` — `createOntology` 요청 필드명 불일치
+
+**발견 시점:** E2E 테스트 — 온톨로지 생성 422 에러
+**심각도:** 🔴 Critical
+**파일:** `frontend/src/api/ontologies.ts`
+
+**증상:** 온톨로지 생성 시 422 Validation Error
+
+**원인:** 프론트엔드가 `{name, base_iri}` 전송, 백엔드는 `{label, iri}` 기대
+
+**수정:** `createOntology`, `updateOntology`에서 요청 body 필드 매핑 추가
+
+---
+
+### [BUG-015] `backend/api/import_.py` — TBox IRI에 UUID 직접 사용
+
+**발견 시점:** E2E 테스트 — FOAF 임포트 후 Entities 페이지에서 클래스 미표시
+**심각도:** 🔴 Critical
+**파일:** `backend/api/import_.py`
+
+**증상:** FOAF 임포트 성공 → Entities 탭에서 `No entities found`
+
+**원인:** `tbox_iri = f"{ontology_id}/tbox"` 에서 `ontology_id`는 UUID (예: `abc-123`). 실제 TBox IRI는 `https://example.org/ont/tbox` 형태여야 함. 다른 API들은 `_resolve_tbox()`로 UUID→IRI 변환 후 사용하지만 import는 UUID를 직접 사용하여 엉뚱한 Named Graph에 저장.
+
+**수정:** `import_.py`에 `_resolve_tbox()` 헬퍼 추가, 모든 import 핸들러에서 사용
+
+---
+
+### [BUG-016] `frontend/src/pages/ontology/ImportPage.tsx` — 단일 `/import` 엔드포인트 호출
+
+**발견 시점:** E2E 테스트 — Import 탭에서 "Import Select Not Found" 에러
+**심각도:** 🔴 Critical
+**파일:** `frontend/src/pages/ontology/ImportPage.tsx`, `frontend/src/api/ontologies.ts`
+
+**증상:** 표준 온톨로지 임포트 시 에러 발생
+
+**원인:** 프론트엔드가 `/ontologies/{id}/import` 단일 엔드포인트 호출. 백엔드는 `/import/file`, `/import/url`, `/import/standard` 세 가지로 분리.
+
+**수정:** `importOntologyFile()`, `importOntologyUrl()`, `importOntologyStandard()` 각각 구현. `ImportPage.tsx` 각 모드에 맞는 함수 사용.
+
+---
+
+### 미해결 항목
+
+없음. 모든 E2E 시나리오 (11/11) 통과.
+
+---
+
+*디버그 로그 최종 업데이트: 2026-03-26 (E2E 11/11 통과)*

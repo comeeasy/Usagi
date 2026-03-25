@@ -4,15 +4,16 @@ import { Upload, Link, BookOpen, CheckCircle } from 'lucide-react'
 import OntologyTabs from '@/components/layout/OntologyTabs'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import { useMutation } from '@tanstack/react-query'
-import { importOntology } from '@/api/ontologies'
+import { importOntologyFile, importOntologyUrl, importOntologyStandard } from '@/api/ontologies'
 
 type ImportMode = 'file' | 'url' | 'standard'
 
+// backend keys: schema.org, foaf, dc, skos, owl, rdfs
 const STANDARD_ONTOLOGIES = [
-  { id: 'schema.org', label: 'Schema.org', url: 'https://schema.org/version/latest/schemaorg-current-https.jsonld', format: 'json-ld' },
-  { id: 'foaf', label: 'FOAF', url: 'http://xmlns.com/foaf/spec/index.rdf', format: 'rdf-xml' },
-  { id: 'dublin-core', label: 'Dublin Core Terms', url: 'https://www.dublincore.org/specifications/dublin-core/dcmi-terms/dublin_core_terms.rdf', format: 'rdf-xml' },
-  { id: 'skos', label: 'SKOS', url: 'https://www.w3.org/2009/08/skos-reference/skos.rdf', format: 'rdf-xml' },
+  { id: 'schema.org', label: 'Schema.org', description: 'https://schema.org/' },
+  { id: 'foaf', label: 'FOAF', description: 'http://xmlns.com/foaf/spec/' },
+  { id: 'dc', label: 'Dublin Core Terms', description: 'https://purl.org/dc/terms/' },
+  { id: 'skos', label: 'SKOS', description: 'https://www.w3.org/2004/02/skos/' },
 ]
 
 const FORMATS = ['turtle', 'rdf-xml', 'json-ld', 'n-triples', 'n-quads']
@@ -26,25 +27,24 @@ export default function ImportPage() {
   const [selectedStandard, setSelectedStandard] = useState<string | null>(null)
 
   const importMutation = useMutation({
-    mutationFn: (data: Parameters<typeof importOntology>[1]) => importOntology(ontologyId!, data),
+    mutationFn: (fn: () => Promise<{ message: string; triples_imported?: number }>) => fn(),
   })
 
   const handleFileImport = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!file) return
     const content = await file.text()
-    importMutation.mutate({ format, content, file_name: file.name })
+    importMutation.mutate(() => importOntologyFile(ontologyId!, { format, content, file_name: file.name }))
   }
 
   const handleUrlImport = (e: React.FormEvent) => {
     e.preventDefault()
-    importMutation.mutate({ format, url })
+    importMutation.mutate(() => importOntologyUrl(ontologyId!, url))
   }
 
   const handleStandardImport = () => {
-    const std = STANDARD_ONTOLOGIES.find((s) => s.id === selectedStandard)
-    if (!std) return
-    importMutation.mutate({ format: std.format, url: std.url })
+    if (!selectedStandard) return
+    importMutation.mutate(() => importOntologyStandard(ontologyId!, selectedStandard))
   }
 
   const inputStyle = {
@@ -203,7 +203,7 @@ export default function ImportPage() {
                 />
                 <div>
                   <p className="font-medium text-sm" style={{ color: 'var(--color-text-primary)' }}>{std.label}</p>
-                  <p className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>{std.url}</p>
+                  <p className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>{std.description}</p>
                 </div>
               </label>
             ))}

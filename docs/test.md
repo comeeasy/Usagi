@@ -600,3 +600,35 @@ $ python -m pytest --tb=short -q
 | BUG-009 | `api/properties.py`, `api/search.py` | `UUID/tbox` IRI 형식 오류 (dc:identifier lookup 없이 직접 UUID 사용) | `_resolve_tbox()` 헬퍼로 UUID→IRI 변환 후 TBox 경로 생성 |
 | BUG-010 | `api/individuals.py`, `api/search.py` | Individual SPARQL 쿼리에 `GRAPH ?g` 절 누락으로 조회 결과 0건 | 모든 Individual 쿼리에 `GRAPH ?g {}` 추가 |
 | WARNING-001 | `services/ontology_store.py` | `RdfFormat` 미임포트로 Turtle 직렬화 실패 | `pyoxigraph.RdfFormat` 임포트 + `dump()` API 수정 |
+| BUG-011 | `services/graph_store.py` | `session.begin_transaction()` 코루틴을 `async with` 직접 사용 → TypeError | `async with await session.begin_transaction() as tx:` 로 수정 |
+| BUG-012 | `frontend/src/api/ontologies.ts` | `listOntologies`/`getOntology` 응답에서 `label`→`name`, `iri`→`base_iri` 매핑 누락 | `mapOntology()` 헬퍼 추가 |
+| BUG-013 | `frontend/src/api/relations.ts` | `/properties/object`, `/properties/data` 非存在 엔드포인트 호출 | `/properties?kind=object`, `/properties?kind=data` 로 수정 |
+| BUG-014 | `frontend/src/api/ontologies.ts` | `createOntology` 요청 시 `name`/`base_iri` 전송 (백엔드는 `label`/`iri` 기대) | 요청 body 필드 매핑 추가 |
+| BUG-015 | `backend/api/import_.py` | `tbox_iri = f"{ontology_id}/tbox"` — UUID를 IRI로 사용해 잘못된 Named Graph에 저장 | `_resolve_tbox()` 헬퍼로 올바른 IRI 기반 TBox 경로 사용 |
+| BUG-016 | `frontend/src/pages/ontology/ImportPage.tsx` | 단일 `/import` 엔드포인트 호출 (존재하지 않음) | `/import/standard`, `/import/url`, `/import/file` 각각으로 분리 |
+
+### 11.6 E2E 테스트 최종 결과 (2026-03-26)
+
+Docker Compose 전체 스택(`backend + frontend + neo4j + kafka`) 구동 후 실행.
+
+```
+$ cd frontend && CI=true E2E_BASE_URL=http://localhost npx playwright test e2e/
+
+Running 11 tests using 1 worker
+
+[1/11]  시나리오 1 › 1-1. 홈에서 새 온톨로지 생성 UI 확인        ✅
+[2/11]  시나리오 1 › 1-2. Entities 탭에서 Concept(Person) 추가    ✅
+[3/11]  시나리오 1 › 1-3. Individuals 탭에서 Individual(Alice) 추가 ✅
+[4/11]  시나리오 1 › 1-4. SPARQL 탭에서 Individual 조회           ✅
+[5/11]  시나리오 2 › 2-1. Import 탭에서 FOAF 표준 온톨로지 Import  ✅
+[6/11]  시나리오 2 › 2-2. Entities 탭에서 foaf:Person 확인         ✅
+[7/11]  시나리오 2 › 2-3. 검색으로 필터링                          ✅
+[8/11]  시나리오 3 › 3-1. Reasoner 탭 접근 및 실행                 ✅
+[9/11]  시나리오 3 › 3-2. 불일치 violations 표시 확인              ✅
+[10/11] 시나리오 4 › 4-1. Relations 탭에서 Object Property 생성    ✅
+[11/11] 시나리오 4 › 4-2. Graph 탭에서 노드 렌더링 확인            ✅
+
+11 passed (10.7s)
+```
+
+**결과: 11/11 전부 통과** ✅
