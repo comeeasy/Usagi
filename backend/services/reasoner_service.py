@@ -7,6 +7,7 @@ services/reasoner_service.py — owlready2 + HermiT OWL 2 추론 서비스
   3. sync_reasoner_hermit(infer_property_values=True, infer_data_property_values=True)
   4. 추론 결과(inferred triples) → Oxigraph inferred Named Graph에 저장
   5. 위반/추론 사실 → ReasonerResult 직렬화
+  6. SPARQL 기반 위반 검출 (CardinalityViolation, DomainRangeViolation)
 
 전제 조건: JVM 설치 필요 (Dockerfile에서 default-jre-headless 설치)
 """
@@ -103,6 +104,18 @@ class ReasonerService:
                     await self._store.insert_triples(
                         f"{ontology_id}/inferred", triples
                     )
+
+            # SPARQL 기반 추가 위반 검출 (owlready2 불필요)
+            cardinality_violations = await self._detect_cardinality_violations(tbox_iri)
+            domain_range_violations = await self._detect_domain_range_violations(tbox_iri)
+            extra = cardinality_violations + domain_range_violations
+
+            if extra:
+                all_violations = result.violations + extra
+                consistent = result.consistent and not extra
+                result = result.model_copy(
+                    update={"violations": all_violations, "consistent": consistent}
+                )
 
             self._job_store[job_id].update(
                 {
@@ -217,6 +230,150 @@ class ReasonerService:
             inferred_axioms=inferred_axioms,
             execution_ms=execution_ms,
         )
+
+    # ── SPARQL 기반 위반 검출 ──────────────────────────────────────────────────
+
+    _SPARQL_PREFIX = """
+PREFIX owl:  <http://www.w3.org/2002/07/owl#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+"""
+
+    async def _detect_cardinality_violations(
+        self, tbox_iri: str
+    ) -> list[ReasonerViolation]:
+        """owl:maxCardinality / owl:exactCardinality 위반 검출 (SPARQL)."""
+        violations: list[ReasonerViolation] = []
+
+        # 1) TBox에서 카디널리티 제약 수집
+        restriction_rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
+SELECT DISTINCT ?cls ?prop ?n ?rtype WHERE {{
+    GRAPH <{tbox_iri}> {{
+        ?cls rdfs:subClassOf ?restr .
+        ?restr a owl:Restriction ; owl:onProperty ?prop .
+        {{
+            ?restr owl:maxCardinality ?n .
+            BIND("max" AS ?rtype)
+        }}
+        UNION
+        {{
+            ?restr owl:exactCardinality ?n .
+            BIND("exact" AS ?rtype)
+        }}
+    }}
+}}""")
+
+        for r in restriction_rows:
+            cls_iri = r["cls"]["value"]
+            prop_iri = r["prop"]["value"]
+            rtype = r["rtype"]["value"]
+            try:
+                max_n = int(r["n"]["value"])
+            except (ValueError, KeyError):
+                continue
+
+            # 2) 해당 클래스의 개체별 프로퍼티 값 수 집계
+            count_rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
+SELECT ?ind (COUNT(DISTINCT ?val) AS ?cnt) WHERE {{
+    GRAPH <{tbox_iri}> {{
+        ?ind a <{cls_iri}> ; <{prop_iri}> ?val .
+    }}
+}}
+GROUP BY ?ind""")
+
+            for row in count_rows:
+                try:
+                    count = int(row["cnt"]["value"])
+                    ind_iri = row["ind"]["value"]
+                except (ValueError, KeyError):
+                    continue
+
+                if rtype == "max" and count > max_n:
+                    violations.append(
+                        ReasonerViolation(
+                            type="CardinalityViolation",
+                            subject_iri=ind_iri,
+                            description=(
+                                f"<{ind_iri}>: <{prop_iri}> has {count} values "
+                                f"(maxCardinality={max_n})"
+                            ),
+                        )
+                    )
+                elif rtype == "exact" and count != max_n:
+                    violations.append(
+                        ReasonerViolation(
+                            type="CardinalityViolation",
+                            subject_iri=ind_iri,
+                            description=(
+                                f"<{ind_iri}>: <{prop_iri}> has {count} values "
+                                f"(exactCardinality={max_n})"
+                            ),
+                        )
+                    )
+
+        return violations
+
+    async def _detect_domain_range_violations(
+        self, tbox_iri: str
+    ) -> list[ReasonerViolation]:
+        """rdfs:domain / rdfs:range 위반 검출 (SPARQL)."""
+        violations: list[ReasonerViolation] = []
+
+        # Domain 위반: 프로퍼티 주어가 선언된 domain 클래스에 속하지 않음
+        domain_rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
+SELECT DISTINCT ?ind ?prop ?domain WHERE {{
+    GRAPH <{tbox_iri}> {{
+        ?prop rdfs:domain ?domain .
+        ?ind ?prop ?val .
+        FILTER(isIRI(?ind))
+        FILTER NOT EXISTS {{
+            ?ind a ?t .
+            ?t rdfs:subClassOf* ?domain .
+        }}
+        FILTER NOT EXISTS {{ ?ind a ?domain }}
+    }}
+}}""")
+
+        for r in domain_rows:
+            violations.append(
+                ReasonerViolation(
+                    type="DomainRangeViolation",
+                    subject_iri=r["ind"]["value"],
+                    description=(
+                        f"<{r['ind']['value']}>: uses <{r['prop']['value']}> "
+                        f"but is not in domain <{r['domain']['value']}>"
+                    ),
+                )
+            )
+
+        # Range 위반: 객체 프로퍼티의 목적어가 선언된 range 클래스에 속하지 않음
+        range_rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
+SELECT DISTINCT ?ind ?prop ?range ?val WHERE {{
+    GRAPH <{tbox_iri}> {{
+        ?prop rdfs:range ?range .
+        ?ind ?prop ?val .
+        FILTER(isIRI(?val))
+        FILTER NOT EXISTS {{
+            ?val a ?t .
+            ?t rdfs:subClassOf* ?range .
+        }}
+        FILTER NOT EXISTS {{ ?val a ?range }}
+    }}
+}}""")
+
+        for r in range_rows:
+            violations.append(
+                ReasonerViolation(
+                    type="DomainRangeViolation",
+                    subject_iri=r["ind"]["value"],
+                    description=(
+                        f"<{r['ind']['value']}>: <{r['prop']['value']}> "
+                        f"value <{r['val']['value']}> not in range <{r['range']['value']}>"
+                    ),
+                )
+            )
+
+        return violations
 
     async def get_result(self, job_id: str) -> dict:
         """추론 Job 상태 및 결과 조회."""
