@@ -639,22 +639,27 @@ MSW로 `/merge/preview`, `/merge` 엔드포인트 Mock.
 
 ---
 
-### 12.6 실행 목표
+### 12.6 실행 목표 → **완료**
 
-| 구분 | 현재 | 목표 |
+| 구분 | 이전 | 결과 |
 |------|------|------|
-| 백엔드 | 103 passed | **117+ passed** (test_merge 14건 + test_concepts 7건 추가) |
-| 프론트엔드 | 40/42 passed | **54+ passed** (실패 2건 수정 + 신규 14건 추가) |
+| 백엔드 | 103 passed | **124 passed** ✅ |
+| 프론트엔드 | 40/42 passed | **72 passed** ✅ |
 
-### 12.7 실행 순서
+### 12.7 실행 결과 (2026-03-26 완료)
 
-```
-1. backend/tests/test_merge.py 작성 → pytest 통과 확인
-2. backend/tests/test_concepts.py 고급 필드 케이스 추가 → pytest 통과 확인
-3. frontend RelationsPage 실패 원인 분석 → 수정
-4. frontend ConceptForm.test.tsx 작성 → vitest 통과 확인
-5. frontend MergePage.test.tsx 작성 → vitest 통과 확인
-```
+| 단계 | 파일 | 결과 |
+|------|------|------|
+| 1 | `backend/tests/test_merge.py` (신규 14건) | ✅ 14/14 |
+| 2 | `backend/tests/test_concepts.py` (추가 7건) | ✅ 22/22 (전체) |
+| 3 | `frontend` RelationsPage MSW 핸들러 수정 | ✅ 7/7 |
+| 4 | `frontend/src/components/entities/__tests__/ConceptForm.test.tsx` (신규 16건) | ✅ 16/16 |
+| 5 | `frontend/src/pages/ontology/__tests__/MergePage.test.tsx` (신규 14건) | ✅ 14/14 |
+
+**수정 사항 포함:**
+- `api/merge.py`: UUID → 온톨로지 IRI 해석 (`dc:` prefix `purl.org/dc/terms/` 수정)
+- `backend/tests/conftest.py`: `MergeService` 테스트 앱 state 추가
+- `frontend/src/tests/mocks/handlers.ts`: merge/preview, merge MSW 핸들러 추가
 
 ---
 
