@@ -174,8 +174,25 @@ SELECT DISTINCT ?iri ?label ?kind WHERE {{
 @router.post("/vector")
 async def vector_search(request: Request, ontology_id: str, body: VectorSearchRequest) -> list[dict]:
     """
-    임베딩 기반 유사 Entity 검색.
-    벡터 DB 미구축 시 키워드 검색으로 폴백.
+    fastembed 기반 코사인 유사도 검색.
+    인덱스 미구축 또는 빈 온톨로지 시 키워드 검색으로 폴백.
     """
-    # 벡터 DB 미구현 → 키워드 폴백
+    store = request.app.state.ontology_store
+    manager = getattr(request.app.state, "vector_index_manager", None)
+
+    tbox = await _resolve_tbox(store, ontology_id)
+    if tbox is None:
+        return []
+
+    ontology_iri = tbox[: -len("/tbox")]
+
+    if manager is not None:
+        try:
+            results = await manager.search(ontology_iri, body.text, body.k, store)
+            if results:
+                return results
+        except Exception:
+            pass  # 임베딩 모델 로드 실패 등 → 폴백
+
+    # 폴백: 키워드 검색
     return await search_entities(request, ontology_id, q=body.text, kind="all", limit=body.k)
