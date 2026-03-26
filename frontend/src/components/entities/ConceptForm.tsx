@@ -1,11 +1,26 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
+import type { PropertyRestriction, RestrictionType } from '@/types/concept'
+
+const RESTRICTION_TYPES: { value: RestrictionType; label: string }[] = [
+  { value: 'someValuesFrom', label: 'some (∃)' },
+  { value: 'allValuesFrom', label: 'only (∀)' },
+  { value: 'hasValue', label: 'value (=)' },
+  { value: 'minCardinality', label: 'min' },
+  { value: 'maxCardinality', label: 'max' },
+  { value: 'exactCardinality', label: 'exactly' },
+]
+
+const CARDINALITY_TYPES: RestrictionType[] = ['minCardinality', 'maxCardinality', 'exactCardinality']
 
 interface ConceptFormValues {
   iri: string
   label: string
   comment: string
-  parentIris: string[]
+  superClasses: string[]
+  equivalentClasses: string[]
+  disjointWith: string[]
+  restrictions: PropertyRestriction[]
 }
 
 interface ConceptFormProps {
@@ -13,11 +28,206 @@ interface ConceptFormProps {
     iri?: string
     label?: string
     comment?: string
-    parentIris?: string[]
+    superClasses?: string[]
+    equivalentClasses?: string[]
+    disjointWith?: string[]
+    restrictions?: PropertyRestriction[]
   }
   onSubmit?: (values: ConceptFormValues) => void
   onCancel?: () => void
   mode?: 'create' | 'edit'
+}
+
+function IRIListInput({
+  label,
+  values,
+  onChange,
+  placeholder,
+}: {
+  label: string
+  values: string[]
+  onChange: (vals: string[]) => void
+  placeholder: string
+}) {
+  const [draft, setDraft] = useState('')
+  const inputStyle = {
+    backgroundColor: 'var(--color-bg-elevated)',
+    borderColor: 'var(--color-border)',
+    color: 'var(--color-text-primary)',
+  }
+  const add = () => {
+    const v = draft.trim()
+    if (v && !values.includes(v)) { onChange([...values, v]); setDraft('') }
+  }
+  return (
+    <div>
+      <label className="block text-xs mb-1 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+        {label}
+      </label>
+      <div className="flex gap-1 flex-wrap mb-1.5">
+        {values.map((v) => (
+          <span
+            key={v}
+            className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-mono"
+            style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', color: 'var(--color-info)' }}
+          >
+            {v}
+            <button type="button" onClick={() => onChange(values.filter((x) => x !== v))} className="hover:opacity-80">
+              <X size={10} />
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-1">
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
+          placeholder={placeholder}
+          className="flex-1 px-3 py-1.5 rounded border text-sm focus:outline-none font-mono"
+          style={inputStyle}
+        />
+        <button
+          type="button"
+          onClick={add}
+          className="px-2 py-1.5 rounded border text-sm hover:opacity-80"
+          style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function RestrictionEditor({
+  restrictions,
+  onChange,
+}: {
+  restrictions: PropertyRestriction[]
+  onChange: (r: PropertyRestriction[]) => void
+}) {
+  const [propIri, setPropIri] = useState('')
+  const [rtype, setRtype] = useState<RestrictionType>('someValuesFrom')
+  const [value, setValue] = useState('')
+  const [cardinality, setCardinality] = useState('1')
+
+  const inputStyle = {
+    backgroundColor: 'var(--color-bg-elevated)',
+    borderColor: 'var(--color-border)',
+    color: 'var(--color-text-primary)',
+  }
+
+  const addRestriction = () => {
+    if (!propIri.trim()) return
+    const r: PropertyRestriction = {
+      property_iri: propIri.trim(),
+      type: rtype,
+      value: value.trim(),
+      ...(CARDINALITY_TYPES.includes(rtype) ? { cardinality: parseInt(cardinality) || 1 } : {}),
+    }
+    onChange([...restrictions, r])
+    setPropIri('')
+    setValue('')
+  }
+
+  const needsCardinality = CARDINALITY_TYPES.includes(rtype)
+
+  return (
+    <div>
+      <label className="block text-xs mb-1 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+        Restrictions
+      </label>
+
+      {/* Existing */}
+      {restrictions.length > 0 && (
+        <div className="flex flex-col gap-1 mb-2">
+          {restrictions.map((r, i) => (
+            <div
+              key={i}
+              className="flex items-center justify-between text-xs p-2 rounded"
+              style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)' }}
+            >
+              <span style={{ color: 'var(--color-text-secondary)' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>{r.type}</span>
+                {' '}<span className="font-mono" style={{ color: 'var(--color-info)' }}>{r.property_iri.split('#').pop() ?? r.property_iri}</span>
+                {r.value && <> → <span className="font-mono">{r.value.split('#').pop() ?? r.value}</span></>}
+                {r.cardinality !== undefined && <span> ({r.cardinality})</span>}
+              </span>
+              <button
+                type="button"
+                onClick={() => onChange(restrictions.filter((_, j) => j !== i))}
+                className="hover:opacity-80 ml-2"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add new */}
+      <div
+        className="p-3 rounded border"
+        style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}
+      >
+        <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>Add restriction</p>
+        <div className="flex gap-1 mb-1.5">
+          <select
+            value={rtype}
+            onChange={(e) => setRtype(e.target.value as RestrictionType)}
+            className="px-2 py-1.5 rounded border text-xs"
+            style={inputStyle}
+          >
+            {RESTRICTION_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
+          {needsCardinality && (
+            <input
+              type="number"
+              value={cardinality}
+              onChange={(e) => setCardinality(e.target.value)}
+              min={0}
+              className="w-16 px-2 py-1.5 rounded border text-xs"
+              style={inputStyle}
+            />
+          )}
+        </div>
+        <div className="flex gap-1 mb-1.5">
+          <input
+            type="text"
+            value={propIri}
+            onChange={(e) => setPropIri(e.target.value)}
+            placeholder="Property IRI"
+            className="flex-1 px-2 py-1.5 rounded border text-xs font-mono focus:outline-none"
+            style={inputStyle}
+          />
+        </div>
+        <div className="flex gap-1">
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Filler IRI or value"
+            className="flex-1 px-2 py-1.5 rounded border text-xs font-mono focus:outline-none"
+            style={inputStyle}
+          />
+          <button
+            type="button"
+            onClick={addRestriction}
+            disabled={!propIri.trim()}
+            className="px-2 py-1.5 rounded border text-xs hover:opacity-80 disabled:opacity-40"
+            style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+          >
+            <Plus size={13} />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function ConceptForm({
@@ -29,23 +239,14 @@ export default function ConceptForm({
   const [iri, setIri] = useState(initialValues?.iri ?? '')
   const [label, setLabel] = useState(initialValues?.label ?? '')
   const [comment, setComment] = useState(initialValues?.comment ?? '')
-  const [parentIris, setParentIris] = useState<string[]>(initialValues?.parentIris ?? [])
-  const [newParent, setNewParent] = useState('')
-
-  const addParent = () => {
-    if (newParent.trim() && !parentIris.includes(newParent.trim())) {
-      setParentIris([...parentIris, newParent.trim()])
-      setNewParent('')
-    }
-  }
-
-  const removeParent = (p: string) => {
-    setParentIris(parentIris.filter((x) => x !== p))
-  }
+  const [superClasses, setSuperClasses] = useState<string[]>(initialValues?.superClasses ?? [])
+  const [equivalentClasses, setEquivalentClasses] = useState<string[]>(initialValues?.equivalentClasses ?? [])
+  const [disjointWith, setDisjointWith] = useState<string[]>(initialValues?.disjointWith ?? [])
+  const [restrictions, setRestrictions] = useState<PropertyRestriction[]>(initialValues?.restrictions ?? [])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSubmit?.({ iri, label, comment, parentIris })
+    onSubmit?.({ iri, label, comment, superClasses, equivalentClasses, disjointWith, restrictions })
   }
 
   const inputStyle = {
@@ -96,58 +297,34 @@ export default function ConceptForm({
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           placeholder="Description of this class"
-          rows={3}
+          rows={2}
           className="w-full px-3 py-1.5 rounded border text-sm focus:outline-none resize-none"
           style={inputStyle}
         />
       </div>
 
-      <div>
-        <label className="block text-xs mb-1 font-medium" style={labelStyle}>
-          Parent Classes
-        </label>
-        <div className="flex gap-1 flex-wrap mb-2">
-          {parentIris.map((p) => (
-            <span
-              key={p}
-              className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-mono"
-              style={{
-                backgroundColor: 'var(--color-bg-elevated)',
-                border: '1px solid var(--color-border)',
-                color: 'var(--color-info)',
-              }}
-            >
-              {p}
-              <button type="button" onClick={() => removeParent(p)} className="hover:opacity-80">
-                <X size={10} />
-              </button>
-            </span>
-          ))}
-        </div>
-        <div className="flex gap-1">
-          <input
-            type="text"
-            value={newParent}
-            onChange={(e) => setNewParent(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addParent())}
-            placeholder="https://example.org/ParentClass"
-            className="flex-1 px-3 py-1.5 rounded border text-sm focus:outline-none font-mono"
-            style={inputStyle}
-          />
-          <button
-            type="button"
-            onClick={addParent}
-            className="px-2 py-1.5 rounded border text-sm flex items-center gap-1 hover:opacity-80"
-            style={{
-              backgroundColor: 'var(--color-bg-elevated)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-secondary)',
-            }}
-          >
-            <Plus size={14} />
-          </button>
-        </div>
-      </div>
+      <IRIListInput
+        label="Parent Classes (rdfs:subClassOf)"
+        values={superClasses}
+        onChange={setSuperClasses}
+        placeholder="https://example.org/ParentClass"
+      />
+
+      <IRIListInput
+        label="Equivalent Classes (owl:equivalentClass)"
+        values={equivalentClasses}
+        onChange={setEquivalentClasses}
+        placeholder="https://example.org/EquivalentClass"
+      />
+
+      <IRIListInput
+        label="Disjoint With (owl:disjointWith)"
+        values={disjointWith}
+        onChange={setDisjointWith}
+        placeholder="https://example.org/DisjointClass"
+      />
+
+      <RestrictionEditor restrictions={restrictions} onChange={setRestrictions} />
 
       <div className="flex gap-2 pt-2">
         <button

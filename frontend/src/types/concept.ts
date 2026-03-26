@@ -1,8 +1,16 @@
+export type RestrictionType =
+  | 'someValuesFrom'
+  | 'allValuesFrom'
+  | 'hasValue'
+  | 'minCardinality'
+  | 'maxCardinality'
+  | 'exactCardinality'
+
 export interface PropertyRestriction {
   property_iri: string
-  restriction_type: 'some' | 'all' | 'exactly' | 'min' | 'max'
+  type: RestrictionType
+  value: string        // 클래스 IRI 또는 리터럴
   cardinality?: number
-  filler_iri?: string
 }
 
 export interface Concept {
@@ -10,7 +18,9 @@ export interface Concept {
   label?: string
   comment?: string
   ontology_id: string
-  parent_iris: string[]
+  super_classes: string[]
+  equivalent_classes: string[]
+  disjoint_with: string[]
   restrictions: PropertyRestriction[]
   is_deprecated: boolean
 }
@@ -19,14 +29,18 @@ export interface ConceptCreate {
   iri: string
   label?: string
   comment?: string
-  parent_iris?: string[]
+  super_classes?: string[]
+  equivalent_classes?: string[]
+  disjoint_with?: string[]
   restrictions?: PropertyRestriction[]
 }
 
 export interface ConceptUpdate {
   label?: string
   comment?: string
-  parent_iris?: string[]
+  super_classes?: string[]
+  equivalent_classes?: string[]
+  disjoint_with?: string[]
   restrictions?: PropertyRestriction[]
   is_deprecated?: boolean
 }

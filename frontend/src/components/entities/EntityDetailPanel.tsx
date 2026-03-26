@@ -13,7 +13,7 @@ interface EntityDetailPanelProps {
 }
 
 function isConcept(e: Concept | Individual): e is Concept {
-  return 'parent_iris' in e
+  return 'super_classes' in e
 }
 
 export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: EntityDetailPanelProps) {
@@ -108,14 +108,38 @@ export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: Enti
                 {/* Concept-specific */}
                 {isConcept(entity) && (
                   <>
-                    {entity.parent_iris.length > 0 && (
+                    {entity.super_classes.length > 0 && (
                       <div>
                         <label className="text-xs block mb-1" style={{ color: 'var(--color-text-muted)' }}>
                           Parent Classes
                         </label>
                         <div className="flex flex-wrap gap-1">
-                          {entity.parent_iris.map((p) => (
+                          {entity.super_classes.map((p) => (
                             <IRIBadge key={p} iri={p} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {entity.equivalent_classes.length > 0 && (
+                      <div>
+                        <label className="text-xs block mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                          Equivalent Classes
+                        </label>
+                        <div className="flex flex-wrap gap-1">
+                          {entity.equivalent_classes.map((c) => (
+                            <IRIBadge key={c} iri={c} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {entity.disjoint_with.length > 0 && (
+                      <div>
+                        <label className="text-xs block mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                          Disjoint With
+                        </label>
+                        <div className="flex flex-wrap gap-1">
+                          {entity.disjoint_with.map((c) => (
+                            <IRIBadge key={c} iri={c} />
                           ))}
                         </div>
                       </div>
@@ -145,9 +169,10 @@ export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: Enti
                                 color: 'var(--color-text-secondary)',
                               }}
                             >
-                              <span style={{ color: 'var(--color-text-muted)' }}>{r.restriction_type} </span>
+                              <span style={{ color: 'var(--color-text-muted)' }}>{r.type} </span>
                               <IRIBadge iri={r.property_iri} />
-                              {r.filler_iri && <> → <IRIBadge iri={r.filler_iri} /></>}
+                              {r.value && <> → <span className="font-mono">{r.value}</span></>}
+                              {r.cardinality !== undefined && <span> ({r.cardinality})</span>}
                             </div>
                           ))}
                         </div>

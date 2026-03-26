@@ -155,7 +155,15 @@ export default function EntitiesPage() {
                 {tab === 'concepts' ? (
                   <ConceptForm
                     mode="create"
-                    onSubmit={(v) => createConceptMutation.mutate(v as Parameters<typeof createConcept>[1])}
+                    onSubmit={(v) => createConceptMutation.mutate({
+                      iri: v.iri,
+                      label: v.label,
+                      comment: v.comment,
+                      super_classes: v.superClasses,
+                      equivalent_classes: v.equivalentClasses,
+                      disjoint_with: v.disjointWith,
+                      restrictions: v.restrictions,
+                    })}
                     onCancel={() => setShowCreateForm(false)}
                   />
                 ) : (
@@ -247,11 +255,21 @@ export default function EntitiesPage() {
                       iri: editingEntity.iri,
                       label: editingEntity.label,
                       comment: (editingEntity as Concept).comment,
-                      parentIris: (editingEntity as Concept).parent_iris,
+                      superClasses: (editingEntity as Concept).super_classes,
+                      equivalentClasses: (editingEntity as Concept).equivalent_classes,
+                      disjointWith: (editingEntity as Concept).disjoint_with,
+                      restrictions: (editingEntity as Concept).restrictions,
                     }}
                     onSubmit={(v) => updateConceptMutation.mutate({
                       iri: editingEntity.iri,
-                      data: { label: v.label, comment: v.comment, parent_iris: v.parentIris },
+                      data: {
+                        label: v.label,
+                        comment: v.comment,
+                        super_classes: v.superClasses,
+                        equivalent_classes: v.equivalentClasses,
+                        disjoint_with: v.disjointWith,
+                        restrictions: v.restrictions,
+                      },
                     })}
                     onCancel={() => setEditingEntity(null)}
                   />
