@@ -21,6 +21,7 @@ from httpx import AsyncClient, ASGITransport
 from services.ontology_store import OntologyStore
 from services.graph_store import GraphStore
 from services.reasoner_service import ReasonerService
+from services.merge_service import MergeService
 from services.ingestion.kafka_producer import KafkaProducer
 
 
@@ -72,6 +73,7 @@ def app(ontology_store, mock_graph_store, mock_kafka_producer):
     test_app.state.ontology_store = ontology_store
     test_app.state.graph_store = mock_graph_store
     test_app.state.reasoner_service = ReasonerService(ontology_store)
+    test_app.state.merge_service = MergeService(ontology_store)
     test_app.state.kafka_producer = mock_kafka_producer
 
     from api import ontologies, concepts, individuals, properties, search, subgraph
