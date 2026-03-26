@@ -14,6 +14,7 @@ from config import settings
 from services.ontology_store import OntologyStore
 from services.graph_store import GraphStore
 from services.reasoner_service import ReasonerService
+from services.merge_service import MergeService
 from services.ingestion.kafka_producer import KafkaProducer
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password
     )
     app.state.reasoner_service = ReasonerService(app.state.ontology_store)
+    app.state.merge_service = MergeService(app.state.ontology_store)
     app.state.kafka_producer = KafkaProducer(settings.kafka_brokers)
 
     # MCP 서비스 등록
