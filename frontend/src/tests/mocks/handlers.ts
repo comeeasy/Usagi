@@ -75,21 +75,27 @@ export const handlers = [
     HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
   ),
 
-  // Properties (Relations)
-  http.get(`${BASE}/ontologies/:id/properties/object`, () =>
-    HttpResponse.json({ items: [mockObjectProperty], total: 1, page: 1, page_size: 20 }),
-  ),
-  http.get(`${BASE}/ontologies/:id/properties/data`, () =>
-    HttpResponse.json({ items: [mockDataProperty], total: 1, page: 1, page_size: 20 }),
-  ),
-  http.post(`${BASE}/ontologies/:id/properties/object`, async ({ request }) => {
+  // Properties (Relations) — GET /properties?kind=object|data
+  http.get(`${BASE}/ontologies/:id/properties`, ({ request }) => {
+    const url = new URL(request.url)
+    const kind = url.searchParams.get('kind')
+    if (kind === 'data') {
+      return HttpResponse.json({ items: [mockDataProperty], total: 1, page: 1, page_size: 20 })
+    }
+    return HttpResponse.json({ items: [mockObjectProperty], total: 1, page: 1, page_size: 20 })
+  }),
+  http.post(`${BASE}/ontologies/:id/properties`, async ({ request }) => {
     const body = await request.json() as Record<string, unknown>
     return HttpResponse.json({ ...mockObjectProperty, ...body }, { status: 201 })
   }),
-  http.post(`${BASE}/ontologies/:id/properties/data`, async ({ request }) => {
-    const body = await request.json() as Record<string, unknown>
-    return HttpResponse.json({ ...mockDataProperty, ...body }, { status: 201 })
-  }),
+
+  // Merge
+  http.post(`${BASE}/ontologies/:id/merge/preview`, () =>
+    HttpResponse.json({ conflicts: [], conflict_count: 0, auto_mergeable_count: 3 }),
+  ),
+  http.post(`${BASE}/ontologies/:id/merge`, () =>
+    HttpResponse.json({ merged: true, triple_count: 12 }),
+  ),
 
   // SPARQL
   http.post(`${BASE}/ontologies/:id/sparql`, async ({ request }) => {
