@@ -519,6 +519,145 @@ npx playwright test --headed
 
 ---
 
+## 12. 신규 구현 테스트 계획 (2026-03-26)
+
+### 12.0 현재 기준선
+
+| 구분 | 결과 |
+|------|------|
+| 백엔드 pytest | **103 / 103 통과** |
+| 프론트엔드 Vitest | **40 / 42 통과** (RelationsPage 2건 실패) |
+
+이번 사이클에서 구현한 항목:
+
+| # | 항목 | 관련 파일 |
+|---|------|----------|
+| 1 | MergePage 충돌 해결 UI | `MergePage.tsx`, `api/ontologies.ts` |
+| 2 | ConceptForm 고급 필드 (equivalentClass, disjointWith, restrictions) | `ConceptForm.tsx`, `types/concept.ts`, `EntityDetailPanel.tsx`, `EntitiesPage.tsx` |
+| 3 | MergeService 서비스 레이어 분리 | `services/merge_service.py`, `api/merge.py`, `main.py` |
+
+---
+
+### 12.1 백엔드 — `test_merge.py` (신규)
+
+**대상:** `services/merge_service.py` + `api/merge.py`
+
+#### MergeService 단위 테스트
+
+| 테스트 케이스 | 검증 항목 |
+|--------------|----------|
+| `test_detect_conflicts_no_conflict` | 중복 IRI 없는 두 온톨로지 → `conflicts=[]`, `auto_mergeable_count>0` |
+| `test_detect_conflicts_label_conflict` | 동일 IRI에 다른 label → `conflict_type="label"`, target/source 값 모두 포함 |
+| `test_detect_conflicts_domain_conflict` | 동일 Property IRI에 다른 domain → `conflict_type="domain"` |
+| `test_detect_conflicts_range_conflict` | 동일 Property IRI에 다른 range → `conflict_type="range"` |
+| `test_merge_no_resolutions` | resolutions=[] → 소스 트리플이 타겟에 추가됨 |
+| `test_merge_keep_target` | `choice="keep-target"` → 타겟 값 유지, 소스 값 무시 |
+| `test_merge_keep_source` | `choice="keep-source"` → 소스 값으로 교체 |
+| `test_merge_both` | `choice="merge-both"` → 타겟 + 소스 값 모두 존재 |
+| `test_compare_literal_lists_equal` | 동일 집합 → `False` (다르지 않음) |
+| `test_compare_literal_lists_different` | 다른 집합 → `True` |
+
+#### API 엔드포인트 통합 테스트
+
+| 테스트 케이스 | 검증 항목 |
+|--------------|----------|
+| `test_api_merge_preview_no_conflict` | POST `/merge/preview` → 200, `conflicts=[]` |
+| `test_api_merge_preview_with_conflict` | POST `/merge/preview` → 충돌 포함 응답 |
+| `test_api_merge_execute` | POST `/merge` → 200, `merged=true`, `triple_count>0` |
+| `test_api_merge_execute_with_resolutions` | resolutions 전달 → keep-source 처리 확인 |
+
+---
+
+### 12.2 백엔드 — `test_concepts.py` 추가
+
+**대상:** Concept 고급 필드 (equivalent_classes, disjoint_with, restrictions)
+
+| 테스트 케이스 | 검증 항목 |
+|--------------|----------|
+| `test_create_concept_with_equivalent_class` | `equivalent_classes` 포함 생성 → GET 시 `owl:equivalentClass` 반환 |
+| `test_create_concept_with_disjoint_with` | `disjoint_with` 포함 생성 → GET 시 `owl:disjointWith` 반환 |
+| `test_create_concept_with_some_restriction` | `restrictions=[{type:"someValuesFrom", ...}]` → GET 시 restrictions 배열 포함 |
+| `test_create_concept_with_cardinality_restriction` | `type:"minCardinality", cardinality:1` → GET 시 cardinality 반환 |
+| `test_update_concept_equivalent_classes` | PUT → `equivalent_classes` 변경 후 반영 확인 |
+| `test_update_concept_disjoint_with` | PUT → `disjoint_with` 변경 후 반영 확인 |
+| `test_update_concept_restrictions` | PUT → restrictions 교체 확인 |
+
+---
+
+### 12.3 프론트엔드 — RelationsPage 실패 테스트 수정
+
+**현황:** `RelationsPage.test.tsx` 2건 실패 중
+
+| 테스트 | 실패 원인 추정 | 수정 방향 |
+|-------|--------------|----------|
+| `switches to data tab` | `'data Properties'` 셀렉터가 실제 렌더링과 불일치 | 실제 DOM 텍스트 확인 후 셀렉터 수정 |
+| (연관 케이스) | Mock 데이터 구조 불일치 가능 | 최신 `PropertyResponse` 형식 반영 |
+
+---
+
+### 12.4 프론트엔드 — `ConceptForm.test.tsx` (신규)
+
+**파일:** `frontend/src/components/entities/__tests__/ConceptForm.test.tsx`
+
+| 테스트 케이스 | 검증 항목 |
+|--------------|----------|
+| `renders basic fields` | IRI, Label, Comment, Parent Classes 입력란 존재 |
+| `renders advanced fields` | Equivalent Classes, Disjoint With, Restrictions 섹션 존재 |
+| `adds and removes super class IRI` | IRI 입력 + Enter → 태그 추가, ×클릭 → 제거 |
+| `adds equivalent class IRI` | IRI 입력 → 태그 추가 |
+| `adds disjoint class IRI` | IRI 입력 → 태그 추가 |
+| `adds restriction someValuesFrom` | 타입 선택 + property IRI + filler → 항목 추가 |
+| `adds restriction with cardinality` | `minCardinality` 선택 → 숫자 입력란 표시, 값 포함 |
+| `removes restriction` | × 클릭 → restriction 제거 |
+| `submits with all fields` | 폼 제출 → onSubmit에 모든 필드 포함 |
+| `create mode IRI is editable` | mode=create → IRI 입력 가능 |
+| `edit mode IRI is disabled` | mode=edit → IRI 입력 비활성화 |
+| `initialValues populates all fields` | initialValues 전달 → 모든 필드 초기값 반영 |
+
+---
+
+### 12.5 프론트엔드 — `MergePage.test.tsx` (신규)
+
+**파일:** `frontend/src/pages/ontology/__tests__/MergePage.test.tsx`
+
+MSW로 `/merge/preview`, `/merge` 엔드포인트 Mock.
+
+| 테스트 케이스 | 검증 항목 |
+|--------------|----------|
+| `renders step select initially` | 소스 온톨로지 드롭다운 + "Preview & Resolve Conflicts" 버튼 표시 |
+| `preview button disabled without source` | 소스 미선택 시 버튼 disabled |
+| `clicking preview calls preview API` | 드롭다운 선택 → 버튼 클릭 → `/merge/preview` POST 호출 |
+| `shows conflict count and auto merge count` | preview 결과 → 충돌 수 / 자동병합 수 카드 표시 |
+| `shows no conflict message when empty` | conflicts=[] → "No conflicts detected" 메시지 |
+| `renders conflict items` | 충돌 목록 → IRI, conflict_type, target/source 값 표시 |
+| `default choice is keep-target` | 각 충돌 항목 기본값 "Keep Current" 선택됨 |
+| `changing choice updates selection` | "Use Source" 클릭 → 해당 항목 선택 상태 변경 |
+| `merge button calls merge API with resolutions` | Merge 클릭 → `/merge` POST + resolutions[] 전달 확인 |
+| `shows done step on success` | merge 성공 → "Merge complete" + triple_count 표시 |
+| `back button returns to select step` | Back 클릭 → 소스 선택 화면으로 복귀 |
+| `merge another resets state` | "Merge another" 클릭 → 초기 상태 복귀 |
+
+---
+
+### 12.6 실행 목표
+
+| 구분 | 현재 | 목표 |
+|------|------|------|
+| 백엔드 | 103 passed | **117+ passed** (test_merge 14건 + test_concepts 7건 추가) |
+| 프론트엔드 | 40/42 passed | **54+ passed** (실패 2건 수정 + 신규 14건 추가) |
+
+### 12.7 실행 순서
+
+```
+1. backend/tests/test_merge.py 작성 → pytest 통과 확인
+2. backend/tests/test_concepts.py 고급 필드 케이스 추가 → pytest 통과 확인
+3. frontend RelationsPage 실패 원인 분석 → 수정
+4. frontend ConceptForm.test.tsx 작성 → vitest 통과 확인
+5. frontend MergePage.test.tsx 작성 → vitest 통과 확인
+```
+
+---
+
 ## 11. 통합 테스트 시나리오: HR 도메인 온톨로지
 
 **파일:** `backend/tests/test_integration_hr_ontology.py`
