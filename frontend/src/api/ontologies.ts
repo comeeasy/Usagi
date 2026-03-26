@@ -91,10 +91,30 @@ export function importOntology(
   return Promise.reject(new Error('importOntology: url or content required'))
 }
 
+export interface ConflictItem {
+  iri: string
+  conflict_type: 'label' | 'domain' | 'range' | 'superClass'
+  target_value: string
+  source_value: string
+}
+
+export interface ConflictResolution {
+  iri: string
+  conflict_type: 'label' | 'domain' | 'range' | 'superClass'
+  choice: 'keep-target' | 'keep-source' | 'merge-both'
+}
+
+export function previewMerge(
+  targetId: string,
+  sourceId: string,
+): Promise<{ conflicts: ConflictItem[]; conflict_count: number; auto_mergeable_count: number }> {
+  return apiPost(`/ontologies/${targetId}/merge/preview`, { source_ontology_id: sourceId })
+}
+
 export function mergeOntologies(
   targetId: string,
   sourceId: string,
-  strategy: string,
-): Promise<{ message: string; merged_triples?: number }> {
-  return apiPost(`/ontologies/${targetId}/merge`, { source_ontology_id: sourceId, strategy })
+  resolutions: ConflictResolution[] = [],
+): Promise<{ merged: boolean; triple_count: number }> {
+  return apiPost(`/ontologies/${targetId}/merge`, { source_ontology_id: sourceId, resolutions })
 }
