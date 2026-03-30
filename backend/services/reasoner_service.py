@@ -367,20 +367,41 @@ SELECT DISTINCT ?ind ?prop ?range ?val WHERE {{
         """owl:disjointWith 위반 검출 (SPARQL) — 개체가 서로 disjoint 클래스에 동시에 속하는 경우."""
         violations: list[ReasonerViolation] = []
 
+        # 먼저 TBox에 disjointWith 트리플이 있는지 확인
+        dw_check = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
+SELECT ?c1 ?c2 WHERE {{ GRAPH <{tbox_iri}> {{ ?c1 owl:disjointWith ?c2 . }} }}""")
+        logger.info("_detect_disjoint_violations: TBox disjointWith triples=%s", dw_check)
+
+        # 개체 타입 확인
+        ind_types = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
+SELECT ?ind ?type WHERE {{ GRAPH ?g {{ ?ind a ?type . FILTER(isIRI(?ind)) FILTER(?type != owl:NamedIndividual) }} }}""")
+        logger.info("_detect_disjoint_violations: all individual types=%s", ind_types)
+
+        # UNION으로 양방향(A disjointWith B, B disjointWith A) 모두 처리
         rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
 SELECT DISTINCT ?ind ?c1 ?c2 WHERE {{
-    GRAPH <{tbox_iri}> {{
-        ?c1 owl:disjointWith ?c2 .
+    {{
+        GRAPH <{tbox_iri}> {{ ?c1 owl:disjointWith ?c2 . }}
+    }} UNION {{
+        GRAPH <{tbox_iri}> {{ ?c2 owl:disjointWith ?c1 . }}
     }}
     GRAPH ?g1 {{ ?ind a ?c1 . FILTER(isIRI(?ind)) }}
     GRAPH ?g2 {{ ?ind a ?c2 . }}
+    FILTER(?c1 != ?c2)
     FILTER(STR(?c1) < STR(?c2))
 }}""")
 
+        logger.info("_detect_disjoint_violations: tbox=%s rows=%d result=%s", tbox_iri, len(rows), rows)
+
+        seen: set[tuple] = set()
         for r in rows:
             ind_iri = r["ind"]["value"]
             c1 = r["c1"]["value"]
             c2 = r["c2"]["value"]
+            key = (ind_iri, min(c1, c2), max(c1, c2))
+            if key in seen:
+                continue
+            seen.add(key)
             violations.append(
                 ReasonerViolation(
                     type="DisjointViolation",
@@ -413,7 +434,8 @@ SELECT DISTINCT ?ind ?c1 ?c2 WHERE {{
         base["completed_at"] = job.get("completed_at")
 
         if job["status"] == "completed":
-            base["result"] = job.get("result")
+            result = job.get("result")
+            base["result"] = result.model_dump() if result else None
         else:
             base["error"] = job.get("error")
 

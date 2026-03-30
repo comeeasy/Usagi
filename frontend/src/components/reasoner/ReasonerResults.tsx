@@ -8,14 +8,15 @@ interface ReasonerResultsProps {
   isLoading?: boolean
 }
 
-const SEVERITY_STYLES: Record<string, { bg: string; color: string }> = {
-  error: { bg: 'rgba(248,81,73,0.15)', color: 'var(--color-error)' },
-  warning: { bg: 'rgba(210,153,34,0.15)', color: 'var(--color-warning)' },
-  info: { bg: 'rgba(121,192,255,0.15)', color: 'var(--color-info)' },
+const TYPE_STYLES: Record<string, { bg: string; color: string }> = {
+  DisjointViolation:    { bg: 'rgba(248,81,73,0.15)',   color: 'var(--color-error)' },
+  UnsatisfiableClass:   { bg: 'rgba(248,81,73,0.15)',   color: 'var(--color-error)' },
+  CardinalityViolation: { bg: 'rgba(210,153,34,0.15)',  color: 'var(--color-warning, #d29922)' },
+  DomainRangeViolation: { bg: 'rgba(210,153,34,0.15)',  color: 'var(--color-warning, #d29922)' },
 }
 
 function ViolationRow({ v }: { v: ReasonerViolation }) {
-  const style = SEVERITY_STYLES[v.severity] ?? SEVERITY_STYLES.info
+  const style = TYPE_STYLES[v.type] ?? { bg: 'rgba(121,192,255,0.15)', color: 'var(--color-info)' }
   return (
     <div
       className="p-3 rounded-lg border flex flex-col gap-2"
@@ -23,31 +24,16 @@ function ViolationRow({ v }: { v: ReasonerViolation }) {
     >
       <div className="flex items-center gap-2">
         <span
-          className="text-xs px-1.5 py-0.5 rounded font-semibold uppercase"
+          className="text-xs px-1.5 py-0.5 rounded font-semibold"
           style={{ backgroundColor: style.bg, color: style.color, border: `1px solid ${style.color}` }}
         >
-          {v.severity}
-        </span>
-        <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          {v.violation_type}
+          {v.type}
         </span>
       </div>
-      <p className="text-sm" style={{ color: 'var(--color-text-primary)' }}>{v.message}</p>
+      <p className="text-sm" style={{ color: 'var(--color-text-primary)' }}>{v.description}</p>
       <div className="flex items-center gap-2 flex-wrap text-xs">
         <span style={{ color: 'var(--color-text-muted)' }}>Subject:</span>
         <IRIBadge iri={v.subject_iri} />
-        {v.predicate_iri && (
-          <>
-            <span style={{ color: 'var(--color-text-muted)' }}>Predicate:</span>
-            <IRIBadge iri={v.predicate_iri} />
-          </>
-        )}
-        {v.object_iri && (
-          <>
-            <span style={{ color: 'var(--color-text-muted)' }}>Object:</span>
-            <IRIBadge iri={v.object_iri} />
-          </>
-        )}
       </div>
     </div>
   )
@@ -63,15 +49,14 @@ function AxiomRow({ a }: { a: InferredAxiom }) {
       }}
     >
       <div className="flex items-center gap-2 flex-wrap text-xs">
-        <IRIBadge iri={a.subject_iri} />
+        <IRIBadge iri={a.subject} />
         <span style={{ color: 'var(--color-text-muted)' }}>→</span>
-        <IRIBadge iri={a.predicate_iri} />
+        <IRIBadge iri={a.predicate} />
         <span style={{ color: 'var(--color-text-muted)' }}>→</span>
-        <IRIBadge iri={a.object_iri} />
+        <IRIBadge iri={a.object} />
       </div>
-      <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        <span>Rule: <span style={{ color: 'var(--color-info)' }}>{a.inference_rule}</span></span>
-        <span>Confidence: <span style={{ color: 'var(--color-success)' }}>{(a.confidence * 100).toFixed(0)}%</span></span>
+      <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        Rule: <span style={{ color: 'var(--color-info)' }}>{a.inference_rule}</span>
       </div>
     </div>
   )
@@ -102,8 +87,10 @@ export default function ReasonerResults({ result, isLoading = false }: ReasonerR
     )
   }
 
-  const violations = result.violations ?? []
-  const axioms = result.inferred_axioms ?? []
+  const data = result.result
+  const violations = data?.violations ?? []
+  const axioms = data?.inferred_axioms ?? []
+  const durationMs = data?.execution_ms
 
   return (
     <div className="flex flex-col gap-4">
@@ -112,21 +99,21 @@ export default function ReasonerResults({ result, isLoading = false }: ReasonerR
         <div className="p-3 rounded-lg border text-center"
           style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-surface)' }}>
           <div className="text-2xl font-bold" style={{ color: violations.length > 0 ? 'var(--color-error)' : 'var(--color-success)' }}>
-            {result.violation_count ?? violations.length}
+            {violations.length}
           </div>
           <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Violations</div>
         </div>
         <div className="p-3 rounded-lg border text-center"
           style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-surface)' }}>
           <div className="text-2xl font-bold" style={{ color: 'var(--color-info)' }}>
-            {result.inferred_count ?? axioms.length}
+            {axioms.length}
           </div>
           <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Inferred Axioms</div>
         </div>
         <div className="p-3 rounded-lg border text-center"
           style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-surface)' }}>
           <div className="text-2xl font-bold" style={{ color: 'var(--color-text-primary)' }}>
-            {result.elapsed_seconds ? `${result.elapsed_seconds.toFixed(1)}s` : '—'}
+            {durationMs != null ? `${(durationMs / 1000).toFixed(1)}s` : '—'}
           </div>
           <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Duration</div>
         </div>
