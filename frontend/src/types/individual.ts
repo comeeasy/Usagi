@@ -22,23 +22,23 @@ export interface Individual {
   iri: string
   label?: string
   ontology_id: string
-  type_iris: string[]
-  data_properties: DataPropertyValue[]
-  object_properties: ObjectPropertyValue[]
+  types: string[]
+  data_property_values: DataPropertyValue[]
+  object_property_values: ObjectPropertyValue[]
   provenance: ProvenanceRecord[]
 }
 
 export interface IndividualCreate {
   iri: string
   label?: string
-  type_iris?: string[]
-  data_properties?: DataPropertyValue[]
-  object_properties?: ObjectPropertyValue[]
+  types?: string[]
+  data_property_values?: DataPropertyValue[]
+  object_property_values?: ObjectPropertyValue[]
 }
 
 export interface IndividualUpdate {
   label?: string
-  type_iris?: string[]
-  data_properties?: DataPropertyValue[]
-  object_properties?: ObjectPropertyValue[]
+  types?: string[]
+  data_property_values?: DataPropertyValue[]
+  object_property_values?: ObjectPropertyValue[]
 }

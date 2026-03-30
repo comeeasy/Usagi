@@ -10,8 +10,8 @@ export function runReasoner(
   return apiPost(`/ontologies/${ontologyId}/reasoner/run`, request)
 }
 
-export function getReasonerResult(jobId: string): Promise<ReasonerResult> {
-  return apiGet(`/reasoner/jobs/${jobId}`)
+export function getReasonerResult(ontologyId: string, jobId: string): Promise<ReasonerResult> {
+  return apiGet(`/ontologies/${ontologyId}/reasoner/jobs/${jobId}`)
 }
 
 export function listReasonerJobs(ontologyId: string): Promise<ReasonerJob[]> {

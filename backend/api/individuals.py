@@ -215,16 +215,16 @@ async def get_individual(request: Request, ontology_id: str, iri: str) -> Indivi
     store = request.app.state.ontology_store
     iri = unquote(iri)
 
-    if not await store.sparql_ask(f"{_P} ASK {{ <{iri}> a owl:NamedIndividual }}"):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}"):
         raise HTTPException(404, detail={"code": "INDIVIDUAL_NOT_FOUND", "message": f"Not found: {iri}"})
 
     basic = await store.sparql_select(f"""{_P}
-SELECT ?label WHERE {{ <{iri}> a owl:NamedIndividual . OPTIONAL {{ <{iri}> rdfs:label ?label }} }} LIMIT 1""")
+SELECT ?label WHERE {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual . OPTIONAL {{ <{iri}> rdfs:label ?label }} }} }} LIMIT 1""")
     label = _v(basic[0].get("label")) or None if basic else None
 
     type_rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?type WHERE {{
-    <{iri}> rdf:type ?type . FILTER(?type != owl:NamedIndividual) FILTER(isIRI(?type))
+    GRAPH ?g {{ <{iri}> rdf:type ?type . FILTER(?type != owl:NamedIndividual) FILTER(isIRI(?type)) }}
 }}""")
     types = [_v(r.get("type")) for r in type_rows]
 
@@ -253,8 +253,8 @@ SELECT ?g ?p ?o WHERE {{
         for r in op_rows
     ]
 
-    same_rows = await store.sparql_select(f"{_P}\nSELECT ?s WHERE {{ <{iri}> owl:sameAs ?s . FILTER(isIRI(?s)) }}")
-    diff_rows = await store.sparql_select(f"{_P}\nSELECT ?d WHERE {{ <{iri}> owl:differentFrom ?d . FILTER(isIRI(?d)) }}")
+    same_rows = await store.sparql_select(f"{_P}\nSELECT ?s WHERE {{ GRAPH ?g {{ <{iri}> owl:sameAs ?s . FILTER(isIRI(?s)) }} }}")
+    diff_rows = await store.sparql_select(f"{_P}\nSELECT ?d WHERE {{ GRAPH ?g {{ <{iri}> owl:differentFrom ?d . FILTER(isIRI(?d)) }} }}")
 
     return Individual(
         iri=iri, ontology_id=ontology_id, label=label, types=types,
@@ -274,7 +274,7 @@ async def update_individual(request: Request, ontology_id: str, iri: str, body: 
     iri = unquote(iri)
     g = _manual_graph(ontology_id)
 
-    if not await store.sparql_ask(f"{_P} ASK {{ <{iri}> a owl:NamedIndividual }}"):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}"):
         raise HTTPException(404, detail={"code": "INDIVIDUAL_NOT_FOUND", "message": f"Not found: {iri}"})
 
     if body.label is not None:
@@ -334,7 +334,7 @@ async def delete_individual(request: Request, ontology_id: str, iri: str) -> Non
     store = request.app.state.ontology_store
     iri = unquote(iri)
 
-    if not await store.sparql_ask(f"{_P} ASK {{ <{iri}> a owl:NamedIndividual }}"):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}"):
         raise HTTPException(404, detail={"code": "INDIVIDUAL_NOT_FOUND", "message": f"Not found: {iri}"})
 
     await store.sparql_update(f"""{_P}

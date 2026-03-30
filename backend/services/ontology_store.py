@@ -194,6 +194,18 @@ class OntologyStore:
 
         return await self._run(_exec)
 
+    async def export_rdfxml(self, tbox_iri: str) -> bytes:
+        """TBox Named Graph를 RDF/XML bytes로 직렬화."""
+        import io
+        graph_node = NamedNode(tbox_iri)
+
+        def _exec():
+            buf = io.BytesIO()
+            self._store.dump(buf, RdfFormat.RDF_XML, from_graph=graph_node)
+            return buf.getvalue()
+
+        return await self._run(_exec)
+
     # ── 온톨로지 목록 ─────────────────────────────────────────────────────
 
     async def list_ontologies(self, page: int = 1, page_size: int = 20) -> tuple[list[dict], int]:

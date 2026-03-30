@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Edit2 } from 'lucide-react'
+import { X, Edit2, Trash2 } from 'lucide-react'
 import IRIBadge from '@/components/shared/IRIBadge'
 import ProvenancePanel from '@/components/provenance/ProvenancePanel'
 import type { Concept } from '@/types/concept'
@@ -10,14 +10,16 @@ interface EntityDetailPanelProps {
   iri?: string | null
   onClose?: () => void
   onEdit?: () => void
+  onDelete?: () => void
 }
 
 function isConcept(e: Concept | Individual): e is Concept {
   return 'super_classes' in e
 }
 
-export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: EntityDetailPanelProps) {
+export default function EntityDetailPanel({ entity, iri, onClose, onEdit, onDelete }: EntityDetailPanelProps) {
   const [tab, setTab] = useState<'details' | 'provenance'>('details')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const displayIri = entity?.iri ?? iri
   if (!displayIri) return null
@@ -48,6 +50,35 @@ export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: Enti
             >
               <Edit2 size={14} />
             </button>
+          )}
+          {onDelete && !confirmDelete && (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="p-1 rounded hover:opacity-80"
+              style={{ color: 'var(--color-error, #ef4444)' }}
+              title="Delete"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+          {onDelete && confirmDelete && (
+            <div className="flex items-center gap-1">
+              <span className="text-xs" style={{ color: 'var(--color-error, #ef4444)' }}>Delete?</span>
+              <button
+                onClick={() => { onDelete(); setConfirmDelete(false) }}
+                className="px-2 py-0.5 rounded text-xs font-medium"
+                style={{ backgroundColor: 'var(--color-error, #ef4444)', color: '#fff' }}
+              >
+                Yes
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="px-2 py-0.5 rounded text-xs"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                No
+              </button>
+            </div>
           )}
           <button
             onClick={onClose}
@@ -108,7 +139,7 @@ export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: Enti
                 {/* Concept-specific */}
                 {isConcept(entity) && (
                   <>
-                    {entity.super_classes.length > 0 && (
+                    {(entity.super_classes?.length ?? 0) > 0 && (
                       <div>
                         <label className="text-xs block mb-1" style={{ color: 'var(--color-text-muted)' }}>
                           Parent Classes
@@ -120,7 +151,7 @@ export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: Enti
                         </div>
                       </div>
                     )}
-                    {entity.equivalent_classes.length > 0 && (
+                    {(entity.equivalent_classes?.length ?? 0) > 0 && (
                       <div>
                         <label className="text-xs block mb-1" style={{ color: 'var(--color-text-muted)' }}>
                           Equivalent Classes
@@ -132,7 +163,7 @@ export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: Enti
                         </div>
                       </div>
                     )}
-                    {entity.disjoint_with.length > 0 && (
+                    {(entity.disjoint_with?.length ?? 0) > 0 && (
                       <div>
                         <label className="text-xs block mb-1" style={{ color: 'var(--color-text-muted)' }}>
                           Disjoint With
@@ -154,10 +185,10 @@ export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: Enti
                         </p>
                       </div>
                     )}
-                    {entity.restrictions.length > 0 && (
+                    {(entity.restrictions?.length ?? 0) > 0 && (
                       <div>
                         <label className="text-xs block mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                          Restrictions ({entity.restrictions.length})
+                          Restrictions ({entity.restrictions?.length})
                         </label>
                         <div className="flex flex-col gap-1">
                           {entity.restrictions.map((r, i) => (
@@ -184,25 +215,25 @@ export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: Enti
                 {/* Individual-specific */}
                 {!isConcept(entity) && (
                   <>
-                    {entity.type_iris.length > 0 && (
+                    {(entity.types?.length ?? 0) > 0 && (
                       <div>
                         <label className="text-xs block mb-1" style={{ color: 'var(--color-text-muted)' }}>
                           Types
                         </label>
                         <div className="flex flex-wrap gap-1">
-                          {entity.type_iris.map((t) => (
+                          {entity.types.map((t) => (
                             <IRIBadge key={t} iri={t} />
                           ))}
                         </div>
                       </div>
                     )}
-                    {entity.data_properties.length > 0 && (
+                    {(entity.data_property_values?.length ?? 0) > 0 && (
                       <div>
                         <label className="text-xs block mb-1" style={{ color: 'var(--color-text-muted)' }}>
                           Data Properties
                         </label>
                         <div className="flex flex-col gap-1">
-                          {entity.data_properties.map((dp, i) => (
+                          {entity.data_property_values.map((dp, i) => (
                             <div key={i} className="text-xs flex gap-2 items-center">
                               <IRIBadge iri={dp.property_iri} />
                               <span style={{ color: 'var(--color-text-primary)' }}>
@@ -213,13 +244,13 @@ export default function EntityDetailPanel({ entity, iri, onClose, onEdit }: Enti
                         </div>
                       </div>
                     )}
-                    {entity.object_properties.length > 0 && (
+                    {(entity.object_property_values?.length ?? 0) > 0 && (
                       <div>
                         <label className="text-xs block mb-1" style={{ color: 'var(--color-text-muted)' }}>
                           Object Properties
                         </label>
                         <div className="flex flex-col gap-1">
-                          {entity.object_properties.map((op, i) => (
+                          {entity.object_property_values.map((op, i) => (
                             <div key={i} className="text-xs flex gap-2 items-center">
                               <IRIBadge iri={op.property_iri} />
                               <span style={{ color: 'var(--color-text-muted)' }}>→</span>

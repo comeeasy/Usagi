@@ -18,8 +18,8 @@ export function useReasoner(ontologyId: string | undefined) {
 
   const resultQuery = useQuery({
     queryKey: ['reasoner', 'result', jobId],
-    queryFn: () => getReasonerResult(jobId!),
-    enabled: !!jobId,
+    queryFn: () => getReasonerResult(ontologyId!, jobId!),
+    enabled: !!jobId && !!ontologyId,
     refetchInterval: (query) => {
       const result = query.state.data
       if (result?.status === 'completed' || result?.status === 'failed') return false
