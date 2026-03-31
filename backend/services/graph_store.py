@@ -242,22 +242,23 @@ class GraphStore:
                     }
 
             # Step 2: 수집된 노드 집합 내 모든 엣지 조회
+            # collect(r)에서 start_node/end_node 프로퍼티가 비는 드라이버 이슈를 피해
+            # a.iri, b.iri 를 명시적으로 반환
             seen_edges: dict[str, dict] = {}
             if seen_nodes:
                 node_iris = list(seen_nodes.keys())
                 edge_result = await session.run(
                     """
-                    MATCH (a)-[r]-(b)
+                    MATCH (a)-[r]->(b)
                     WHERE a.iri IN $iris AND b.iri IN $iris
-                    RETURN collect(DISTINCT r) AS rels
+                    RETURN r, a.iri AS srcIri, b.iri AS tgtIri
                     """,
                     iris=node_iris,
                 )
-                edge_record = await edge_result.single()
-                rels = edge_record["rels"] if edge_record else []
-                for rel in rels:
-                    src = rel.start_node.get("iri", "")
-                    tgt = rel.end_node.get("iri", "")
+                async for record in edge_result:
+                    rel = record["r"]
+                    src = record["srcIri"]
+                    tgt = record["tgtIri"]
                     prop_iri = rel.get("propertyIri", rel.type)
                     edge_key = f"{src}-{prop_iri}-{tgt}"
                     if edge_key not in seen_edges:
