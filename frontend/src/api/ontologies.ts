@@ -54,7 +54,23 @@ export function getSubgraph(
   ontologyId: string,
   params: { rootIris?: string[]; depth?: number; includeIndividuals?: boolean },
 ): Promise<SubgraphData> {
-  return apiPost(`/ontologies/${ontologyId}/subgraph`, params)
+  return apiPost(`/ontologies/${ontologyId}/subgraph`, {
+    entity_iris: params.rootIris ?? [],
+    depth: params.depth ?? 2,
+  }).then((raw: { nodes: { iri: string; label: string; kind: string }[]; edges: { source: string; target: string; propertyIri: string; propertyLabel: string }[] }) => ({
+    nodes: raw.nodes.map((n) => ({
+      data: { id: n.iri, label: n.label, type: n.kind as 'concept' | 'individual', iri: n.iri },
+    })),
+    edges: raw.edges.map((e) => ({
+      data: {
+        id: `${e.source}-${e.propertyIri}-${e.target}`,
+        source: e.source,
+        target: e.target,
+        label: e.propertyLabel ?? e.propertyIri,
+        type: 'object',
+      },
+    })),
+  }))
 }
 
 export function importOntologyFile(

@@ -17,6 +17,7 @@ import {
   updateObjectProperty,
   updateDataProperty,
 } from '@/api/relations'
+import { getOntology } from '@/api/ontologies'
 import type { ObjectProperty, DataProperty, ObjectPropertyCreate, DataPropertyCreate } from '@/types/property'
 
 type RelTab = 'object' | 'data'
@@ -32,6 +33,13 @@ export default function RelationsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [editingProperty, setEditingProperty] = useState<ObjectProperty | DataProperty | null>(null)
   const PAGE_SIZE = 20
+
+  const ontologyQuery = useQuery({
+    queryKey: ['ontology', ontologyId],
+    queryFn: () => getOntology(ontologyId!),
+    enabled: !!ontologyId,
+  })
+  const iriPrefix = ontologyQuery.data?.base_iri ? `${ontologyQuery.data.base_iri}#` : ''
 
   const objectQuery = useQuery({
     queryKey: ['object-properties', ontologyId, page, searchQuery],
@@ -144,6 +152,7 @@ export default function RelationsPage() {
                 <PropertyForm
                   propertyType={tab}
                   mode="create"
+                  iriPrefix={iriPrefix}
                   onSubmit={(v) => {
                     const vals = v as { iri: string; label: string; comment?: string; domain: string[]; range: string[]; characteristics: string[]; inverseOf: string; propertyType: string }
                     if (vals.propertyType === 'object') {

@@ -308,6 +308,7 @@ WHERE  {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn a owl:Restriction 
 @router.delete("/{iri:path}", status_code=204)
 async def delete_concept(request: Request, ontology_id: str, iri: str) -> None:
     store = request.app.state.ontology_store
+    graph_store = request.app.state.graph_store
     iri = unquote(iri)
     tbox = await _resolve_tbox(store, ontology_id)
     if tbox is None:
@@ -328,3 +329,4 @@ WHERE  {{ GRAPH <{tbox}> {{ <{iri}> ?p ?o }} }}""")
     await store.sparql_update(f"""{_P}
 DELETE {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}
 WHERE  {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}""")
+    await graph_store.delete_node(iri)

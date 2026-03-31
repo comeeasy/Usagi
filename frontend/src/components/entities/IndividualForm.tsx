@@ -31,6 +31,7 @@ interface IndividualFormProps {
   onSubmit?: (values: IndividualFormValues) => void
   onCancel?: () => void
   mode?: 'create' | 'edit'
+  iriPrefix?: string
 }
 
 export default function IndividualForm({
@@ -38,8 +39,9 @@ export default function IndividualForm({
   onSubmit,
   onCancel,
   mode = 'create',
+  iriPrefix,
 }: IndividualFormProps) {
-  const [iri, setIri] = useState(initialValues?.iri ?? '')
+  const [iri, setIri] = useState(initialValues?.iri ?? (mode === 'create' ? (iriPrefix ?? '') : ''))
   const [label, setLabel] = useState(initialValues?.label ?? '')
   const [typeIris, setTypeIris] = useState<string[]>(initialValues?.typeIris ?? [])
   const [dataProperties, setDataProperties] = useState<DataProp[]>(initialValues?.dataProperties ?? [])

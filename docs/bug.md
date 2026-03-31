@@ -91,9 +91,13 @@
 **원인 3 — SPARQL INSERT로 직접 추가한 트리플은 Neo4j 미반영:**
 API를 거치지 않은 SPARQL INSERT의 ObjectProperty 값은 `upsert_object_property_value` 미호출로 Neo4j에 없음.
 
-**수정 대상:**
-- `backend/api/individuals.py` — update 시 기존 RELATION 엣지 삭제 + 신규 object_property_values 재동기화
-- `backend/services/graph_store.py` — load-all/BFS 쿼리를 "수집된 노드 집합 내 모든 엣지" 방식으로 교체
+**수정 완료:** ✅
+- `graph_store.get_subgraph`: 노드 집합 수집 후 `MATCH (a)-[r]->(b) RETURN r, a.iri, b.iri` 방식으로 전체 엣지 조회 (collect(r) 드라이버 이슈 해결 포함)
+- `graph_store.sync_object_property_values`: RELATION 전면 교체 메서드 추가
+- `graph_store.batch_upsert_concepts`: SUBCLASS_OF 엣지 동기화 추가
+- `sync_service.sync_tbox`: rdfs:subClassOf 쿼리 추가 + UUID→IRI 변환(_resolve_tbox) 수정
+- `individuals.py` update: `sync_object_property_values` 호출 추가
+- `ontologies.py`: `POST /{id}/sync` 엔드포인트 추가
 
 ---
 

@@ -36,6 +36,7 @@ interface ConceptFormProps {
   onSubmit?: (values: ConceptFormValues) => void
   onCancel?: () => void
   mode?: 'create' | 'edit'
+  iriPrefix?: string
 }
 
 function IRIListInput({
@@ -235,8 +236,9 @@ export default function ConceptForm({
   onSubmit,
   onCancel,
   mode = 'create',
+  iriPrefix,
 }: ConceptFormProps) {
-  const [iri, setIri] = useState(initialValues?.iri ?? '')
+  const [iri, setIri] = useState(initialValues?.iri ?? (mode === 'create' ? (iriPrefix ?? '') : ''))
   const [label, setLabel] = useState(initialValues?.label ?? '')
   const [comment, setComment] = useState(initialValues?.comment ?? '')
   const [superClasses, setSuperClasses] = useState<string[]>(initialValues?.superClasses ?? [])

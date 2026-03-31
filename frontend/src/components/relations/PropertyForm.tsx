@@ -39,6 +39,7 @@ interface PropertyFormProps {
   onSubmit?: (values: unknown) => void
   onCancel?: () => void
   mode?: 'create' | 'edit'
+  iriPrefix?: string
 }
 
 export default function PropertyForm({
@@ -47,9 +48,10 @@ export default function PropertyForm({
   onSubmit,
   onCancel,
   mode = 'create',
+  iriPrefix,
 }: PropertyFormProps) {
   const [propType, setPropType] = useState(initialType)
-  const [iri, setIri] = useState(initialValues?.iri ?? '')
+  const [iri, setIri] = useState(initialValues?.iri ?? (mode === 'create' ? (iriPrefix ?? '') : ''))
   const [label, setLabel] = useState(initialValues?.label ?? '')
   const [comment, setComment] = useState(initialValues?.comment ?? '')
   const [domain, setDomain] = useState<string[]>(initialValues?.domain ?? [])

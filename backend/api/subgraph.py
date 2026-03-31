@@ -12,7 +12,7 @@ router = APIRouter(prefix="/ontologies/{ontology_id}", tags=["subgraph"])
 
 
 class SubgraphRequest(BaseModel):
-    entity_iris: list[str] = Field(..., min_length=1)
+    entity_iris: list[str] = Field(default=[])
     depth: int = Field(default=2, ge=1, le=5)
 
 
