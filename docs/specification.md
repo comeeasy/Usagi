@@ -353,7 +353,7 @@ type XSDDatatype =
   | 'xsd:anyURI' | 'xsd:langString';
 
 // ── Backing Source ────────────────────────────────────────────────
-type SourceType = 'jdbc' | 'api-rest' | 'api-stream' | 'manual' | 'owl-file';
+type SourceType = 'jdbc' | 'api-rest' | 'api-stream' | 'manual' | 'owl-file' | 'csv-file';
 
 interface BackingSource {
   id: string;
@@ -401,6 +401,15 @@ interface StreamConfig {
   consumerGroup: string;
   idField: string;
   deliverySemantics: 'exactly-once' | 'at-least-once';
+}
+
+interface CSVConfig {
+  fileName: string;           // 서버 저장 파일명 (업로드 후 설정)
+  delimiter: ',' | ';' | '\t' | '|';
+  hasHeader: boolean;         // 첫 행이 헤더인지
+  primaryKeyField: string;    // IRI 생성에 쓸 PK 컬럼명 (iriTemplate의 {key}에 대응)
+  encoding: 'utf-8' | 'utf-16' | 'latin-1';
+  skipRows?: number;          // 헤더 위 건너뛸 행 수 (기본 0)
 }
 ```
 
@@ -561,6 +570,8 @@ interface InferredAxiom {
 | `PUT` | `/ontologies/{id}/sources/{sourceId}` | Source 설정 수정 |
 | `DELETE` | `/ontologies/{id}/sources/{sourceId}` | Source 삭제 (Triple은 유지, Named Graph 보존) |
 | `POST` | `/ontologies/{id}/sources/{sourceId}/sync` | 수동 즉시 동기화 트리거 |
+| `POST` | `/ontologies/{id}/sources/{sourceId}/upload` | CSV 파일 업로드 (multipart/form-data, `file` 필드) — 응답: `{ fileUrl, rowCount, headers }` |
+| `GET` | `/static/uploads/{filename}` | Neo4j LOAD CSV가 접근하는 파일 서빙 엔드포인트 (내부 전용) |
 
 ---
 
@@ -1001,7 +1012,68 @@ rdf_transformer.py 처리:
 6. N-Triples 직렬화 → rdf-triples 토픽 발행
 ```
 
-### 10.3 충돌 해결 (Conflict Resolution)
+### 10.3 CSV 파일 수집 파이프라인
+
+#### 흐름
+
+```
+POST /sources/{id}/upload  (multipart CSV)
+  │
+  ├─ 서버: /uploads/{source_id}_{timestamp}.csv 저장
+  │        헤더 파싱 → { fileUrl, rowCount, headers } 반환 (프리뷰용)
+  │
+POST /sources/{id}/sync  (업로드 후 즉시 or 수동 트리거)
+  │
+  ├─ [단계 1 — Oxigraph]
+  │    csv.DictReader → 각 row에 대해:
+  │      iri = iriTemplate.format(**row)        # PK 컬럼 치환
+  │      RDFTransformer.transform(event, source) → list[Triple]
+  │    named_graph = f"urn:source:{source_id}/{timestamp}"
+  │    기존 named_graph DROP (재적재 시 원자적 교체)
+  │    ontology_store.sparql_update(BULK INSERT into named_graph)
+  │
+  └─ [단계 2 — Neo4j LOAD CSV]
+       file_url = f"http://backend:8000/static/uploads/{filename}"
+       session.run("""
+         LOAD CSV WITH HEADERS FROM $url AS row
+         CALL {
+           WITH row
+           MERGE (n:Individual {iri: apoc.text.format($iriTemplate, [row[$pk]])})
+           SET n.label    = row[$labelField],
+               n.ontologyId = $ontologyId
+           WITH n, row
+           MERGE (c:Concept {iri: $conceptIri})
+           MERGE (n)-[:TYPE]->(c)
+         } IN TRANSACTIONS OF 500 ROWS
+       """, url=file_url, iriTemplate=..., pk=..., ...)
+```
+
+**주의:** `apoc.text.format` 없이 단순 IRI 템플릿을 적용하려면 Python에서 Cypher 파라미터로 미리 치환된 IRI 목록을 UNWIND로 넘기는 방식도 사용 가능. APOC 플러그인이 없는 경우 이 방식 권장.
+
+#### 단계별 실패 처리
+
+| 실패 시점 | 동작 |
+|-----------|------|
+| 파일 업로드 실패 | 클라이언트에 오류 반환, 아무것도 변경 안 됨 |
+| Oxigraph 단계 실패 | named_graph rollback (DROP), Neo4j 단계 미실행 |
+| Neo4j 단계 실패 | Oxigraph 데이터는 보존됨 → `POST /sync`로 재시도 가능 |
+
+#### JobResponse 반환 형식
+
+```json
+{
+  "jobId": "uuid",
+  "status": "completed",
+  "result": {
+    "rowsRead": 1240,
+    "triplesInserted": 6200,
+    "neo4jNodesUpserted": 1240,
+    "namedGraph": "urn:source:src-csv-hr/2026-03-31T09:00:00"
+  }
+}
+```
+
+### 10.4 충돌 해결 (Conflict Resolution)
 
 동일 IRI에 동일 DataProperty가 복수 소스에서 다른 값으로 들어올 때:
 

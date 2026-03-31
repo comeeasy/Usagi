@@ -245,6 +245,7 @@ Concept: ex:Employee (OWL Class)
 | REST API (스트리밍) | Kafka Producer → Ingestion Worker → RDF 변환 | 초~분 | 실시간 이벤트 |
 | 사용자 수동 입력 | SPARQL Update 직접 호출 (즉시) | 즉시 | 단건 트랜잭션 |
 | OWL 파일 Import | rdflib 파싱 → Oxigraph bulk insert | 1회성 | TBox + ABox 모두 포함 |
+| **CSV 파일** | Python csv 파싱 → RDFTransformer → Oxigraph bulk insert (Named Graph) + Neo4j **LOAD CSV** 병렬 처리 | 1회성/재적재 | 컬럼→Property 매핑, PK 컬럼 기반 IRI 생성 |
 
 ### Individual Provenance 메타데이터
 
@@ -262,6 +263,56 @@ GRAPH ex:source/api-stream/attendance/2026-03-23T09:05:00 {
 - Named Graph IRI = `{source_type}/{source_id}/{timestamp}`
 - Provenance 메타데이터: `prov:wasGeneratedBy`, `prov:generatedAtTime`, `dcterms:source`
 - 소스별 Triple 삭제/롤백 시 Named Graph 단위로 제거 가능
+
+### CSV 파일 수집 상세 설계
+
+CSV는 가장 범용적인 데이터 교환 포맷으로, 별도 파이프라인 없이 즉시 ABox를 적재할 수 있는 핵심 진입점이다.
+
+#### 두 단계 Import (Dual-Write)
+
+```
+CSV 업로드 (multipart)
+    │
+    ├─→ [단계 1: Oxigraph]  Python csv.DictReader
+    │     → RDFTransformer (iriTemplate + propertyMappings 적용)
+    │     → sparql_update (Named Graph = urn:source:{source_id}/{timestamp})
+    │     → 진실 원본 확보, Provenance 기록
+    │
+    └─→ [단계 2: Neo4j]  FastAPI가 CSV를 HTTP Static으로 서빙
+          → LOAD CSV WITH HEADERS FROM 'http://backend/static/uploads/{file}'
+          → CALL { MERGE (n:Individual {iri: ...}) SET n += props } IN TRANSACTIONS OF 500 ROWS
+          → 수만 행도 단일 Cypher로 고속 일괄 처리
+```
+
+**Oxigraph 단계를 먼저 완료한 뒤 Neo4j 단계를 실행** — 부분 실패 시 Oxigraph가 진실 원본을 보존, 재sync 가능.
+
+#### CSVConfig 핵심 설정
+
+| 필드 | 설명 | 예시 |
+|------|------|------|
+| `fileName` | 서버 업로드 경로의 파일명 | `hr_employees_20260331.csv` |
+| `delimiter` | 구분자 | `,` / `;` / `\t` / `\|` |
+| `hasHeader` | 첫 행 헤더 여부 | `true` |
+| `primaryKeyField` | IRI 생성에 쓸 PK 컬럼명 | `emp_id` |
+| `encoding` | 파일 인코딩 | `utf-8` / `utf-16` / `latin-1` |
+
+IRI 생성: `iriTemplate`에 CSV 컬럼명을 `{컬럼명}` 형식으로 참조
+예: `iriTemplate = "https://ex.org/emp/{emp_id}"` → row의 `emp_id` 값으로 치환
+
+#### 재적재(Re-import) 정책
+
+- 동일 BackingSource를 다시 sync하면 기존 Named Graph를 **DROP 후 재삽입** (원자적 교체)
+- Named Graph IRI에 타임스탬프 포함 → 이전 버전 Named Graph는 Provenance 이력으로 보존 가능 (정책 선택)
+- `conflictPolicy: 'user-edit-wins'` 적용 시 수동 입력 Named Graph 값이 CSV 값보다 우선
+
+#### Neo4j LOAD CSV 사용 이유
+
+| 방식 | 1만 행 처리 시간 (추정) |
+|------|----------------------|
+| 행별 `graph_store.upsert_individual` 호출 | ~30~60초 (Python ↔ Neo4j 왕복) |
+| `LOAD CSV` + `CALL IN TRANSACTIONS OF 500 ROWS` | ~2~5초 (Neo4j 내부 처리) |
+
+LOAD CSV는 Neo4j가 파일을 직접 스트리밍하여 배치로 처리하므로, 수만 행 이상의 ABox 적재에 적합하다.
 
 ---
 
