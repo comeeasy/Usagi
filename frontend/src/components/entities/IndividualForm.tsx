@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
+import IRIListSearchInput from '@/components/shared/IRIListSearchInput'
+import IRISearchInput from '@/components/shared/IRISearchInput'
 
 interface DataProp {
   property_iri: string
@@ -46,7 +48,6 @@ export default function IndividualForm({
   const [typeIris, setTypeIris] = useState<string[]>(initialValues?.typeIris ?? [])
   const [dataProperties, setDataProperties] = useState<DataProp[]>(initialValues?.dataProperties ?? [])
   const [objectProperties, setObjectProperties] = useState<ObjectProp[]>(initialValues?.objectProperties ?? [])
-  const [newType, setNewType] = useState('')
 
   const inputStyle = {
     backgroundColor: 'var(--color-bg-elevated)',
@@ -55,13 +56,6 @@ export default function IndividualForm({
   }
 
   const labelStyle = { color: 'var(--color-text-secondary)' }
-
-  const addType = () => {
-    if (newType.trim() && !typeIris.includes(newType.trim())) {
-      setTypeIris([...typeIris, newType.trim()])
-      setNewType('')
-    }
-  }
 
   const addDataProp = () => {
     setDataProperties([...dataProperties, { property_iri: '', value: '' }])
@@ -120,45 +114,13 @@ export default function IndividualForm({
         />
       </div>
 
-      {/* Type IRIs */}
-      <div>
-        <label className="block text-xs mb-1 font-medium" style={labelStyle}>
-          Types
-        </label>
-        <div className="flex gap-1 flex-wrap mb-2">
-          {typeIris.map((t) => (
-            <span
-              key={t}
-              className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-mono"
-              style={{
-                backgroundColor: 'var(--color-bg-elevated)',
-                border: '1px solid var(--color-border)',
-                color: 'var(--color-info)',
-              }}
-            >
-              {t}
-              <button type="button" onClick={() => setTypeIris(typeIris.filter((x) => x !== t))}>
-                <X size={10} />
-              </button>
-            </span>
-          ))}
-        </div>
-        <div className="flex gap-1">
-          <input
-            type="text"
-            value={newType}
-            onChange={(e) => setNewType(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addType())}
-            placeholder="https://example.org/SomeClass"
-            className="flex-1 px-3 py-1.5 rounded border text-sm focus:outline-none font-mono"
-            style={inputStyle}
-          />
-          <button type="button" onClick={addType} className="px-2 py-1.5 rounded border hover:opacity-80"
-            style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-            <Plus size={14} />
-          </button>
-        </div>
-      </div>
+      <IRIListSearchInput
+        label="Types"
+        values={typeIris}
+        onChange={setTypeIris}
+        placeholder="Search or enter class IRI…"
+        kind="concept"
+      />
 
       {/* Data Properties */}
       <div>
@@ -170,14 +132,13 @@ export default function IndividualForm({
           </button>
         </div>
         {dataProperties.map((dp, i) => (
-          <div key={i} className="flex gap-1 mb-1">
-            <input
-              type="text"
+          <div key={i} className="flex gap-1 mb-1 items-center">
+            <IRISearchInput
               value={dp.property_iri}
-              onChange={(e) => updateDataProp(i, 'property_iri', e.target.value)}
-              placeholder="Property IRI"
-              className="flex-1 px-2 py-1 rounded border text-xs focus:outline-none font-mono"
-              style={inputStyle}
+              onChange={(iri) => updateDataProp(i, 'property_iri', iri)}
+              placeholder="Property IRI…"
+              kind="property"
+              className="flex-1"
             />
             <input
               type="text"
@@ -205,22 +166,20 @@ export default function IndividualForm({
           </button>
         </div>
         {objectProperties.map((op, i) => (
-          <div key={i} className="flex gap-1 mb-1">
-            <input
-              type="text"
+          <div key={i} className="flex gap-1 mb-1 items-center">
+            <IRISearchInput
               value={op.property_iri}
-              onChange={(e) => updateObjectProp(i, 'property_iri', e.target.value)}
-              placeholder="Property IRI"
-              className="flex-1 px-2 py-1 rounded border text-xs focus:outline-none font-mono"
-              style={inputStyle}
+              onChange={(iri) => updateObjectProp(i, 'property_iri', iri)}
+              placeholder="Property IRI…"
+              kind="property"
+              className="flex-1"
             />
-            <input
-              type="text"
+            <IRISearchInput
               value={op.target_iri}
-              onChange={(e) => updateObjectProp(i, 'target_iri', e.target.value)}
-              placeholder="Target IRI"
-              className="flex-1 px-2 py-1 rounded border text-xs focus:outline-none font-mono"
-              style={inputStyle}
+              onChange={(iri) => updateObjectProp(i, 'target_iri', iri)}
+              placeholder="Target IRI…"
+              kind="individual"
+              className="flex-1"
             />
             <button type="button" onClick={() => setObjectProperties(objectProperties.filter((_, j) => j !== i))}
               className="px-1 hover:opacity-80" style={{ color: 'var(--color-error)' }}>

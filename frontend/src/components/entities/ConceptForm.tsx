@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import type { PropertyRestriction, RestrictionType } from '@/types/concept'
+import IRIListSearchInput from '@/components/shared/IRIListSearchInput'
+import IRISearchInput from '@/components/shared/IRISearchInput'
 
 const RESTRICTION_TYPES: { value: RestrictionType; label: string }[] = [
   { value: 'someValuesFrom', label: 'some (∃)' },
@@ -39,68 +41,6 @@ interface ConceptFormProps {
   iriPrefix?: string
 }
 
-function IRIListInput({
-  label,
-  values,
-  onChange,
-  placeholder,
-}: {
-  label: string
-  values: string[]
-  onChange: (vals: string[]) => void
-  placeholder: string
-}) {
-  const [draft, setDraft] = useState('')
-  const inputStyle = {
-    backgroundColor: 'var(--color-bg-elevated)',
-    borderColor: 'var(--color-border)',
-    color: 'var(--color-text-primary)',
-  }
-  const add = () => {
-    const v = draft.trim()
-    if (v && !values.includes(v)) { onChange([...values, v]); setDraft('') }
-  }
-  return (
-    <div>
-      <label className="block text-xs mb-1 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-        {label}
-      </label>
-      <div className="flex gap-1 flex-wrap mb-1.5">
-        {values.map((v) => (
-          <span
-            key={v}
-            className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-mono"
-            style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', color: 'var(--color-info)' }}
-          >
-            {v}
-            <button type="button" onClick={() => onChange(values.filter((x) => x !== v))} className="hover:opacity-80">
-              <X size={10} />
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="flex gap-1">
-        <input
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder={placeholder}
-          className="flex-1 px-3 py-1.5 rounded border text-sm focus:outline-none font-mono"
-          style={inputStyle}
-        />
-        <button
-          type="button"
-          onClick={add}
-          className="px-2 py-1.5 rounded border text-sm hover:opacity-80"
-          style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-        >
-          <Plus size={14} />
-        </button>
-      </div>
-    </div>
-  )
-}
 
 function RestrictionEditor({
   restrictions,
@@ -113,12 +53,6 @@ function RestrictionEditor({
   const [rtype, setRtype] = useState<RestrictionType>('someValuesFrom')
   const [value, setValue] = useState('')
   const [cardinality, setCardinality] = useState('1')
-
-  const inputStyle = {
-    backgroundColor: 'var(--color-bg-elevated)',
-    borderColor: 'var(--color-border)',
-    color: 'var(--color-text-primary)',
-  }
 
   const addRestriction = () => {
     if (!propIri.trim()) return
@@ -180,7 +114,7 @@ function RestrictionEditor({
             value={rtype}
             onChange={(e) => setRtype(e.target.value as RestrictionType)}
             className="px-2 py-1.5 rounded border text-xs"
-            style={inputStyle}
+            style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
           >
             {RESTRICTION_TYPES.map((t) => (
               <option key={t.value} value={t.value}>{t.label}</option>
@@ -193,28 +127,25 @@ function RestrictionEditor({
               onChange={(e) => setCardinality(e.target.value)}
               min={0}
               className="w-16 px-2 py-1.5 rounded border text-xs"
-              style={inputStyle}
+              style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
             />
           )}
         </div>
-        <div className="flex gap-1 mb-1.5">
-          <input
-            type="text"
+        <div className="mb-1.5">
+          <IRISearchInput
             value={propIri}
-            onChange={(e) => setPropIri(e.target.value)}
-            placeholder="Property IRI"
-            className="flex-1 px-2 py-1.5 rounded border text-xs font-mono focus:outline-none"
-            style={inputStyle}
+            onChange={(iri) => setPropIri(iri)}
+            placeholder="Search or enter property IRI…"
+            kind="property"
           />
         </div>
         <div className="flex gap-1">
-          <input
-            type="text"
+          <IRISearchInput
             value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="Filler IRI or value"
-            className="flex-1 px-2 py-1.5 rounded border text-xs font-mono focus:outline-none"
-            style={inputStyle}
+            onChange={(iri) => setValue(iri)}
+            placeholder="Filler IRI or value…"
+            kind="concept"
+            className="flex-1"
           />
           <button
             type="button"
@@ -305,25 +236,28 @@ export default function ConceptForm({
         />
       </div>
 
-      <IRIListInput
+      <IRIListSearchInput
         label="Parent Classes (rdfs:subClassOf)"
         values={superClasses}
         onChange={setSuperClasses}
-        placeholder="https://example.org/ParentClass"
+        placeholder="Search or enter class IRI…"
+        kind="concept"
       />
 
-      <IRIListInput
+      <IRIListSearchInput
         label="Equivalent Classes (owl:equivalentClass)"
         values={equivalentClasses}
         onChange={setEquivalentClasses}
-        placeholder="https://example.org/EquivalentClass"
+        placeholder="Search or enter class IRI…"
+        kind="concept"
       />
 
-      <IRIListInput
+      <IRIListSearchInput
         label="Disjoint With (owl:disjointWith)"
         values={disjointWith}
         onChange={setDisjointWith}
-        placeholder="https://example.org/DisjointClass"
+        placeholder="Search or enter class IRI…"
+        kind="concept"
       />
 
       <RestrictionEditor restrictions={restrictions} onChange={setRestrictions} />

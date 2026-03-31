@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
+import IRIListSearchInput from '@/components/shared/IRIListSearchInput'
+import IRISearchInput from '@/components/shared/IRISearchInput'
 
 const CHARACTERISTICS = [
   'Functional',
@@ -59,8 +61,6 @@ export default function PropertyForm({
   const [characteristics, setCharacteristics] = useState<string[]>(initialValues?.characteristics ?? [])
   const [inverseOf, setInverseOf] = useState(initialValues?.inverseOf ?? '')
   const [isFunctional, setIsFunctional] = useState(initialValues?.isFunctional ?? false)
-  const [newDomain, setNewDomain] = useState('')
-  const [newRange, setNewRange] = useState('')
   const [newXsdRange, setNewXsdRange] = useState('xsd:string')
 
   const inputStyle = {
@@ -76,23 +76,9 @@ export default function PropertyForm({
     onSubmit?.({ iri, label, comment, domain, range, characteristics, inverseOf, isFunctional, propertyType: propType })
   }
 
-  const addDomain = () => {
-    if (newDomain.trim() && !domain.includes(newDomain.trim())) {
-      setDomain([...domain, newDomain.trim()])
-      setNewDomain('')
-    }
-  }
-
-  const addRange = () => {
-    if (propType === 'object') {
-      if (newRange.trim() && !range.includes(newRange.trim())) {
-        setRange([...range, newRange.trim()])
-        setNewRange('')
-      }
-    } else {
-      if (!range.includes(newXsdRange)) {
-        setRange([...range, newXsdRange])
-      }
+  const addXsdRange = () => {
+    if (!range.includes(newXsdRange)) {
+      setRange([...range, newXsdRange])
     }
   }
 
@@ -142,56 +128,46 @@ export default function PropertyForm({
           className="w-full px-3 py-1.5 rounded border text-sm focus:outline-none resize-none" style={inputStyle} />
       </div>
 
-      {/* Domain */}
-      <div>
-        <label className="block text-xs mb-1 font-medium" style={labelStyle}>Domain</label>
-        <div className="flex flex-wrap gap-1 mb-1">
-          {domain.map((d) => (
-            <span key={d} className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-mono"
-              style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', color: 'var(--color-info)' }}>
-              {d} <button type="button" onClick={() => setDomain(domain.filter((x) => x !== d))}><X size={10} /></button>
-            </span>
-          ))}
-        </div>
-        <div className="flex gap-1">
-          <input type="text" value={newDomain} onChange={(e) => setNewDomain(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addDomain())}
-            placeholder="Domain IRI" className="flex-1 px-2 py-1 rounded border text-xs font-mono focus:outline-none" style={inputStyle} />
-          <button type="button" onClick={addDomain} className="px-2 py-1 rounded border hover:opacity-80"
-            style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-            <Plus size={12} />
-          </button>
-        </div>
-      </div>
+      <IRIListSearchInput
+        label="Domain"
+        values={domain}
+        onChange={setDomain}
+        placeholder="Search or enter class IRI…"
+        kind="concept"
+      />
 
       {/* Range */}
-      <div>
-        <label className="block text-xs mb-1 font-medium" style={labelStyle}>Range</label>
-        <div className="flex flex-wrap gap-1 mb-1">
-          {range.map((r) => (
-            <span key={r} className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-mono"
-              style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', color: 'var(--color-info)' }}>
-              {r} <button type="button" onClick={() => setRange(range.filter((x) => x !== r))}><X size={10} /></button>
-            </span>
-          ))}
-        </div>
-        <div className="flex gap-1">
-          {propType === 'object' ? (
-            <input type="text" value={newRange} onChange={(e) => setNewRange(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addRange())}
-              placeholder="Range IRI" className="flex-1 px-2 py-1 rounded border text-xs font-mono focus:outline-none" style={inputStyle} />
-          ) : (
+      {propType === 'object' ? (
+        <IRIListSearchInput
+          label="Range"
+          values={range}
+          onChange={setRange}
+          placeholder="Search or enter class IRI…"
+          kind="concept"
+        />
+      ) : (
+        <div>
+          <label className="block text-xs mb-1 font-medium" style={labelStyle}>Range</label>
+          <div className="flex flex-wrap gap-1 mb-1">
+            {range.map((r) => (
+              <span key={r} className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-mono"
+                style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', color: 'var(--color-info)' }}>
+                {r} <button type="button" onClick={() => setRange(range.filter((x) => x !== r))}><X size={10} /></button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-1">
             <select value={newXsdRange} onChange={(e) => setNewXsdRange(e.target.value)}
               className="flex-1 px-2 py-1 rounded border text-xs" style={inputStyle}>
               {XSD_DATATYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-          )}
-          <button type="button" onClick={addRange} className="px-2 py-1 rounded border hover:opacity-80"
-            style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-            <Plus size={12} />
-          </button>
+            <button type="button" onClick={addXsdRange} className="px-2 py-1 rounded border hover:opacity-80"
+              style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              <Plus size={12} />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Object property extras */}
       {propType === 'object' && (
@@ -209,8 +185,12 @@ export default function PropertyForm({
           </div>
           <div>
             <label className="block text-xs mb-1 font-medium" style={labelStyle}>Inverse Of</label>
-            <input type="text" value={inverseOf} onChange={(e) => setInverseOf(e.target.value)}
-              placeholder="Inverse property IRI" className="w-full px-3 py-1.5 rounded border text-sm focus:outline-none font-mono" style={inputStyle} />
+            <IRISearchInput
+              value={inverseOf}
+              onChange={setInverseOf}
+              placeholder="Search or enter property IRI…"
+              kind="property"
+            />
           </div>
         </>
       )}

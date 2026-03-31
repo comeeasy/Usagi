@@ -1,5 +1,6 @@
 import { Plus, X, Upload } from 'lucide-react'
 import type { PropertyMapping } from '@/types/source'
+import IRISearchInput from '@/components/shared/IRISearchInput'
 
 interface MappingEditorProps {
   mappings?: PropertyMapping[]
@@ -83,7 +84,7 @@ export default function MappingEditor({ mappings = [], onChange, onImportR2RML }
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+      <div className="rounded-lg border" style={{ borderColor: 'var(--color-border)' }}>
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr style={{ backgroundColor: 'var(--color-bg-surface)' }}>
@@ -115,13 +116,11 @@ export default function MappingEditor({ mappings = [], onChange, onImportR2RML }
                     />
                   </td>
                   <td className="px-2 py-1">
-                    <input
-                      type="text"
+                    <IRISearchInput
                       value={m.property_iri}
-                      onChange={(e) => updateMapping(i, 'property_iri', e.target.value)}
-                      placeholder="https://example.org/prop"
-                      className="w-full px-2 py-1 rounded border focus:outline-none font-mono"
-                      style={inputStyle}
+                      onChange={(iri) => updateMapping(i, 'property_iri', iri)}
+                      placeholder="Search or enter property IRI…"
+                      kind="property"
                     />
                   </td>
                   <td className="px-2 py-1">

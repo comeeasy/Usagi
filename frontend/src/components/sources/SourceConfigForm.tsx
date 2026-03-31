@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { SourceType, BackingSourceCreate, JDBCConfig, APIConfig, CSVConfig } from '@/types/source'
+import IRISearchInput from '@/components/shared/IRISearchInput'
 
 interface SourceConfigFormProps {
   initialValues?: Partial<BackingSourceCreate>
@@ -114,8 +115,13 @@ export default function SourceConfigForm({
 
       <div>
         <label className="block text-xs mb-1 font-medium" style={labelStyle}>Concept IRI *</label>
-        <input type="text" value={conceptIri} onChange={(e) => setConceptIri(e.target.value)} required
-          placeholder="https://example.org/MyClass" className="w-full px-3 py-1.5 rounded border text-sm focus:outline-none font-mono" style={inputStyle} />
+        <IRISearchInput
+          value={conceptIri}
+          onChange={setConceptIri}
+          placeholder="Search or enter class IRI…"
+          kind="concept"
+          required
+        />
       </div>
 
       <div>

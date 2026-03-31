@@ -3,14 +3,25 @@
  * (super_classes, equivalent_classes, disjoint_with, restrictions)
  */
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ConceptForm from '../ConceptForm'
+import { renderWithProviders } from '@/tests/utils'
+
+// IRISearchInput uses useEntitySearch/useSearchRelations (react-query) + useParams
+// Mock them so tests don't need a real API
+vi.mock('@/hooks/useEntitySearch', () => ({
+  useEntitySearch: () => ({ data: [], isFetching: false }),
+  useSearchRelations: () => ({ data: [], isFetching: false }),
+}))
 
 const SAMPLE_IRI = 'https://x.org#MyClass'
 
 function renderForm(props: React.ComponentProps<typeof ConceptForm> = {}) {
-  return render(<ConceptForm {...props} />)
+  return renderWithProviders(<ConceptForm {...props} />, {
+    initialEntries: ['/ontologies/test-onto/concepts'],
+    path: '/ontologies/:ontologyId/concepts',
+  })
 }
 
 /** Fill the main IRI field so the form can be submitted (required in create mode). */
@@ -28,7 +39,10 @@ describe('ConceptForm — basic fields', () => {
   })
 
   it('shows Create button in create mode, Save in edit mode', () => {
-    const { rerender } = renderForm({ mode: 'create' })
+    const { rerender } = renderWithProviders(<ConceptForm mode="create" />, {
+      initialEntries: ['/ontologies/test-onto/concepts'],
+      path: '/ontologies/:ontologyId/concepts',
+    })
     expect(screen.getByRole('button', { name: /Create/i })).toBeInTheDocument()
 
     rerender(<ConceptForm mode="edit" />)
@@ -69,16 +83,17 @@ describe('ConceptForm — basic fields', () => {
   })
 })
 
-describe('ConceptForm — IRIListInput (superClasses / equivalentClasses / disjointWith)', () => {
+describe('ConceptForm — IRIListSearchInput (superClasses / equivalentClasses / disjointWith)', () => {
   it('adds a super class IRI via Enter key and includes it in submission', async () => {
     const onSubmit = vi.fn()
     renderForm({ onSubmit })
     await fillIRI()
 
-    const parentInput = screen.getByPlaceholderText(/ParentClass/i)
-    await userEvent.type(parentInput, 'https://x.org#Animal{Enter}')
+    // IRIListSearchInput for Parent Classes uses placeholder "Search or enter class IRI…"
+    const parentInputs = screen.getAllByPlaceholderText(/Search or enter class IRI/i)
+    await userEvent.type(parentInputs[0], 'https://x.org#Animal{Enter}')
 
-    // tag should appear
+    // tag should appear as a chip
     expect(screen.getByText('https://x.org#Animal')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Create/i }))
@@ -87,25 +102,12 @@ describe('ConceptForm — IRIListInput (superClasses / equivalentClasses / disjo
     )
   })
 
-  it('adds super class via the + button', async () => {
-    renderForm()
-    const parentInput = screen.getByPlaceholderText(/ParentClass/i)
-    await userEvent.type(parentInput, 'https://x.org#Base')
-
-    // the + button is right after the text input in the flex row
-    const row = parentInput.closest('div')!.parentElement!
-    const addBtn = row.querySelector('button[type="button"]')!
-    fireEvent.click(addBtn)
-
-    expect(screen.getByText('https://x.org#Base')).toBeInTheDocument()
-  })
-
   it('removes a tag using its × button', async () => {
     renderForm({ initialValues: { superClasses: ['https://x.org#Base'] } })
     expect(screen.getByText('https://x.org#Base')).toBeInTheDocument()
 
-    // the × button is inside the tag span
-    const tag = screen.getByText('https://x.org#Base').closest('span')!
+    // the × button is the sibling of the text span inside the chip wrapper
+    const tag = screen.getByText('https://x.org#Base').parentElement!
     const removeBtn = tag.querySelector('button')!
     fireEvent.click(removeBtn)
 
@@ -119,8 +121,9 @@ describe('ConceptForm — IRIListInput (superClasses / equivalentClasses / disjo
     renderForm({ onSubmit })
     await fillIRI()
 
-    const eqInput = screen.getByPlaceholderText(/EquivalentClass/i)
-    await userEvent.type(eqInput, 'https://x.org#EqClass{Enter}')
+    const inputs = screen.getAllByPlaceholderText(/Search or enter class IRI/i)
+    // Second IRIListSearchInput is equivalentClasses
+    await userEvent.type(inputs[1], 'https://x.org#EqClass{Enter}')
 
     fireEvent.click(screen.getByRole('button', { name: /Create/i }))
     expect(onSubmit).toHaveBeenCalledWith(
@@ -133,8 +136,9 @@ describe('ConceptForm — IRIListInput (superClasses / equivalentClasses / disjo
     renderForm({ onSubmit })
     await fillIRI()
 
-    const djInput = screen.getByPlaceholderText(/DisjointClass/i)
-    await userEvent.type(djInput, 'https://x.org#Other{Enter}')
+    const inputs = screen.getAllByPlaceholderText(/Search or enter class IRI/i)
+    // Third IRIListSearchInput is disjointWith
+    await userEvent.type(inputs[2], 'https://x.org#Other{Enter}')
 
     fireEvent.click(screen.getByRole('button', { name: /Create/i }))
     expect(onSubmit).toHaveBeenCalledWith(
@@ -155,10 +159,10 @@ describe('ConceptForm — RestrictionEditor', () => {
     renderForm({ onSubmit })
     await fillIRI()
 
-    await userEvent.type(screen.getByPlaceholderText(/Property IRI/i), 'https://x.org#worksIn')
-    await userEvent.type(screen.getByPlaceholderText(/Filler IRI/i), 'https://x.org#Dept')
+    await userEvent.type(screen.getByPlaceholderText(/Search or enter property IRI/i), 'https://x.org#worksIn{Enter}')
+    await userEvent.type(screen.getByPlaceholderText(/Filler IRI or value/i), 'https://x.org#Dept{Enter}')
 
-    // add button is inside the restriction add row
+    // add button (+) in the restriction panel
     const addPanel = screen.getByText('Add restriction').closest('div')!.parentElement!
     const addBtn = addPanel.querySelector('button[type="button"]')!
     fireEvent.click(addBtn)
@@ -202,7 +206,7 @@ describe('ConceptForm — RestrictionEditor', () => {
     await userEvent.clear(cardinalityInput)
     await userEvent.type(cardinalityInput, '2')
 
-    await userEvent.type(screen.getByPlaceholderText(/Property IRI/i), 'https://x.org#manages')
+    await userEvent.type(screen.getByPlaceholderText(/Search or enter property IRI/i), 'https://x.org#manages{Enter}')
 
     const addPanel = screen.getByText('Add restriction').closest('div')!.parentElement!
     const addBtn = addPanel.querySelector('button[type="button"]')!
