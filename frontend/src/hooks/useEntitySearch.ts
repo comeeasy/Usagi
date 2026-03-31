@@ -17,9 +17,17 @@ export function useEntitySearch(
 
   return useQuery({
     queryKey: ['entities', ontologyId, debouncedQuery, kind, useVector],
-    queryFn: () => {
-      if (useVector) return vectorSearch(ontologyId!, debouncedQuery)
-      return searchEntities(ontologyId!, debouncedQuery, kind)
+    queryFn: async () => {
+      if (!useVector) return searchEntities(ontologyId!, debouncedQuery, kind)
+
+      // Vector ON: keyword + vector 병렬 호출 후 병합 (IRI 중복 제거, keyword 결과 우선)
+      const [keywordResults, vectorResults] = await Promise.all([
+        searchEntities(ontologyId!, debouncedQuery, kind),
+        vectorSearch(ontologyId!, debouncedQuery),
+      ])
+      const seen = new Set(keywordResults.map((r) => r.iri))
+      const extra = vectorResults.filter((r) => !seen.has(r.iri))
+      return [...keywordResults, ...extra]
     },
     enabled: !!ontologyId && debouncedQuery.length > 0,
   })
