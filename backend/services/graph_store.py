@@ -69,11 +69,12 @@ class GraphStore:
                     await tx.run(
                         """
                         MERGE (parent:Concept {iri: $parentIri})
+                        ON CREATE SET parent.ontologyId = $ontologyId
                         WITH parent
                         MATCH (c:Concept {iri: $iri})
                         MERGE (c)-[:SUBCLASS_OF]->(parent)
                         """,
-                        iri=iri, parentIri=parent_iri,
+                        iri=iri, parentIri=parent_iri, ontologyId=ontology_id,
                     )
 
     async def upsert_individual(
@@ -189,42 +190,81 @@ class GraphStore:
         depth = max(1, min(depth, 5))
 
         async with self._session() as session:
-            result = await session.run(
-                f"""
-                MATCH path = (n)-[*1..{depth}]-(m)
-                WHERE n.iri IN $iris AND n.ontologyId = $ontologyId
-                WITH nodes(path) AS ns, relationships(path) AS rs
-                UNWIND ns AS node
-                WITH DISTINCT node, rs
-                WITH collect(DISTINCT node)[0..{_NODE_LIMIT}] AS nodes, rs
-                RETURN nodes, rs AS rels
-                """,
-                iris=entity_iris,
-                ontologyId=ontology_id,
-            )
+            if entity_iris:
+                # Step 1: BFS로 서브그래프 노드 수집
+                node_result = await session.run(
+                    f"""
+                    MATCH path = (n)-[*1..{depth}]-(m)
+                    WHERE n.iri IN $iris
+                    UNWIND nodes(path) AS node
+                    WITH DISTINCT node
+                    WITH collect(node)[0..{_NODE_LIMIT}] AS subNodes
+                    RETURN subNodes AS nodes
+                    """,
+                    iris=entity_iris,
+                )
+                # 루트 노드 자체도 포함 (경로가 없는 고립 노드 대비)
+                root_result = await session.run(
+                    "MATCH (n) WHERE n.iri IN $iris RETURN collect(n) AS nodes",
+                    iris=entity_iris,
+                )
+            else:
+                node_result = await session.run(
+                    f"""
+                    MATCH (n)
+                    WHERE n.ontologyId = $ontologyId
+                    WITH collect(DISTINCT n)[0..{_NODE_LIMIT}] AS subNodes
+                    RETURN subNodes AS nodes
+                    """,
+                    ontologyId=ontology_id,
+                )
+                root_result = None
 
+            # 노드 수집
             seen_nodes: dict[str, dict] = {}
-            seen_edges: dict[str, dict] = {}
+            node_record = await node_result.single()
+            all_nodes = node_record["nodes"] if node_record else []
+            if root_result:
+                root_record = await root_result.single()
+                if root_record:
+                    all_nodes = list(all_nodes) + list(root_record["nodes"])
 
-            async for record in result:
-                for node in record["nodes"]:
-                    iri = node.get("iri", "")
-                    if iri and iri not in seen_nodes:
-                        labels = list(node.labels)
-                        kind = "concept" if "Concept" in labels else "individual"
-                        seen_nodes[iri] = {
-                            "iri": iri,
-                            "label": node.get("label", iri),
-                            "kind": kind,
-                            "ontologyId": node.get("ontologyId", ontology_id),
-                        }
-                for rel in record["rels"]:
-                    edge_key = f"{rel.start_node['iri']}-{rel['propertyIri']}-{rel.end_node['iri']}"
+            for node in all_nodes:
+                iri = node.get("iri", "")
+                if iri and iri not in seen_nodes:
+                    labels = list(node.labels)
+                    kind = "concept" if "Concept" in labels else "individual"
+                    seen_nodes[iri] = {
+                        "iri": iri,
+                        "label": node.get("label", iri),
+                        "kind": kind,
+                        "ontologyId": node.get("ontologyId", ontology_id),
+                    }
+
+            # Step 2: 수집된 노드 집합 내 모든 엣지 조회
+            seen_edges: dict[str, dict] = {}
+            if seen_nodes:
+                node_iris = list(seen_nodes.keys())
+                edge_result = await session.run(
+                    """
+                    MATCH (a)-[r]-(b)
+                    WHERE a.iri IN $iris AND b.iri IN $iris
+                    RETURN collect(DISTINCT r) AS rels
+                    """,
+                    iris=node_iris,
+                )
+                edge_record = await edge_result.single()
+                rels = edge_record["rels"] if edge_record else []
+                for rel in rels:
+                    src = rel.start_node.get("iri", "")
+                    tgt = rel.end_node.get("iri", "")
+                    prop_iri = rel.get("propertyIri", rel.type)
+                    edge_key = f"{src}-{prop_iri}-{tgt}"
                     if edge_key not in seen_edges:
                         seen_edges[edge_key] = {
-                            "source": rel.start_node.get("iri", ""),
-                            "target": rel.end_node.get("iri", ""),
-                            "propertyIri": rel.get("propertyIri", rel.type),
+                            "source": src,
+                            "target": tgt,
+                            "propertyIri": prop_iri,
                             "propertyLabel": rel.get("propertyLabel", rel.type),
                             "kind": "relation",
                         }
@@ -234,7 +274,39 @@ class GraphStore:
             "edges": list(seen_edges.values()),
         }
 
+    async def sync_object_property_values(
+        self,
+        subject_iri: str,
+        opvs: list[dict],
+    ) -> None:
+        """Individual의 RELATION 엣지를 주어진 목록으로 전면 교체."""
+        async with self._session() as session:
+            await session.run(
+                "MATCH ({iri: $iri})-[r:RELATION]->() DELETE r",
+                iri=subject_iri,
+            )
+            for opv in opvs:
+                await session.run(
+                    """
+                    MATCH (s {iri: $sIri}), (o {iri: $oIri})
+                    MERGE (s)-[r:RELATION {propertyIri: $propIri}]->(o)
+                    SET r.propertyLabel = $propLabel
+                    """,
+                    sIri=subject_iri,
+                    oIri=opv["target_iri"],
+                    propIri=opv["property_iri"],
+                    propLabel=opv.get("property_label"),
+                )
+
     # ── 삭제 ──────────────────────────────────────────────────────────────
+
+    async def delete_node(self, iri: str) -> None:
+        """Neo4j에서 특정 노드와 연결된 관계 모두 삭제."""
+        async with self._session() as session:
+            await session.run(
+                "MATCH (n {iri: $iri}) DETACH DELETE n",
+                iri=iri,
+            )
 
     async def delete_ontology_data(self, ontology_id: str) -> None:
         """온톨로지 관련 Neo4j 데이터 전체 삭제 (배치)."""

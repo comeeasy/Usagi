@@ -324,6 +324,10 @@ WHERE  {{ GRAPH <{g}> {{ <{iri}> {pred} ?o }} }}""")
     updated = await get_individual(request, ontology_id, iri)
     data_props = {d.property_iri: d.value for d in updated.data_property_values}
     await graph_store.upsert_individual(ontology_id, iri, updated.label or "", updated.types, data_props)
+    await graph_store.sync_object_property_values(
+        iri,
+        [{"property_iri": o.property_iri, "target_iri": o.target_iri} for o in updated.object_property_values],
+    )
     return updated
 
 
@@ -332,6 +336,7 @@ WHERE  {{ GRAPH <{g}> {{ <{iri}> {pred} ?o }} }}""")
 @router.delete("/{iri:path}", status_code=204)
 async def delete_individual(request: Request, ontology_id: str, iri: str) -> None:
     store = request.app.state.ontology_store
+    graph_store = request.app.state.graph_store
     iri = unquote(iri)
 
     if not await store.sparql_ask(f"{_P} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}"):
@@ -341,3 +346,4 @@ async def delete_individual(request: Request, ontology_id: str, iri: str) -> Non
 DELETE {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}
 WHERE  {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}""")
     await store.sparql_update(f"{_P}\nDELETE WHERE {{ <{iri}> ?p ?o }}")
+    await graph_store.delete_node(iri)
