@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useParams, useLocation } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import OntologyTabs from '@/components/layout/OntologyTabs'
 import EntitySearchBar from '@/components/entities/EntitySearchBar'
@@ -11,6 +11,7 @@ import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import ErrorBoundary from '@/components/shared/ErrorBoundary'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { listConcepts, listIndividuals, createConcept, createIndividual, getConcept, getIndividual, updateConcept, updateIndividual, deleteConcept, deleteIndividual } from '@/api/entities'
+import { getOntology } from '@/api/ontologies'
 import type { Concept, ConceptUpdate } from '@/types/concept'
 import type { Individual, IndividualUpdate } from '@/types/individual'
 
@@ -19,6 +20,7 @@ type EntityKind = Concept | Individual
 
 export default function EntitiesPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
+  const location = useLocation()
   const queryClient = useQueryClient()
 
   const [tab, setTab] = useState<EntityTab>('concepts')
@@ -30,6 +32,30 @@ export default function EntitiesPage() {
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const PAGE_SIZE = 20
+
+  // Graph 탭 Edit 버튼으로 진입 시 해당 entity 편집 패널 자동 오픈
+  useEffect(() => {
+    const { editIri, entityType } = (location.state ?? {}) as { editIri?: string; entityType?: string }
+    if (!editIri || !ontologyId) return
+    const targetTab: EntityTab = entityType === 'individual' ? 'individuals' : 'concepts'
+    setTab(targetTab)
+    const fetchFn = targetTab === 'concepts'
+      ? () => getConcept(ontologyId, editIri)
+      : () => getIndividual(ontologyId, editIri)
+    fetchFn().then((entity) => {
+      setEditingEntity(entity as EntityKind)
+      setSelectedIri(editIri)
+    }).catch(() => {/* 조용히 무시 */})
+    // state 소비 후 history 교체 (뒤로가기 시 재진입 방지)
+    window.history.replaceState({}, '')
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ontologyQuery = useQuery({
+    queryKey: ['ontology', ontologyId],
+    queryFn: () => getOntology(ontologyId!),
+    enabled: !!ontologyId,
+  })
+  const iriPrefix = ontologyQuery.data?.base_iri ? `${ontologyQuery.data.base_iri}#` : ''
 
   const conceptsQuery = useQuery({
     queryKey: ['concepts', ontologyId, page, searchQuery],
@@ -214,6 +240,7 @@ export default function EntitiesPage() {
                 {tab === 'concepts' ? (
                   <ConceptForm
                     mode="create"
+                    iriPrefix={iriPrefix}
                     onSubmit={(v) => createConceptMutation.mutate({
                       iri: v.iri,
                       label: v.label,
@@ -228,6 +255,7 @@ export default function EntitiesPage() {
                 ) : (
                   <IndividualForm
                     mode="create"
+                    iriPrefix={iriPrefix}
                     onSubmit={(v) => {
                       const vals = v as { iri: string; label: string; typeIris: string[]; dataProperties: unknown[]; objectProperties: unknown[] }
                       createIndividualMutation.mutate({
