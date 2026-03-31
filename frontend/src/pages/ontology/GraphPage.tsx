@@ -293,7 +293,7 @@ export default function GraphPage() {
             nodeId={selectedNodeId}
             nodeData={selectedNodeData}
             onClose={() => setSelectedNodeId(null)}
-            onEdit={() => navigate(`/ontologies/${ontologyId}/entities`)}
+            onEdit={() => navigate(`/${ontologyId}/entities`)}
             onDelete={() => {
               if (!selectedNodeData || !window.confirm(`Delete "${selectedNodeData.label || selectedNodeData.iri}"?`)) return
               if (selectedNodeData.type === 'concept') {
