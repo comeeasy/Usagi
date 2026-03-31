@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 
 PREFIX = (
     "PREFIX owl: <http://www.w3.org/2002/07/owl#> "
-    "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>"
+    "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> "
+    "PREFIX dc: <http://purl.org/dc/terms/>"
 )
 
 
@@ -29,6 +30,15 @@ class SyncService:
         self._store = ontology_store
         self._graph_store = graph_store
 
+    async def _resolve_tbox(self, ontology_id: str) -> str | None:
+        """UUID → 온톨로지 IRI/tbox 반환."""
+        rows = await self._store.sparql_select(
+            f'{PREFIX} SELECT ?iri WHERE {{ GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }} }}'
+        )
+        if not rows:
+            return None
+        return f"{_v(rows[0].get('iri'))}/tbox"
+
     async def sync_tbox(self, ontology_id: str) -> int:
         """
         SPARQL SELECT로 owl:Class 추출 → Neo4j batch_upsert_concepts 호출.
@@ -36,24 +46,42 @@ class SyncService:
         Returns:
             int: 처리된 Concept 노드 수
         """
-        tbox_iri = f"{ontology_id}/tbox"
+        tbox_iri = await self._resolve_tbox(ontology_id)
+        if not tbox_iri:
+            logger.warning("sync_tbox: ontology not found: %s", ontology_id)
+            return 0
+
         query = f"""
             {PREFIX}
-            SELECT ?iri ?label WHERE {{
+            SELECT ?iri ?label ?superClass WHERE {{
                 GRAPH <{tbox_iri}> {{
                     ?iri a owl:Class .
                     OPTIONAL {{ ?iri rdfs:label ?label }}
+                    OPTIONAL {{ ?iri rdfs:subClassOf ?superClass .
+                                FILTER(isIRI(?superClass)) }}
                 }}
             }}
         """
 
         rows = await self._store.sparql_select(query)
 
-        concept_list = [
-            {"iri": _v(row.get("iri")), "label": _v(row.get("label"))}
-            for row in rows
-            if row.get("iri")
-        ]
+        # iri별로 super_classes 수집
+        concepts: dict[str, dict] = {}
+        for row in rows:
+            iri = _v(row.get("iri"))
+            if not iri:
+                continue
+            if iri not in concepts:
+                concepts[iri] = {
+                    "iri": iri,
+                    "label": _v(row.get("label")),
+                    "superClasses": [],
+                }
+            sc = _v(row.get("superClass"))
+            if sc and sc not in concepts[iri]["superClasses"]:
+                concepts[iri]["superClasses"].append(sc)
+
+        concept_list = list(concepts.values())
 
         if not concept_list:
             return 0

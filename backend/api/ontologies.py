@@ -244,3 +244,22 @@ async def delete_ontology(request: Request, ontology_id: str) -> None:
         await store.delete_graph(_v(row.get("g")))
 
     await graph_store.delete_ontology_data(ontology_id)
+
+
+
+# ── Neo4j 수동 동기화 ──────────────────────────────────────────────────────
+
+@router.post("/{ontology_id}/sync")
+async def sync_ontology(request: Request, ontology_id: str) -> dict:
+    """Oxigraph → Neo4j 전체 동기화 (TBox + ABox)."""
+    from services.sync_service import SyncService
+    store = _store(request)
+    graph_store = _graph_store(request)
+
+    raw = await _fetch_ontology(store, ontology_id)
+    if not raw:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Not found: {ontology_id}"})
+
+    svc = SyncService(store, graph_store)
+    result = await svc.full_sync(ontology_id)
+    return result

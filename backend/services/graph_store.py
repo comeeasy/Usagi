@@ -139,10 +139,11 @@ class GraphStore:
 
     async def batch_upsert_concepts(self, ontology_id: str, concepts: list[dict]) -> int:
         """
-        Concept 노드 배치 upsert.
+        Concept 노드 배치 upsert + SUBCLASS_OF 관계 동기화.
         concepts: [{ iri, label, superClasses: [iri] }]
         """
         async with self._session() as session:
+            # 1) 노드 upsert
             result = await session.run(
                 """
                 UNWIND $concepts AS c
@@ -154,7 +155,31 @@ class GraphStore:
                 ontologyId=ontology_id,
             )
             record = await result.single()
-            return record["cnt"] if record else 0
+            cnt = record["cnt"] if record else 0
+
+            # 2) SUBCLASS_OF 관계 동기화 (superClasses가 있는 항목만)
+            for concept in concepts:
+                iri = concept.get("iri")
+                super_classes = concept.get("superClasses") or []
+                if not iri or not super_classes:
+                    continue
+                # 기존 관계 삭제 후 재생성
+                await session.run(
+                    "MATCH (c:Concept {iri: $iri})-[r:SUBCLASS_OF]->() DELETE r",
+                    iri=iri,
+                )
+                for parent_iri in super_classes:
+                    await session.run(
+                        """
+                        MERGE (parent:Concept {iri: $parentIri})
+                        ON CREATE SET parent.ontologyId = $ontologyId
+                        WITH parent
+                        MATCH (c:Concept {iri: $iri})
+                        MERGE (c)-[:SUBCLASS_OF]->(parent)
+                        """,
+                        iri=iri, parentIri=parent_iri, ontologyId=ontology_id,
+                    )
+            return cnt
 
     async def batch_upsert_individuals(self, ontology_id: str, individuals: list[dict]) -> int:
         """
