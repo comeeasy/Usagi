@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X, Pencil, Trash2 } from 'lucide-react'
 import IRIBadge from '@/components/shared/IRIBadge'
 
 interface NodeData {
@@ -13,9 +13,11 @@ interface NodeDetailPanelProps {
   nodeId?: string | null
   nodeData?: NodeData | null
   onClose?: () => void
+  onEdit?: () => void
+  onDelete?: () => void
 }
 
-export default function NodeDetailPanel({ nodeId, nodeData, onClose }: NodeDetailPanelProps) {
+export default function NodeDetailPanel({ nodeId, nodeData, onClose, onEdit, onDelete }: NodeDetailPanelProps) {
   if (!nodeId) return null
 
   const iri = nodeData?.iri ?? nodeId
@@ -99,6 +101,32 @@ export default function NodeDetailPanel({ nodeId, nodeData, onClose }: NodeDetai
               </p>
             </div>
           ))}
+
+        {/* Actions */}
+        {(onEdit || onDelete) && (
+          <div className="flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+            {onEdit && (
+              <button
+                onClick={onEdit}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium hover:opacity-80 flex-1"
+                style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
+              >
+                <Pencil size={12} />
+                Edit
+              </button>
+            )}
+            {onDelete && (
+              <button
+                onClick={onDelete}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium hover:opacity-80 flex-1"
+                style={{ backgroundColor: 'var(--color-error, #ef4444)', color: '#fff' }}
+              >
+                <Trash2 size={12} />
+                Delete
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </aside>
   )
