@@ -1,18 +1,11 @@
 // Backing Source API client
 
 import { apiGet, apiPost, apiPut, apiDelete } from './client'
-import type { BackingSource, BackingSourceCreate } from '@/types/source'
-import type { PaginatedResponse, JobResponse } from '@/types/ontology'
+import type { BackingSource, BackingSourceCreate, UploadResult } from '@/types/source'
+import type { JobResponse } from '@/types/ontology'
 
-export function listSources(
-  ontologyId: string,
-  params?: { page?: number; pageSize?: number },
-): Promise<PaginatedResponse<BackingSource>> {
-  const qs = new URLSearchParams()
-  if (params?.page) qs.set('page', String(params.page))
-  if (params?.pageSize) qs.set('page_size', String(params.pageSize))
-  const query = qs.toString() ? `?${qs.toString()}` : ''
-  return apiGet(`/ontologies/${ontologyId}/sources${query}`)
+export function listSources(ontologyId: string): Promise<BackingSource[]> {
+  return apiGet(`/ontologies/${ontologyId}/sources`)
 }
 
 export function getSource(ontologyId: string, sourceId: string): Promise<BackingSource> {
@@ -37,4 +30,24 @@ export function deleteSource(ontologyId: string, sourceId: string): Promise<void
 
 export function triggerSync(ontologyId: string, sourceId: string): Promise<JobResponse> {
   return apiPost(`/ontologies/${ontologyId}/sources/${sourceId}/sync`, {})
+}
+
+export async function uploadCsvFile(
+  ontologyId: string,
+  sourceId: string,
+  file: File,
+): Promise<UploadResult> {
+  const form = new FormData()
+  form.append('file', file)
+  // apiPost는 JSON만 지원하므로 fetch 직접 사용
+  const base = (await import('./client')).API_BASE_URL
+  const res = await fetch(`${base}/ontologies/${ontologyId}/sources/${sourceId}/upload`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }))
+    throw new Error(err.detail ?? err.message ?? 'Upload failed')
+  }
+  return res.json()
 }

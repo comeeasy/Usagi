@@ -7,8 +7,11 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from config import settings
 from services.ontology_store import OntologyStore
@@ -97,6 +100,11 @@ app.include_router(sources.router, prefix=API_PREFIX)
 from app_mcp.tools import mcp
 
 app.mount("/mcp", mcp.sse_app())
+
+# 업로드된 CSV 파일 정적 서빙 (Neo4j LOAD CSV 접근용)
+_UPLOADS_DIR = Path("uploads")
+_UPLOADS_DIR.mkdir(exist_ok=True)
+app.mount("/static/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")
 
 
 @app.get("/health")

@@ -1,6 +1,7 @@
 // Base URL 설정, fetch wrapper, 에러 파싱
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
+const BASE_URL = API_BASE_URL
 
 export class ApiError extends Error {
   constructor(

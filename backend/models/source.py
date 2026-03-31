@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-SourceType = Literal["jdbc", "api-rest", "api-stream", "manual", "owl-file"]
+SourceType = Literal["jdbc", "api-rest", "api-stream", "manual", "owl-file", "csv-file"]
 
 
 class JDBCConfig(BaseModel):
@@ -38,6 +38,15 @@ class StreamConfig(BaseModel):
     delivery_semantics: Literal["exactly-once", "at-least-once"] = "at-least-once"
 
 
+class CSVConfig(BaseModel):
+    file_name: str = ""                          # 업로드 후 서버 저장 파일명
+    delimiter: Literal[",", ";", "\t", "|"] = ","
+    has_header: bool = True
+    primary_key_field: str = ""                  # IRI 생성에 쓸 PK 컬럼명
+    encoding: Literal["utf-8", "utf-16", "latin-1"] = "utf-8"
+    skip_rows: int = 0                           # 헤더 위 건너뛸 행 수
+
+
 class PropertyMapping(BaseModel):
     source_field: str           # 소스의 컬럼/필드 이름
     property_iri: str           # 대상 OWL Property IRI
@@ -53,7 +62,7 @@ class BackingSource(BaseModel):
     iri_template: str           # IRI 생성 템플릿: "https://ex.org/emp/{emp_id}"
     property_mappings: list[PropertyMapping] = []
     conflict_policy: Literal["user-edit-wins", "latest-wins"] = "user-edit-wins"
-    config: JDBCConfig | APIConfig | StreamConfig | dict[str, Any] = {}
+    config: JDBCConfig | APIConfig | StreamConfig | CSVConfig | dict[str, Any] = {}
     status: Literal["active", "paused", "error"] = "active"
     last_sync_at: str | None = None  # ISO 8601
 
@@ -65,7 +74,7 @@ class BackingSourceCreate(BaseModel):
     iri_template: str
     property_mappings: list[PropertyMapping] = []
     conflict_policy: Literal["user-edit-wins", "latest-wins"] = "user-edit-wins"
-    config: JDBCConfig | APIConfig | StreamConfig | dict[str, Any] = {}
+    config: JDBCConfig | APIConfig | StreamConfig | CSVConfig | dict[str, Any] = {}
 
 
 class BackingSourceUpdate(BaseModel):
@@ -74,7 +83,7 @@ class BackingSourceUpdate(BaseModel):
     iri_template: str | None = None
     property_mappings: list[PropertyMapping] | None = None
     conflict_policy: Literal["user-edit-wins", "latest-wins"] | None = None
-    config: JDBCConfig | APIConfig | StreamConfig | dict[str, Any] | None = None
+    config: JDBCConfig | APIConfig | StreamConfig | CSVConfig | dict[str, Any] | None = None
     status: Literal["active", "paused", "error"] | None = None
 
 
