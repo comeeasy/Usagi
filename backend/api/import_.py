@@ -7,10 +7,13 @@ api/import_.py — 온톨로지 파일/URL Import 라우터
   POST /ontologies/{id}/import/standard   사전 등록 온톨로지 임포트
 """
 
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 import services.import_service as import_svc
 
@@ -72,6 +75,7 @@ async def import_file(
     try:
         triples = await import_svc.parse_file(content, fmt)
     except Exception as e:
+        logger.exception("PARSE_ERROR file=%s fmt=%s", file.filename, fmt)
         raise HTTPException(400, detail={"code": "PARSE_ERROR", "message": str(e)})
 
     count = await import_svc.bulk_insert(store, triples, tbox_iri)

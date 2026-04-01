@@ -1,6 +1,6 @@
 // Ontology CRUD API client
 
-import { apiGet, apiPost, apiPut, apiDelete } from './client'
+import { apiFetch, apiGet, apiPost, apiPut, apiDelete } from './client'
 import type { Ontology, OntologyCreate, OntologyUpdate, PaginatedResponse } from '@/types/ontology'
 
 // Backend returns {label, iri} but frontend types use {name, base_iri}
@@ -75,10 +75,14 @@ export function getSubgraph(
 
 export function importOntologyFile(
   ontologyId: string,
-  data: { format: string; content: string; file_name?: string },
+  file: File,
 ): Promise<{ message: string; triples_imported?: number }> {
-  return apiPost(`/ontologies/${ontologyId}/import/file`, data)
-    .then((res: { imported: number }) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
+  const form = new FormData()
+  form.append('file', file)
+  return apiFetch<{ imported: number }>(`/ontologies/${ontologyId}/import/file`, {
+    method: 'POST',
+    body: form,
+  }).then((res) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
 }
 
 export function importOntologyUrl(
@@ -103,7 +107,7 @@ export function importOntology(
   data: { format: string; content?: string; url?: string; file_name?: string },
 ): Promise<{ message: string; triples_imported?: number }> {
   if (data.url) return importOntologyUrl(ontologyId, data.url)
-  if (data.content) return importOntologyFile(ontologyId, { format: data.format, content: data.content, file_name: data.file_name })
+  if (data.content) return Promise.reject(new Error('importOntology: use importOntologyFile with a File object instead'))
   return Promise.reject(new Error('importOntology: url or content required'))
 }
 

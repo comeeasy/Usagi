@@ -32,9 +32,12 @@ export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
+  const isFormData = options?.body instanceof FormData
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
+    headers: isFormData
+      ? { ...options?.headers }
+      : { 'Content-Type': 'application/json', ...options?.headers },
   })
   if (!response.ok) {
     await parseError(response)

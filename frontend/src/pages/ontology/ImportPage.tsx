@@ -30,11 +30,10 @@ export default function ImportPage() {
     mutationFn: (fn: () => Promise<{ message: string; triples_imported?: number }>) => fn(),
   })
 
-  const handleFileImport = async (e: React.FormEvent) => {
+  const handleFileImport = (e: React.FormEvent) => {
     e.preventDefault()
     if (!file) return
-    const content = await file.text()
-    importMutation.mutate(() => importOntologyFile(ontologyId!, { format, content, file_name: file.name }))
+    importMutation.mutate(() => importOntologyFile(ontologyId!, file))
   }
 
   const handleUrlImport = (e: React.FormEvent) => {
