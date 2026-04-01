@@ -101,6 +101,21 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
           },
         },
         {
+          selector: 'edge[type = "subclass"]',
+          style: {
+            'line-color': '#30363D',
+            'target-arrow-color': '#30363D',
+            'target-arrow-shape': 'triangle',
+            'curve-style': 'bezier',
+            'label': 'data(label)',
+            'font-size': 9,
+            'color': '#8B949E',
+            'text-rotation': 'autorotate',
+            'width': 1.5,
+            'line-style': 'dashed',
+          },
+        },
+        {
           selector: 'edge',
           style: {
             'line-color': '#30363D',

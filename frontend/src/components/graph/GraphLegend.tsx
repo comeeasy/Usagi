@@ -3,8 +3,7 @@ export default function GraphLegend() {
     { color: '#2F81F7', label: 'Concept', shape: 'rect' },
     { color: '#3FB950', label: 'Individual', shape: 'circle' },
     { color: '#A371F7', label: 'Object Property', shape: 'line' },
-    { color: '#D29922', label: 'Data Property', shape: 'line' },
-    { color: '#30363D', label: 'Subclass', shape: 'line' },
+    { color: '#30363D', label: 'Subclass / Type', shape: 'dashed' },
   ]
 
   return (
@@ -29,6 +28,11 @@ export default function GraphLegend() {
             <div
               className="w-3 h-3 rounded-full flex-shrink-0"
               style={{ backgroundColor: color }}
+            />
+          ) : shape === 'dashed' ? (
+            <div
+              className="w-4 h-0.5 flex-shrink-0"
+              style={{ backgroundImage: `repeating-linear-gradient(to right, ${color} 0, ${color} 3px, transparent 3px, transparent 6px)` }}
             />
           ) : (
             <div className="w-4 h-0.5 flex-shrink-0" style={{ backgroundColor: color }} />

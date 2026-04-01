@@ -67,7 +67,7 @@ export function getSubgraph(
         source: e.source,
         target: e.target,
         label: e.propertyLabel ?? e.propertyIri,
-        type: 'object',
+        type: (e.propertyIri === 'SUBCLASS_OF' || e.propertyIri === 'TYPE') ? 'subclass' : 'object',
       },
     })),
   }))
