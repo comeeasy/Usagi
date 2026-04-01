@@ -9,7 +9,7 @@ export interface CyElement {
   data: {
     id: string
     label?: string
-    type?: 'concept' | 'individual'
+    type?: string
     source?: string
     target?: string
     iri?: string

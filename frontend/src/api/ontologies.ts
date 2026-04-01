@@ -66,7 +66,16 @@ export function getSubgraph(
         id: `${e.source}-${e.propertyIri}-${e.target}`,
         source: e.source,
         target: e.target,
-        label: e.propertyLabel ?? e.propertyIri,
+        label: (() => {
+          const raw = e.propertyLabel ?? e.propertyIri
+          if (!raw || raw === 'RELATION' || raw === 'TYPE' || raw === 'SUBCLASS_OF') {
+            const iri = e.propertyIri
+            if (iri.includes('#')) return iri.split('#').at(-1) ?? iri
+            if (iri.includes('/')) return iri.split('/').at(-1) ?? iri
+            return iri
+          }
+          return raw
+        })(),
         type: (e.propertyIri === 'SUBCLASS_OF' || e.propertyIri === 'TYPE') ? 'subclass' : 'object',
       },
     })),

@@ -289,11 +289,19 @@ class GraphStore:
                     prop_iri = rel.get("propertyIri", rel.type)
                     edge_key = f"{src}-{prop_iri}-{tgt}"
                     if edge_key not in seen_edges:
+                        prop_label = rel.get("propertyLabel")
+                        if not prop_label or prop_label == rel.type:
+                            if "#" in prop_iri:
+                                prop_label = prop_iri.split("#")[-1]
+                            elif "/" in prop_iri:
+                                prop_label = prop_iri.split("/")[-1]
+                            else:
+                                prop_label = prop_iri
                         seen_edges[edge_key] = {
                             "source": src,
                             "target": tgt,
                             "propertyIri": prop_iri,
-                            "propertyLabel": rel.get("propertyLabel", rel.type),
+                            "propertyLabel": prop_label,
                             "kind": "relation",
                         }
 
