@@ -1,6 +1,6 @@
 # Web framework
 fastapi>=0.115.12
-uvicorn[standard]==0.30.6
+uvicorn[standard]>=0.30.6
 
 # Data validation & settings
 pydantic>=2.8.2
@@ -18,14 +18,14 @@ neo4j==5.23.0
 kafka-python==2.0.2
 
 # MCP server
-fastmcp==2.0.0
+fastmcp==2.14.6
 
 # Vector search (ONNX 기반, PyTorch 불필요)
 fastembed>=0.3.0
 numpy>=1.26.0
 
 # HTTP client (for Import from URL)
-httpx==0.27.2
+httpx>=0.27.2
 
 # File upload
 python-multipart==0.0.9

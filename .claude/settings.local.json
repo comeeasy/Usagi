@@ -95,7 +95,14 @@
       "Bash(docker ps:*)",
       "Bash(docker exec:*)",
       "Bash(curl:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(gh pr:*)",
+      "Bash(claude mcp:*)",
+      "mcp__usagi__list_ontologies",
+      "mcp__usagi__search_entities",
+      "mcp__usagi__search_relations",
+      "mcp__usagi__sparql_query",
+      "mcp__usagi__get_ontology_summary"
     ]
   }
 }

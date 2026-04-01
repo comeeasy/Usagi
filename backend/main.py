@@ -99,7 +99,7 @@ app.include_router(sources.router, prefix=API_PREFIX)
 
 from app_mcp.tools import mcp
 
-app.mount("/mcp", mcp.sse_app())
+app.mount("/mcp", mcp.http_app(transport="sse"))
 
 # 업로드된 CSV 파일 정적 서빙 (Neo4j LOAD CSV 접근용)
 _UPLOADS_DIR = Path("uploads")
