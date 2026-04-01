@@ -23,6 +23,10 @@ from services.ingestion.kafka_producer import KafkaProducer
 
 logger = logging.getLogger(__name__)
 
+# MCP 앱을 lifespan보다 먼저 생성 (lifespan에서 참조)
+from app_mcp.tools import mcp as _mcp
+_mcp_app = _mcp.http_app(transport="sse")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -97,9 +101,7 @@ app.include_router(merge.router, prefix=API_PREFIX)
 app.include_router(reasoner.router, prefix=API_PREFIX)
 app.include_router(sources.router, prefix=API_PREFIX)
 
-from app_mcp.tools import mcp
-
-app.mount("/mcp", mcp.http_app(transport="sse"))
+app.mount("/mcp", _mcp_app)
 
 # 업로드된 CSV 파일 정적 서빙 (Neo4j LOAD CSV 접근용)
 _UPLOADS_DIR = Path("uploads")

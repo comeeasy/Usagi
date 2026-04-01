@@ -207,6 +207,7 @@ class GraphStore:
         ontology_id: str,
         entity_iris: list[str],
         depth: int,
+        ont_iri: str | None = None,
     ) -> dict:
         """
         BFS로 서브그래프 탐색. 노드 최대 _NODE_LIMIT개.
@@ -234,14 +235,15 @@ class GraphStore:
                     iris=entity_iris,
                 )
             else:
+                ont_ids = list({ontology_id, ont_iri} - {None})
                 node_result = await session.run(
                     f"""
                     MATCH (n)
-                    WHERE n.ontologyId = $ontologyId
+                    WHERE n.ontologyId IN $ontologyIds
                     WITH collect(DISTINCT n)[0..{_NODE_LIMIT}] AS subNodes
                     RETURN subNodes AS nodes
                     """,
-                    ontologyId=ontology_id,
+                    ontologyIds=ont_ids,
                 )
                 root_result = None
 

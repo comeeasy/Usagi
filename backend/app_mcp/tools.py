@@ -78,6 +78,22 @@ def _xsd_full(xsd: str) -> str:
     return xsd if xsd.startswith("http") else _XSD_BASE + xsd
 
 
+def _parse_list(val: Any) -> list | None:
+    """SSE 전송 시 JSON 문자열로 직렬화된 list 파라미터를 파싱."""
+    if val is None:
+        return None
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
+        import json
+        try:
+            parsed = json.loads(val)
+            return parsed if isinstance(parsed, list) else None
+        except (json.JSONDecodeError, ValueError):
+            return None
+    return None
+
+
 @mcp.tool()
 async def list_ontologies() -> list[dict]:
     """온톨로지 목록 조회 MCP 도구.
@@ -390,6 +406,12 @@ async def add_individual(
     if store is None:
         return {"error": "store not available"}
 
+    types = _parse_list(types)
+    data_properties = _parse_list(data_properties)
+    object_properties = _parse_list(object_properties)
+    same_as = _parse_list(same_as)
+    different_from = _parse_list(different_from)
+
     # IRI 중복 확인
     exists = await store.sparql_ask(
         f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}"
@@ -483,6 +505,12 @@ async def update_individual(
     graph_store = _services.get("graph_store")
     if store is None:
         return {"error": "store not available"}
+
+    types = _parse_list(types)
+    data_properties = _parse_list(data_properties)
+    object_properties = _parse_list(object_properties)
+    same_as = _parse_list(same_as)
+    different_from = _parse_list(different_from)
 
     exists = await store.sparql_ask(
         f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}"
