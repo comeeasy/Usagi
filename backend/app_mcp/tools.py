@@ -360,10 +360,10 @@ async def run_reasoner(
                 return {"job_id": job_id, "status": "completed", "error": "no result"}
             return {
                 "job_id": job_id,
-                "consistent": result.consistent,
-                "violations": [v.model_dump() for v in result.violations],
-                "inferred_axioms_count": len(result.inferred_axioms),
-                "execution_ms": result.execution_ms,
+                "consistent": result["consistent"],
+                "violations": result["violations"],
+                "inferred_axioms_count": len(result.get("inferred_axioms", [])),
+                "execution_ms": result.get("execution_ms"),
             }
 
         if status == "failed":

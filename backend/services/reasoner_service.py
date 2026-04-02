@@ -62,16 +62,20 @@ class ReasonerService:
         tmp_path: str | None = None
 
         try:
-            rows = await self._store.sparql_select(f"""
-                PREFIX owl: <http://www.w3.org/2002/07/owl#>
-                PREFIX dc:  <http://purl.org/dc/terms/>
-                SELECT ?iri WHERE {{
-                    GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }}
-                }} LIMIT 1
-            """)
-            if not rows:
-                raise ValueError(f"Ontology not found: {ontology_id}")
-            tbox_iri = f"{rows[0]['iri']['value']}/tbox"
+            if ontology_id.startswith("http"):
+                ont_iri = ontology_id
+            else:
+                rows = await self._store.sparql_select(f"""
+                    PREFIX owl: <http://www.w3.org/2002/07/owl#>
+                    PREFIX dc:  <http://purl.org/dc/terms/>
+                    SELECT ?iri WHERE {{
+                        GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }}
+                    }} LIMIT 1
+                """)
+                if not rows:
+                    raise ValueError(f"Ontology not found: {ontology_id}")
+                ont_iri = rows[0]['iri']['value']
+            tbox_iri = f"{ont_iri}/tbox"
 
             rdfxml_bytes = await self._store.export_rdfxml(tbox_iri)
 
@@ -103,7 +107,7 @@ class ReasonerService:
 
                 if triples:
                     await self._store.insert_triples(
-                        f"{ontology_id}/inferred", triples
+                        f"{ont_iri}/inferred", triples
                     )
 
             # SPARQL 기반 추가 위반 검출 (owlready2 불필요)
@@ -322,8 +326,8 @@ GROUP BY ?ind""")
 SELECT DISTINCT ?ind ?prop ?domain WHERE {{
     GRAPH <{tbox_iri}> {{ ?prop rdfs:domain ?domain . }}
     GRAPH ?g {{ ?ind ?prop ?val . FILTER(isIRI(?ind)) }}
-    FILTER NOT EXISTS {{ GRAPH ?gt {{ ?ind a ?t . ?t rdfs:subClassOf* ?domain . }} }}
     FILTER NOT EXISTS {{ GRAPH ?ga {{ ?ind a ?domain }} }}
+    FILTER NOT EXISTS {{ GRAPH ?gt1 {{ ?ind a ?t }} GRAPH ?gt2 {{ ?t rdfs:subClassOf* ?domain }} }}
 }}""")
 
         for r in domain_rows:
@@ -343,8 +347,8 @@ SELECT DISTINCT ?ind ?prop ?domain WHERE {{
 SELECT DISTINCT ?ind ?prop ?range ?val WHERE {{
     GRAPH <{tbox_iri}> {{ ?prop rdfs:range ?range . }}
     GRAPH ?g {{ ?ind ?prop ?val . FILTER(isIRI(?val)) }}
-    FILTER NOT EXISTS {{ GRAPH ?gt {{ ?val a ?t . ?t rdfs:subClassOf* ?range . }} }}
     FILTER NOT EXISTS {{ GRAPH ?ga {{ ?val a ?range }} }}
+    FILTER NOT EXISTS {{ GRAPH ?gt1 {{ ?val a ?t }} GRAPH ?gt2 {{ ?t rdfs:subClassOf* ?range }} }}
 }}""")
 
         for r in range_rows:

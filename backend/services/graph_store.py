@@ -247,7 +247,8 @@ class GraphStore:
                     WITH collect(DISTINCT n) AS direct
                     UNWIND direct AS d
                     OPTIONAL MATCH (d)--(neighbor)
-                    WITH direct + collect(DISTINCT neighbor) AS all_nodes
+                    WITH direct, collect(DISTINCT neighbor) AS neighbors
+                    WITH direct + neighbors AS all_nodes
                     UNWIND all_nodes AS node
                     WITH DISTINCT node
                     WHERE node IS NOT NULL
