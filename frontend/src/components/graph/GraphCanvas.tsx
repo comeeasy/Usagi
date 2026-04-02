@@ -9,7 +9,7 @@ export interface CyElement {
   data: {
     id: string
     label?: string
-    type?: string
+    kind?: string
     source?: string
     target?: string
     iri?: string
@@ -41,7 +41,7 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
       elements: elements as cytoscape.ElementDefinition[],
       style: [
         {
-          selector: 'node[type = "concept"]',
+          selector: 'node[kind = "concept"]',
           style: {
             'background-color': '#2F81F7',
             'label': 'data(label)',
@@ -57,7 +57,7 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
           },
         },
         {
-          selector: 'node[type = "individual"]',
+          selector: 'node[kind = "individual"]',
           style: {
             'background-color': '#3FB950',
             'label': 'data(label)',
@@ -87,7 +87,7 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
           },
         },
         {
-          selector: 'edge[type = "object"]',
+          selector: 'edge[kind = "object"]',
           style: {
             'line-color': '#A371F7',
             'target-arrow-color': '#A371F7',
@@ -101,7 +101,7 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
           },
         },
         {
-          selector: 'edge[type = "subclass"]',
+          selector: 'edge[kind = "subclass"]',
           style: {
             'line-color': '#30363D',
             'target-arrow-color': '#30363D',

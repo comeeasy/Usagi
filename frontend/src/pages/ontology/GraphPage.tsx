@@ -294,11 +294,11 @@ export default function GraphPage() {
             nodeData={selectedNodeData}
             onClose={() => setSelectedNodeId(null)}
             onEdit={() => navigate(`/${ontologyId}/entities`, {
-              state: { editIri: selectedNodeData?.iri, entityType: selectedNodeData?.type },
+              state: { editIri: selectedNodeData?.iri, entityType: selectedNodeData?.kind },
             })}
             onDelete={() => {
               if (!selectedNodeData || !window.confirm(`Delete "${selectedNodeData.label || selectedNodeData.iri}"?`)) return
-              if (selectedNodeData.type === 'concept') {
+              if (selectedNodeData.kind === 'concept') {
                 deleteConceptMutation.mutate(selectedNodeData.iri as string)
               } else {
                 deleteIndividualMutation.mutate(selectedNodeData.iri as string)

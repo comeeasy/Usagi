@@ -59,7 +59,7 @@ export function getSubgraph(
     depth: params.depth ?? 2,
   }).then((raw: { nodes: { iri: string; label: string; kind: string }[]; edges: { source: string; target: string; propertyIri: string; propertyLabel: string }[] }) => ({
     nodes: raw.nodes.map((n) => ({
-      data: { id: n.iri, label: n.label, type: n.kind as 'concept' | 'individual', iri: n.iri },
+      data: { id: n.iri, label: n.label, kind: n.kind, iri: n.iri },
     })),
     edges: raw.edges.map((e) => ({
       data: {
@@ -76,7 +76,7 @@ export function getSubgraph(
           }
           return raw
         })(),
-        type: (e.propertyIri === 'SUBCLASS_OF' || e.propertyIri === 'TYPE') ? 'subclass' : 'object',
+        kind: (e.propertyIri === 'SUBCLASS_OF' || e.propertyIri === 'TYPE') ? 'subclass' : 'object',
       },
     })),
   }))
