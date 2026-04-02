@@ -152,24 +152,9 @@ async def search_entities(
     if store is None:
         return []
 
-    # ── 벡터 검색 (use_vector=True) ───────────────────────────────────────
-    if use_vector:
-        vector_manager = _services.get("vector_index_manager")
-        if vector_manager is not None:
-            try:
-                vec_results = await vector_manager.search(ontology_id, query, limit, store)
-                if vec_results:
-                    # kind 필터 적용
-                    if kind != "all":
-                        vec_results = [r for r in vec_results if r.get("kind") == kind]
-                    if vec_results:
-                        return vec_results[:limit]
-            except Exception:
-                pass  # 인덱스 미구축 등 → 키워드 검색으로 폴백
-
-    # ── 키워드 검색 (폴백 또는 use_vector=False) ──────────────────────────
+    # ── 키워드 검색 ───────────────────────────────────────────────────────
     tbox_iri = f"{ontology_id}/tbox"
-    results: list[dict] = []
+    keyword_results: list[dict] = []
 
     if kind in ("concept", "all"):
         sparql = f"""
@@ -190,10 +175,10 @@ async def search_entities(
             iri = row.get("iri", {}).get("value", "")
             label = row.get("label", {}).get("value", iri)
             if iri:
-                results.append({"iri": iri, "label": label, "kind": "concept"})
+                keyword_results.append({"iri": iri, "label": label, "kind": "concept"})
 
     if kind in ("individual", "all"):
-        remaining = limit - len(results)
+        remaining = limit - len(keyword_results)
         if remaining > 0:
             sparql = f"""
                 PREFIX owl: <http://www.w3.org/2002/07/owl#>
@@ -213,9 +198,26 @@ async def search_entities(
                 iri = row.get("iri", {}).get("value", "")
                 label = row.get("label", {}).get("value", iri)
                 if iri:
-                    results.append({"iri": iri, "label": label, "kind": "individual"})
+                    keyword_results.append({"iri": iri, "label": label, "kind": "individual"})
 
-    return results[:limit]
+    if not use_vector:
+        return keyword_results[:limit]
+
+    # ── 벡터 검색 병렬 실행 후 병합 (프론트엔드와 동일한 방식) ───────────
+    # keyword 결과 우선, vector 결과에서 중복 IRI 제외한 것을 추가
+    vec_results: list[dict] = []
+    vector_manager = _services.get("vector_index_manager")
+    if vector_manager is not None:
+        try:
+            vec_results = await vector_manager.search(ontology_id, query, limit, store)
+            if kind != "all":
+                vec_results = [r for r in vec_results if r.get("kind") == kind]
+        except Exception:
+            pass  # 인덱스 미구축 등 → keyword 결과만 반환
+
+    seen = {r["iri"] for r in keyword_results}
+    merged = keyword_results + [r for r in vec_results if r.get("iri") not in seen]
+    return merged[:limit]
 
 
 @mcp.tool()
