@@ -41,11 +41,12 @@ mcp = FastMCP("Ontology Platform")
 _services: dict[str, Any] = {}
 
 
-def init_services(store: Any, graph_store: Any, reasoner: Any) -> None:
+def init_services(store: Any, graph_store: Any, reasoner: Any, vector_index_manager: Any = None) -> None:
     """앱 lifespan에서 호출하여 서비스 인스턴스를 등록."""
     _services["store"] = store
     _services["graph_store"] = graph_store
     _services["reasoner"] = reasoner
+    _services["vector_index_manager"] = vector_index_manager
     logger.info("MCP tools: services registered")
 
 
@@ -132,14 +133,17 @@ async def search_entities(
     query: str,
     kind: str = "all",
     limit: int = 10,
+    use_vector: bool = True,
 ) -> list[dict]:
-    """Entity 검색 MCP 도구 (키워드).
+    """Entity 검색 MCP 도구 (키워드 + 벡터 하이브리드).
 
     Args:
         ontology_id: 대상 온톨로지 IRI
-        query: 검색 키워드
+        query: 검색 키워드 또는 자연어 문장
         kind: "concept" | "individual" | "all"
         limit: 최대 결과 수
+        use_vector: True(기본값)이면 벡터 유사도 검색과 키워드 검색을 함께 수행.
+                    벡터 인덱스 미구축 시 키워드 검색으로 자동 폴백.
 
     Returns:
         [{ iri, label, kind }]
@@ -148,6 +152,22 @@ async def search_entities(
     if store is None:
         return []
 
+    # ── 벡터 검색 (use_vector=True) ───────────────────────────────────────
+    if use_vector:
+        vector_manager = _services.get("vector_index_manager")
+        if vector_manager is not None:
+            try:
+                vec_results = await vector_manager.search(ontology_id, query, limit, store)
+                if vec_results:
+                    # kind 필터 적용
+                    if kind != "all":
+                        vec_results = [r for r in vec_results if r.get("kind") == kind]
+                    if vec_results:
+                        return vec_results[:limit]
+            except Exception:
+                pass  # 인덱스 미구축 등 → 키워드 검색으로 폴백
+
+    # ── 키워드 검색 (폴백 또는 use_vector=False) ──────────────────────────
     tbox_iri = f"{ontology_id}/tbox"
     results: list[dict] = []
 

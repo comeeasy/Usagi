@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.ontology_store,
         app.state.graph_store,
         app.state.reasoner_service,
+        app.state.vector_index_manager,
     )
 
     # 백그라운드 태스크

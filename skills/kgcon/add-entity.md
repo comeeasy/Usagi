@@ -32,8 +32,9 @@ Before adding any entity, always perform these lookups:
 
 1. **Search for similar Concepts**
    ```
-   search_entities(ontology_id, query="<keyword related to the entity>", kind="concept")
+   search_entities(ontology_id, query="<keyword related to the entity>", kind="concept", use_vector=true)
    ```
+   - `use_vector=true` enables hybrid search (vector similarity + keyword). Always use this.
    - If a matching class already exists, reuse it instead of creating a new Concept
    - Identify candidate parent classes
 
@@ -88,7 +89,7 @@ add_individual(
 
 **Checklist:**
 - [ ] At least one Concept IRI is specified in `types`
-- [ ] Any Individual referenced in `object_properties` already exists (verify with `search_entities`)
+- [ ] Any Individual referenced in `object_properties` already exists (verify with `search_entities(..., use_vector=true)`)
 - [ ] The IRI is not a duplicate
 
 ---

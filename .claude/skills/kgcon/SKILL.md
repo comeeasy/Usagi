@@ -116,8 +116,8 @@ Follow the procedure in [add-entity.md](add-entity.md) to register each entity.
 
 ### Per-Entity Steps
 
-- Before adding: run `search_entities` to check for duplicates or near-matches
-- After adding: validate immediately with SPARQL
+- Before adding: run `search_entities(..., use_vector=true)` to check for duplicates or near-matches
+- After adding: validate with `run_reasoner`
 
 ### Report Progress
 
