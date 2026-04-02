@@ -139,7 +139,7 @@ async def search_entities(
 
     Args:
         ontology_id: 대상 온톨로지 IRI
-        query: 검색 키워드 또는 자연어 문장
+        query: 단일 검색 키워드
         kind: "concept" | "individual" | "all"
         limit: 최대 결과 수
         use_vector: True(기본값)이면 벡터 유사도 검색과 키워드 검색을 함께 수행.
@@ -230,7 +230,7 @@ async def search_relations(
 
     Args:
         ontology_id: 대상 온톨로지 IRI
-        query: 검색 키워드 (빈 문자열이면 전체 조회)
+        query: 단일 검색 키워드
         limit: 최대 결과 수
 
     Returns:
