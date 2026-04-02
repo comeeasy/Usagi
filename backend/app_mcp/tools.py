@@ -587,6 +587,87 @@ WHERE  {{ GRAPH <{g}> {{ <{iri}> {pred_str} ?o }} }}""")
 
 
 @mcp.tool()
+async def add_concept(
+    ontology_id: str,
+    iri: str,
+    label: str,
+    super_classes: list[str] | None = None,
+    description: str | None = None,
+) -> dict:
+    """Concept(owl:Class) 생성 MCP 도구.
+
+    온톨로지의 TBox에 새 클래스를 추가합니다.
+    기존 클래스를 확장하거나, 문서에서 추출한 새 도메인 개념을 등록할 때 사용합니다.
+
+    Args:
+        ontology_id: 대상 온톨로지 IRI (예: "https://infiniq.co.kr/jc3iedm/")
+        iri: 생성할 Concept의 IRI (예: "https://infiniq.co.kr/jc3iedm/SpecialForces")
+             중복 IRI는 오류 반환.
+        label: rdfs:label 값 (사람이 읽을 수 있는 이름)
+        super_classes: rdfs:subClassOf로 연결할 부모 클래스 IRI 목록
+                       search_entities(kind="concept")으로 후보를 먼저 확인하세요.
+                       예: ["https://infiniq.co.kr/jc3iedm/MilitaryOrganisation"]
+        description: rdfs:comment 값 (선택)
+
+    Returns:
+        성공: {"status": "created", "iri": "...", "graph_iri": "..."}
+        실패: {"error": "오류 메시지"}
+
+    Example:
+        add_concept(
+            ontology_id="https://infiniq.co.kr/jc3iedm/",
+            iri="https://infiniq.co.kr/jc3iedm/SpecialForces",
+            label="특수부대",
+            super_classes=["https://infiniq.co.kr/jc3iedm/MilitaryOrganisation"],
+        )
+    """
+    store = _services.get("store")
+    graph_store = _services.get("graph_store")
+    if store is None:
+        return {"error": "store not available"}
+
+    super_classes = _parse_list(super_classes)
+
+    # IRI 중복 확인
+    exists = await store.sparql_ask(
+        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:Class }} }}"
+    )
+    if exists:
+        return {"error": f"IRI already exists: {iri}"}
+
+    # TBox 그래프에 추가
+    tbox_graph = f"{ontology_id}/tbox"
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    triples: list[str] = [
+        f"    <{iri}> a owl:Class .",
+        f'    <{iri}> rdfs:label "{_esc(label)}" .',
+    ]
+    for sc in (super_classes or []):
+        triples.append(f"    <{iri}> rdfs:subClassOf <{sc}> .")
+    if description:
+        triples.append(f'    <{iri}> rdfs:comment "{_esc(description)}" .')
+    triples.append(f'    <{iri}> prov:generatedAtTime "{now}"^^xsd:dateTime .')
+    triples.append(f'    <{iri}> prov:wasAttributedTo "manual" .')
+
+    await store.sparql_update(
+        f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{tbox_graph}> {{\n"
+        + "\n".join(triples)
+        + "\n} }"
+    )
+
+    # Neo4j 동기화
+    if graph_store is not None:
+        await graph_store.upsert_concept(ontology_id, iri, label, super_classes or [])
+    else:
+        logger.warning("add_concept: graph_store not available, Neo4j sync skipped")
+
+    logger.info("add_concept: created %s in %s", iri, tbox_graph)
+    return {"status": "created", "iri": iri, "graph_iri": tbox_graph}
+
+
+@mcp.tool()
 async def delete_individual(ontology_id: str, iri: str) -> dict:
     """Individual 삭제 MCP 도구.
 

@@ -151,6 +151,8 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
       onNodeSelect?.(evt.target.id())
     })
 
+    cy.one('layoutstop', () => { cy.fit(undefined, 40) })
+
     cyRef.current = cy
   }, [elements, layout, onNodeSelect])
 

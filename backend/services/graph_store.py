@@ -107,11 +107,13 @@ class GraphStore:
                     await tx.run(
                         """
                         MERGE (c:Concept {iri: $typeIri})
+                        ON CREATE SET c.ontologyId = $ontologyId
+                        ON MATCH SET c.ontologyId = COALESCE(c.ontologyId, $ontologyId)
                         WITH c
                         MATCH (i:Individual {iri: $iri})
                         MERGE (i)-[:TYPE]->(c)
                         """,
-                        iri=iri, typeIri=type_iri,
+                        iri=iri, typeIri=type_iri, ontologyId=ontology_id,
                     )
 
     async def upsert_object_property_value(
@@ -236,11 +238,20 @@ class GraphStore:
                 )
             else:
                 ont_ids = list({ontology_id, ont_iri} - {None})
+                # ontologyId가 일치하는 노드 + 그 노드와 직접 연결된 이웃 노드도 포함
+                # (Concept 노드가 ontologyId=NULL인 경우를 커버)
                 node_result = await session.run(
                     f"""
                     MATCH (n)
                     WHERE n.ontologyId IN $ontologyIds
-                    WITH collect(DISTINCT n)[0..{_NODE_LIMIT}] AS subNodes
+                    WITH collect(DISTINCT n) AS direct
+                    UNWIND direct AS d
+                    OPTIONAL MATCH (d)--(neighbor)
+                    WITH direct + collect(DISTINCT neighbor) AS all_nodes
+                    UNWIND all_nodes AS node
+                    WITH DISTINCT node
+                    WHERE node IS NOT NULL
+                    WITH collect(node)[0..{_NODE_LIMIT}] AS subNodes
                     RETURN subNodes AS nodes
                     """,
                     ontologyIds=ont_ids,

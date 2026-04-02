@@ -2,7 +2,8 @@ import { useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import { deleteConcept, deleteIndividual } from '@/api/entities'
-import { X, Search } from 'lucide-react'
+import { syncOntology } from '@/api/ontologies'
+import { X, Search, RefreshCw } from 'lucide-react'
 import cytoscape from 'cytoscape'
 import OntologyTabs from '@/components/layout/OntologyTabs'
 import GraphCanvas from '@/components/graph/GraphCanvas'
@@ -37,6 +38,11 @@ export default function GraphPage() {
 
   const searchResults = useEntitySearch(ontologyId, searchQuery, 'all', useVector)
   const subgraphMutation = useSubgraph(ontologyId)
+
+  const syncMutation = useMutation({
+    mutationFn: () => syncOntology(ontologyId!),
+    onSuccess: () => { if (hasLoaded) loadGraph(rootEntities.map((e) => e.iri), depth) },
+  })
 
   const deleteConceptMutation = useMutation({
     mutationFn: (iri: string) => deleteConcept(ontologyId!, iri),
@@ -123,6 +129,16 @@ export default function GraphPage() {
               onZoomOut={() => cyRef.current?.zoom(cyRef.current.zoom() * 0.8)}
               onFit={() => cyRef.current?.fit()}
             />
+            <button
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              title="Oxigraph → Neo4j 동기화"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs hover:opacity-80 disabled:opacity-50"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-bg-surface)' }}
+            >
+              <RefreshCw size={13} className={syncMutation.isPending ? 'animate-spin' : ''} />
+              Sync
+            </button>
           </div>
 
           {/* Search + depth row */}

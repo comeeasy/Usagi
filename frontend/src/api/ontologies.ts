@@ -45,6 +45,10 @@ export function deleteOntology(id: string): Promise<void> {
   return apiDelete(`/ontologies/${id}`)
 }
 
+export function syncOntology(id: string): Promise<{ tbox_count: number; abox_count: number; elapsed_seconds: number }> {
+  return apiPost(`/ontologies/${id}/sync`, {})
+}
+
 export interface SubgraphData {
   nodes: Array<{ data: { id: string; label: string; kind: string; iri: string }; classes?: string }>
   edges: Array<{ data: { id: string; source: string; target: string; label: string; kind: string }; classes?: string }>
