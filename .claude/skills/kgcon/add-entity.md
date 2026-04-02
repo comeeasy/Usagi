@@ -95,13 +95,28 @@ add_individual(
 
 ## Post-Addition Validation
 
-After adding an entity, verify with:
+After adding an entity, run the reasoner scoped to the newly added IRI:
 
 ```
-sparql_query(
-    ontology_id = <ontology_id>,
-    query = "SELECT ?p ?o WHERE { <added IRI> ?p ?o }"
+run_reasoner(
+    ontology_id  = <ontology_id>,
+    entity_iris  = [<added IRI>]
 )
 ```
 
-Confirm the result contains the expected triples and report back to the user.
+Interpret the result as follows and report back to the user:
+
+| Field | Meaning |
+|-------|---------|
+| `consistent: true`, `violations: []` | Entity is coherent — addition is valid |
+| `consistent: false` | Ontology is now inconsistent — the addition likely contains a logical error |
+| `violations: [...]` | Constraint violations found — review each violation and decide whether to fix or remove the entity |
+| `inferred_axioms_count` | Number of axioms the reasoner derived from this entity — higher counts indicate richer inference |
+
+**If violations are found**, report them clearly:
+```
+⚠ Violation: <violation description>
+  → Suggested fix: <what to correct>
+```
+
+**If the ontology is inconsistent**, offer to remove the entity and explain which part of the definition caused the conflict.
