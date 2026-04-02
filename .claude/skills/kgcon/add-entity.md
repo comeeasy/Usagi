@@ -1,15 +1,16 @@
 # Shared Entity Addition Procedure
 
-This document defines the core entity addition procedure shared by the `kgcon` and `add-entity` skills.
+This document defines the core bundle-registration procedure shared by the `kgcon` and `add-entity` skills.
 
 ---
 
 ## What is a bundle?
 
-A **bundle** is what one invocation of add-entity / one registration batch adds: **one or more** RDF nodes (Concepts and/or Individuals) **plus** the relationships between them (via `object_properties`, types, and data properties).
+A **bundle** is a set of one or more RDF nodes (Concepts and/or Individuals) **plus all relationships between them** (via `object_properties`, `types`, and `data_properties`) that are registered together in a single pass.
 
-- **Dependency order:** Create **Concepts** first (Individuals need `types` to reference class IRIs). For Individuals linked by `object_properties`, ensure each **target** Individual exists before you reference it—either it already exists in the ontology or you create it **earlier in the same bundle**.
-- **Reuse:** Prefer reusing existing Concepts or Individuals from `search_entities` instead of minting duplicates.
+- **Concepts before Individuals**: Individuals need `types` that reference class IRIs, so Concepts must exist first.
+- **Target Individuals before source Individuals**: For any `object_property`, the target IRI must already exist in the ontology *or* be created earlier in the same bundle.
+- **Reuse before minting**: Use `search_entities` to find existing Concepts or Individuals; prefer reuse over creating duplicates.
 
 ---
 
@@ -19,7 +20,7 @@ A **bundle** is what one invocation of add-entity / one registration batch adds:
 
 - Korean source → Korean labels
 - English source → English labels
-- IRIs must always use ASCII (kebab-case or PascalCase); never include non-ASCII characters in IRIs
+- IRIs must always use ASCII (kebab-case for Individuals, PascalCase for Concepts); never include non-ASCII characters in IRIs.
 
 ---
 
@@ -28,32 +29,33 @@ A **bundle** is what one invocation of add-entity / one registration batch adds:
 | Kind | OWL | Write tool |
 |------|-----|------------|
 | Concept | `owl:Class` | `add_concept` |
-| Individual | `owl:NamedIndividual` | `add_individual` (and `update_individual` for fixes) |
+| Individual | `owl:NamedIndividual` | `add_individual` (fixes via `update_individual`) |
 
-**MCP limitation:** There is **no** `update_concept` or `delete_concept` in MCP. To avoid bad Concept axioms, rely on `search_entities(kind="concept")` before `add_concept`. If a Concept was already added incorrectly, fixing it may require the Usagi UI or REST API (`backend/api/concepts.py`); document the issue for the user instead of inventing unsupported MCP calls.
+**MCP limitation:** There is **no** `update_concept` or `delete_concept`. To avoid bad Concept axioms, always `search_entities(kind="concept")` before calling `add_concept`. If a Concept was added incorrectly, document the issue for the user and point to the Usagi UI or REST API for correction.
 
 ---
 
-## Pre-addition: Understand the Ontology
+## Pre-registration: search before creating
 
 Before adding any node or edge in the bundle:
 
-1. **Similar Concepts**
+1. **Find similar Concepts**
    ```
    search_entities(ontology_id, query="<keyword>", kind="concept", use_vector=true)
    ```
-   - Always use `use_vector=true` for hybrid search when available.
-   - Reuse existing classes when they match; note parent-class candidates.
+   Reuse existing classes when they match; note parent-class candidates.
 
-2. **Similar Individuals** (avoid duplicates)
+2. **Find similar Individuals** (avoid duplicates)
    ```
    search_entities(ontology_id, query="<keyword>", kind="individual", use_vector=true)
    ```
 
-3. **Properties** (when setting relationships)
+3. **Find properties** (when setting relationships or data attributes)
    ```
-   search_relations(ontology_id, query="<relationship keyword>")
+   search_relations(ontology_id, query="<keyword>")
    ```
+
+**Query rule — one keyword per call:** `query` must be a **single word** (e.g. `"unit"`, `"location"`, `"isPartOf"`). Never pass multi-word phrases or sentences. If you need to explore multiple concepts, call the tool multiple times with one keyword each.
 
 ---
 
@@ -61,20 +63,19 @@ Before adding any node or edge in the bundle:
 
 ```
 add_concept(
-    ontology_id     = <ONTOLOGY_ID>,
-    iri             = <base_iri + PascalCase local name>,
-    label           = <label in the source language>,
-    super_classes   = [<parent class IRI>],
-    description     = <optional rdfs:comment in source language>
+    ontology_id   = <ONTOLOGY_ID>,
+    iri           = <base_iri + PascalCase local name>,
+    label         = <label in source language>,
+    super_classes = [<parent class IRI>],
+    description   = <optional rdfs:comment in source language>
 )
 ```
 
-**IRI rules:** Append a PascalCase local name to the base IRI (e.g. `https://example.org/ont/` + `SpecialForces`). No spaces or non-ASCII in IRIs.
+**IRI rules:** Append a PascalCase local name to the base IRI (e.g. `https://example.org/ont/SpecialForces`). No spaces or non-ASCII characters.
 
-**Checklist:**
-
+Checklist before calling:
 - [ ] Equivalent or very similar Concept does not already exist
-- [ ] Parent class(es) are correct
+- [ ] Parent class(es) confirmed via `search_entities`
 - [ ] IRI matches namespace conventions
 
 ---
@@ -85,31 +86,30 @@ add_concept(
 add_individual(
     ontology_id       = <ONTOLOGY_ID>,
     iri               = <base_iri + category/kebab-case-name>,
-    label             = <human-readable name in the source language>,
+    label             = <human-readable name in source language>,
     types             = [<Concept IRI list>],
     data_properties   = [{"property_iri": "...", "value": "...", "datatype": "xsd:string"}],
     object_properties = [{"property_iri": "...", "target_iri": "..."}]
 )
 ```
 
-**IRI rules:** e.g. `https://example.org/ont/unit/3rd-armor-brigade` with categories like `unit/`, `location/`, `operation/`.
+**IRI rules:** Use a category prefix followed by a kebab-case local name, e.g. `https://example.org/ont/unit/3rd-armor-brigade`. Common categories: `unit/`, `location/`, `operation/`, `event/`.
 
-**Checklist:**
-
-- [ ] At least one Concept in `types`
-- [ ] Every `target_iri` in `object_properties` exists before this Individual is committed (or is created earlier in the bundle)
-- [ ] IRI is not a duplicate
+Checklist before calling:
+- [ ] At least one valid Concept in `types`
+- [ ] Every `target_iri` in `object_properties` exists before this call (or is created earlier in the bundle)
+- [ ] IRI is not a duplicate (verified via `search_entities`)
 
 ---
 
 ## Mandatory validation: `run_reasoner`
 
-After **any** `add_concept`, `add_individual`, or `update_individual` that affects the bundle, run:
+After **every** `add_concept`, `add_individual`, or `update_individual` that affects the bundle, run:
 
 ```
 run_reasoner(
-    ontology_id   = <ONTOLOGY_ID>,
-    entity_iris   = [<all IRIs in this bundle that you created or modified>]
+    ontology_id  = <ONTOLOGY_ID>,
+    entity_iris  = [<all IRIs created or modified in this bundle>]
 )
 ```
 
@@ -117,36 +117,63 @@ Interpret the result:
 
 | Outcome | Meaning |
 |---------|---------|
-| `consistent: true` and no meaningful `violations` | Bundle is logically acceptable under OWL |
-| `consistent: false` | Inconsistency—fix or roll back |
-| `violations: [...]` | Review each item and correct Individuals via `update_individual` where possible |
+| `consistent: true`, no meaningful violations | Bundle is logically acceptable |
+| `consistent: false` | Ontology-level inconsistency — must fix or roll back |
+| `violations: [...]` | Review each; correct Individuals via `update_individual` |
 
-**Do not treat SPARQL as the primary pass/fail gate.** Use `sparql_query` only for optional SELECT/ASK probes (mutating SPARQL is blocked by the tool).
-
----
-
-## Inner Ralph loop: fix until reasoner is clean (or stop with a report)
-
-If `run_reasoner` fails or lists violations:
-
-1. **Re-ground context:** Call `search_entities` and `search_relations` again with focused queries so you see nearby Concepts, Individuals, and property IRIs.
-2. **Individuals:** Use `update_individual` to adjust `label`, `types`, `data_properties`, `object_properties`, `same_as`, or `different_from` as needed. Only fields you pass are updated; pass `[]` for a list field to clear it (per tool semantics).
-3. **Concepts:** MCP cannot update Concepts—prefer prevention via search before add. If stuck, explain the gap and point to UI/REST.
-4. **Re-run** `run_reasoner` on the same `entity_iris` set (expanded if you touched neighbors).
-
-**Iteration cap:** Prefer up to **5** full fix cycles. If there is no progress (same violations repeat), stop, summarize violations, and list options (manual edit, delete Individual via `delete_individual` if appropriate, or REST for Concepts).
+**Do not use SPARQL as the pass/fail gate.** `sparql_query` (SELECT/ASK only) is for optional diagnostic probes; the OWL reasoner is the authoritative validator.
 
 ---
 
-## Optional: SPARQL checks
+## Inner Ralph loop: fix until reasoner is clean
 
-`sparql_query` may be used for SELECT/ASK diagnostics (e.g. listing types of an IRI). It does not replace `run_reasoner` for consistency.
+If `run_reasoner` returns violations or `consistent: false`:
+
+1. **Re-ground**: call `search_entities` and `search_relations` with focused **single-keyword** queries to see nearby Concepts, Individuals, and property IRIs.
+2. **Fix Individuals**: use `update_individual` to adjust `label`, `types`, `data_properties`, `object_properties`, `same_as`, or `different_from`. Pass `[]` to a list field to clear it entirely (per tool semantics). Only provided fields are updated.
+3. **Fix Concepts**: MCP cannot update Concepts. Prevent errors via search first. If stuck, document the issue as a guardrail and instruct the user to use the Usagi UI or REST API.
+4. **Re-run** `run_reasoner` on the same `entity_iris` set (expand the set if you touched neighbours).
+
+**Iteration cap:** Up to **5** full fix cycles. If the same violations repeat with no progress (gutter detected), stop the inner loop, summarise the violations, log a guardrail, and report to the user with options (manual edit, `delete_individual`, REST for Concepts).
+
+**Guardrail format:**
+```
+GUARDRAIL: <short pattern label>
+  Cause: <what went wrong>
+  Fix: <how to avoid in future bundles>
+```
+Write these to the caller's progress file (or inline if standalone).
+
+---
+
+## Coverage check for the bundle (post-reasoner)
+
+After the reasoner is clean, verify the bundle against its source claims:
+
+```
+get_subgraph(
+    ontology_id = <ONTOLOGY_ID>,
+    entity_iris = [<bundle IRIs>],
+    depth       = 2
+)
+```
+
+Check that every node and edge you intended to register appears in the subgraph. If anything is missing, create a follow-up bundle.
+
+---
+
+## Optional: SPARQL diagnostics
+
+`sparql_query` may be used for SELECT/ASK probes (e.g., listing the types of an IRI, checking if a property link exists). It does not replace `run_reasoner` for consistency validation, and mutating SPARQL is blocked by the tool.
 
 ---
 
 ## Summary checklist for a bundle
 
-- [ ] Concepts before dependent Individuals; object targets exist or are created first in-bundle
-- [ ] `search_entities` / `search_relations` used before minting new IRIs
-- [ ] `run_reasoner` executed after writes; fix loop applied when needed
-- [ ] User informed of final IRIs and reasoner outcome
+- [ ] Concepts registered before dependent Individuals
+- [ ] Object_property targets exist before their sources in the bundle
+- [ ] `search_entities` / `search_relations` used before minting any new IRI
+- [ ] `run_reasoner` executed after all writes; inner fix loop applied if needed
+- [ ] `get_subgraph` confirms all intended nodes and edges are present
+- [ ] Guardrails logged for any stuck violations
+- [ ] Caller's progress file (e.g. `kgcon-progress.md`) updated with new IRIs and reasoner outcome

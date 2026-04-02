@@ -1,45 +1,64 @@
 ---
 name: add-entity
-description: Add one or more ontology entities (Concepts and/or Individuals) and their relations to an ontology. Used as a sub-procedure by the kgcon skill; full procedure is in add-entity.md.
-argument-hint: [label or description of the graph fragment to add]
+description: Add a bundle of ontology entities (Concepts and/or Individuals) and their relations to an ontology. Used as a sub-procedure by kgcon. Full procedure is in add-entity.md.
+argument-hint: [description of the graph fragment to add]
 ---
 
-# Add Entity
+# Add Entity Bundle
 
-Add a **graph fragment (bundle)** to an ontology: one or more Concepts and/or Individuals, including relationships expressed via `object_properties` and property IRIs from `search_relations`.
+Add a **graph fragment (bundle)** to an ontology: one or more Concepts and/or Individuals, including all relationships (object_properties) and attributes (data_properties) between them. Uses an inner Ralph loop to guarantee the bundle is OWL-consistent before returning.
 
-Use `$ARGUMENTS` as the description of what to add, if provided.
+Use `$ARGUMENTS` as the description of the bundle to add, if provided.
 
 ---
 
 ## Step 1 — Determine the Target Ontology
 
-Check in the following order:
+Check in order:
 
-1. **Ontology specified in `$ARGUMENTS`** (e.g., `/add-entity ontology=https://... "…"`) → use it directly
-2. **Ontology already established in the current context** (e.g., set by a parent skill like `kgcon`) → use it directly
-3. **Neither** → ask the user:
+1. **Ontology specified in `$ARGUMENTS`** (e.g., `ontology=https://…`) → use it directly
+2. **Ontology already established in the current context** (e.g., set by a parent `kgcon` run) → use it directly
+3. **Neither** → call `list_ontologies()`, show the result, ask the user to choose
 
-   ```
-   list_ontologies()
-   ```
-
-   Show the list and ask: "Which ontology would you like to add to?"
-
-Store the selected ontology IRI as `ONTOLOGY_ID`.
+Store as `ONTOLOGY_ID`.
 
 ---
 
-## Step 2 — Add the Bundle
+## Step 2 — Plan the Bundle
+
+Before touching MCP, list every node and edge you intend to register:
+
+| # | Kind | IRI (proposed) | Label | Types / Parent | Relations to other nodes |
+|---|------|---------------|-------|----------------|--------------------------|
+| 1 | Concept | … | … | parent IRI | — |
+| 2 | Individual | … | … | Concept IRI | op → node #1 |
+| … | | | | | |
+
+Dependency order: Concepts before Individuals; object_property targets before sources.
+
+---
+
+## Step 3 — Register (inner Ralph loop)
 
 Follow the full procedure in [add-entity.md](../kgcon/add-entity.md):
 
-1. Plan the bundle (ordering, dependencies, reuse vs new IRIs).
-2. For each node and relationship, use `search_entities` and `search_relations` (`use_vector=true` for entity search).
-3. Call `add_concept` and/or `add_individual` in dependency order.
-4. **Validate with `run_reasoner`** on all IRIs in the bundle — this is mandatory; do not substitute SPARQL for pass/fail.
-5. If the reasoner reports inconsistency or violations, run the **fix loop** in add-entity.md (`search_*`, `update_individual`, re-run reasoner) until resolved or you must stop and report.
+1. **Search before creating**: `search_entities` (use_vector=true) and `search_relations` for each candidate IRI. Reuse existing nodes; do not mint duplicates. **Query must be a single keyword per call** (e.g. `"unit"`, `"isPartOf"`); never pass multi-word phrases.
+2. **Register**: `add_concept` and/or `add_individual` in dependency order.
+3. **Validate**: `run_reasoner(ontology_id, entity_iris=[<all bundle IRIs>])` — mandatory; do not substitute SPARQL for pass/fail.
+4. **Fix loop** (inner Ralph):
+   - Re-ground via `search_*`
+   - Fix via `update_individual`
+   - Re-run `run_reasoner`
+   - Up to **5 cycles**; if stuck (gutter), document a guardrail and stop
+5. **Subgraph check**: `get_subgraph(ontology_id, entity_iris=[<bundle IRIs>], depth=2)` — confirm all intended nodes and edges appear.
 
-Optional: use `sparql_query` (SELECT/ASK only) for auxiliary checks; main validation remains the OWL reasoner.
+---
 
-Report outcomes (added IRIs, reasoner status, any remaining issues) to the user.
+## Step 4 — Report
+
+Return to the caller (or the user if standalone):
+
+- IRIs created or updated (the bundle's contribution to set S)
+- Reasoner outcome: `consistent=<true/false>`, violations count
+- Subgraph check: pass / gap description
+- Guardrails added (patterns to avoid in future bundles)

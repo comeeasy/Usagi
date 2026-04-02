@@ -1,133 +1,192 @@
 ---
 name: kgcon
-description: Knowledge Graph Construction — extract entities and relationships from documents or user input, register them in a Usagi ontology using MCP, and iterate until OWL reasoning passes and subgraph coverage matches the source. Uses Ralph-style loops with optional kgcon-progress.md.
-argument-hint: [file path or text description]
+description: Knowledge Graph Construction — extract entities and relationships from documents, register them in a Usagi ontology using MCP, and iterate via a two-level Ralph loop until OWL reasoning passes and subgraph coverage matches the source.
+argument-hint: [file path or text content]
 ---
 
 # Knowledge Graph Construction (kgcon)
 
-You are a knowledge graph construction specialist. Build a faithful OWL representation of the source by combining **outer** coverage iteration (source vs subgraph) with **inner** registration iteration (reasoner + `update_individual`), as defined in [add-entity.md](add-entity.md) and the [add-entity](../add-entity/SKILL.md) skill.
+You are a knowledge graph construction specialist. Build a faithful OWL representation of the source using a **two-level Ralph loop**:
+
+- **Outer loop** — coverage: compare source claims to the subgraph; register what is missing
+- **Inner loop** — consistency: run `run_reasoner`, fix violations, re-reason until clean
+
+Both loops persist state to `./kgcon-progress.md` so a fresh context can resume without losing work.
 
 ---
 
-## Ralph loop (how this skill uses it)
+## Ralph Loop Principles
 
-State is not only in chat memory. **Recommended:** maintain `./kgcon-progress.md` in the working directory and update it each outer iteration with:
+Progress lives in **files, not chat memory**. Treat `kgcon-progress.md` as the single source of truth:
 
-- Source fingerprint (file name or short summary)
-- `ONTOLOGY_ID`
-- Set `S` = IRIs created or updated in this kgcon run
-- Last `get_subgraph` summary (node/edge counts or notable gaps)
-- Checklist of source claims vs graph (what is covered / what is still missing)
-- Last `run_reasoner` outcome for the bundle(s)
-
-This mirrors the Ralph idea: the next turn can resume from the file if context is rotated.
+1. Write **machine-verifiable success criteria** as checkboxes before the first bundle.
+2. Update `kgcon-progress.md` after every outer iteration (new IRIs, subgraph summary, checklist state, reasoner outcome).
+3. If the context window fills up, a new agent instance reads `kgcon-progress.md` and continues exactly where the previous one stopped.
+4. **Gutter detection**: if the same violations repeat for 3+ inner fix cycles with no progress, stop the inner loop, document the failure as a guardrail, and report to the user.
+5. **Guardrails**: log failed patterns (wrong type, missing target IRI, class mismatch, …) so the same mistake is not repeated in later bundles.
 
 ---
 
-## Step 1 — Input source
+## Step 1 — Read Source
 
-Use `$ARGUMENTS` when provided.
-
-- **File path** (`.pdf`, `.md`, `.txt`, …): Read with the Read tool
-- **URL**: Fetch the content
-- **Plain text**: Use as-is
-- **No argument:** Ask: "Please provide a document or content to analyze."
-
-Keep the **full source text** (or chunk references) available for the coverage pass in Step 5.
+Read the input file with the Read tool (PDF, MD, TXT, …) or use the provided plain text directly.
+Keep the full source text available throughout for the coverage check in Step 5.
 
 ---
 
-## Step 2 — Target ontology
+## Step 2 — Select Ontology
 
 ```
 list_ontologies()
 ```
 
-Let the user choose. Store `ONTOLOGY_ID`.
+Show the result and let the user confirm the target. Store as `ONTOLOGY_ID`.
 
 ---
 
-## Step 3 — Ontology structure
+## Step 3 — Understand Ontology Structure
 
 ```
 get_ontology_summary(ONTOLOGY_ID)
 ```
 
-Note class and property vocabulary for mapping.
+Note available classes and properties; this shapes bundle planning in Step 4.
 
 ---
 
-## Step 4 — Outer loop: extract → register → verify coverage
+## Step 4 — Outer Loop: Extract → Register → Coverage
 
-Repeat until **coverage is satisfied** (Step 5) or the user stops you.
+Repeat until **coverage is satisfied** (Step 5) or the user stops.
 
-### 4a — Extract
+### 4a — Initialise the progress file
 
-Identify Concepts and Individuals implied by the source, with evidence. Respect the language rule in [add-entity.md](add-entity.md).
+On the **first** outer iteration, write `./kgcon-progress.md`:
 
-**Optional user checkpoint:** You may show a table of planned additions and ask for confirmation once at the start, or after large chunks—especially for long documents. For iterative refinement, smaller passes without blocking on every micro-edit are acceptable if the user prefers speed.
+```markdown
+# kgcon Progress
 
-### 4b — Register in bundles
+## Source
+<file name and one-line summary>
 
-Do **not** register atomically one triple at a time without a plan. Group work into **bundles** (see [add-entity.md](add-entity.md)):
+## Ontology
+ONTOLOGY_ID: <value>
 
-1. Concepts first, then Individuals in dependency order for `object_properties`.
-2. For each bundle, follow add-entity: `search_entities` / `search_relations`, `add_concept` / `add_individual`, **`run_reasoner`**, and the **inner fix loop** (`search_*`, `update_individual`, re-reason) until clean or iteration cap.
+## Success Criteria (exit conditions)
+- [ ] Every key entity in the source has a corresponding Individual in the graph
+- [ ] Every key relationship is represented as an object_property edge
+- [ ] run_reasoner reports consistent=true with no violations for all registered IRIs
+- [ ] get_subgraph coverage checklist has no material omissions (all ✓)
 
-Track every new or updated IRI in set `S`.
+## S — IRIs registered this session
+(append as you go)
 
-### 4c — Report incremental progress
+## Guardrails
+(append failed patterns as you discover them)
 
+## Iteration Log
+(append one block per outer iteration)
 ```
-✓ Bundle: Concept … + Individuals … — reasoner OK
-⚠ Bundle: … — violations addressed via update_individual
+
+On **subsequent** iterations, append to the existing file — do not overwrite prior entries.
+
+### 4b — Extract
+
+Scan the full source text. For each implied Concept and Individual, record:
+- **Evidence**: quote or section reference
+- **Proposed IRI**
+- **Class** (`types`)
+- **Data properties**
+- **Object properties** (note target IRI; target must exist before the source is registered)
+
+Group findings into **bundles** in dependency order: Concepts first, then Individuals, with object_property targets before sources.
+
+**Optional checkpoint:** For long documents, show the extraction table and ask the user to confirm before registering.
+
+### 4c — Register bundles (inner loop)
+
+For each bundle, follow the full procedure in [add-entity.md](add-entity.md):
+
+1. `search_entities` / `search_relations` — reuse existing IRIs; avoid duplicates
+2. `add_concept` / `add_individual` in dependency order
+3. `run_reasoner` — mandatory after each bundle
+4. Inner fix loop: `search_*` → `update_individual` → re-reason (up to 5 cycles)
+5. Log guardrails for any stuck violation
+
+Track every new/updated IRI in the **S** section of `kgcon-progress.md`.
+
+### 4d — Update progress file
+
+After each bundle, append to the Iteration Log:
+
+```markdown
+### Outer iteration <N> — <bundle label>
+Bundles registered: <list>
+IRIs added to S: <list>
+Reasoner: consistent=<true/false>, violations=<count>
+Guardrails added: <list or none>
+```
+
+Report incremental status inline:
+```
+✓ Bundle: <Concepts + Individuals> — reasoner OK
+⚠ Bundle: <…> — <N> violations fixed via update_individual
+✗ Bundle: <…> — stuck after 5 inner cycles; see Guardrails
 ```
 
 ---
 
-## Step 5 — Coverage verification (outer exit condition)
+## Step 5 — Coverage Verification (outer exit condition)
 
-When you believe registration is complete, verify against the **source**:
+When all planned bundles are registered, run the coverage check:
 
-1. Collect `S` = all IRIs you created or materially updated in this kgcon session for this source.
+1. Collect `S` from `kgcon-progress.md`.
 2. Call:
    ```
    get_subgraph(
-       ontology_id  = ONTOLOGY_ID,
-       entity_iris  = <list of IRIs in S>,
-       depth        = 2 to 5 (increase if relationships are deeper)
+       ontology_id = ONTOLOGY_ID,
+       entity_iris = <S>,
+       depth       = 2        # increase to 3–5 if relationships are deeper
    )
    ```
-3. Compare **nodes** and **edges** of that subgraph to the source text (or chunked text). Build an explicit checklist: for each important fact in the source (entities, attributes, relations), is there a corresponding node, data property, or edge path in the subgraph?
-4. **If anything material is missing or wrong:** go back to Step 4—extract the gap, register another bundle (inner loop applies), then run Step 5 again.
-5. **Exit when** the checklist has no substantive omissions for the scope you agreed with the user (full document or stated subset).
+3. Build an explicit **coverage checklist** comparing the subgraph to the source text:
+   - For every key entity in the source: `✓ node present` / `✗ missing`
+   - For every key relationship: `✓ edge present` / `✗ missing`
+   - For every key attribute (data property): `✓ present` / `✗ missing`
+4. **If any `✗` items are material**: go back to Step 4 — extract the gap, register a new bundle (inner loop applies), then re-run Step 5.
+5. **Exit** when the checklist has no material `✗` items.
+
+Update `kgcon-progress.md` with the subgraph summary and checklist after each Step 5 run.
 
 ---
 
-## Step 6 — Final report
+## Step 6 — Final Report
 
 ```
 ## kgcon Complete
 
-- Input: <summary>
-- Target ontology: <ONTOLOGY_ID>
-- IRIs touched (S): <list or reference to kgcon-progress.md>
+- Input: <file name / summary>
+- Ontology: <ONTOLOGY_ID>
+- IRIs in S: <count> — full list in kgcon-progress.md
 
-### Coverage
-- Subgraph check: OK / last depth used / notes
+### Coverage Checklist
+| Source claim | Graph representation | Status |
+|---|---|---|
+| <entity / relation / attribute> | <IRI or edge> | ✓ / ✗ |
 
 ### Counts
 | Type       | Attempted | Succeeded | Skipped | Failed |
 |------------|-----------|-----------|---------|--------|
-| Concept    | …         | …         | …       | …      |
-| Individual | …         | …         | …       | …      |
+| Concept    |           |           |         |        |
+| Individual |           |           |         |        |
 
 ### Reasoner
-- Final status: <summary>
+Final: consistent=<true/false>, violations=<count>
 
-### Skipped / Failed / Manual follow-up
-- <item>: <reason>
+### Guardrails (lessons learned this session)
+- <pattern>: <why it failed and how to avoid>
+
+### Manual follow-up
+- <item>: <reason (e.g. MCP cannot update Concepts)>
 ```
 
 ---
@@ -135,7 +194,7 @@ When you believe registration is complete, verify against the **source**:
 ## Delegation map
 
 | Concern | Where |
-|---------|--------|
-| Bundle definition, reasoner fix loop, `update_individual` | [add-entity.md](add-entity.md) |
+|---------|-------|
+| Bundle procedure, inner Ralph loop, reasoner fix | [add-entity.md](add-entity.md) |
 | Invoking add-entity as a skill | [add-entity](../add-entity/SKILL.md) |
-| MCP tools | `list_ontologies`, `get_ontology_summary`, `search_entities`, `search_relations`, `get_subgraph`, `run_reasoner`, `add_concept`, `add_individual`, `update_individual`, `delete_individual`, optional `sparql_query` |
+| MCP tools | `list_ontologies`, `get_ontology_summary`, `search_entities`, `search_relations`, `get_subgraph`, `run_reasoner`, `add_concept`, `add_individual`, `update_individual`, `delete_individual`, `sparql_query` |
