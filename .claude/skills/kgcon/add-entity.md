@@ -31,7 +31,7 @@ A **bundle** is a set of one or more RDF nodes (Concepts and/or Individuals) **p
 | Concept | `owl:Class` | `add_concept` |
 | Individual | `owl:NamedIndividual` | `add_individual` (fixes via `update_individual`) |
 
-**MCP limitation:** There is **no** `update_concept` or `delete_concept`. To avoid bad Concept axioms, always `search_entities(kind="concept")` before calling `add_concept`. If a Concept was added incorrectly, document the issue for the user and point to the Usagi UI or REST API for correction.
+**MCP limitation:** There is **no** `update_concept` or `delete_concept`. To avoid bad Concept axioms, always `search_entities(kind="all")` before calling `add_concept`. If a Concept was added incorrectly, document the issue for the user and point to the Usagi UI or REST API for correction.
 
 ---
 
@@ -39,21 +39,18 @@ A **bundle** is a set of one or more RDF nodes (Concepts and/or Individuals) **p
 
 Before adding any node or edge in the bundle:
 
-1. **Find similar Concepts**
+1. **Find similar entities** (Concepts and Individuals together)
    ```
-   search_entities(ontology_id, query="<keyword>", kind="concept", use_vector=true)
+   search_entities(ontology_id, query="<keyword>", kind="all", use_vector=true)
    ```
-   Reuse existing classes when they match; note parent-class candidates.
+   Reuse existing classes when they match; note parent-class candidates and avoid duplicate Individuals.
 
-2. **Find similar Individuals** (avoid duplicates)
-   ```
-   search_entities(ontology_id, query="<keyword>", kind="individual", use_vector=true)
-   ```
-
-3. **Find properties** (when setting relationships or data attributes)
+2. **Find properties** (when setting relationships or data attributes)
    ```
    search_relations(ontology_id, query="<keyword>")
    ```
+
+**`kind` rule — always use `"all"`:** `search_entities` must always be called with `kind="all"`. Never pass `kind="concept"` or `kind="individual"`; using `"all"` ensures both Concepts and Individuals are considered in a single pass and prevents missed matches.
 
 **Query rule — one keyword per call:** `query` must be a **single word** (e.g. `"unit"`, `"location"`, `"isPartOf"`). Never pass multi-word phrases or sentences. If you need to explore multiple concepts, call the tool multiple times with one keyword each.
 

@@ -30,7 +30,7 @@ A **bundle** is what one invocation of add-entity / one registration batch adds:
 | Concept | `owl:Class` | `add_concept` |
 | Individual | `owl:NamedIndividual` | `add_individual` (and `update_individual` for fixes) |
 
-**MCP limitation:** There is **no** `update_concept` or `delete_concept` in MCP. To avoid bad Concept axioms, rely on `search_entities(kind="concept")` before `add_concept`. If a Concept was already added incorrectly, fixing it may require the Usagi UI or REST API (`backend/api/concepts.py`); document the issue for the user instead of inventing unsupported MCP calls.
+**MCP limitation:** There is **no** `update_concept` or `delete_concept` in MCP. To avoid bad Concept axioms, rely on `search_entities(kind="all")` before `add_concept`. If a Concept was already added incorrectly, fixing it may require the Usagi UI or REST API (`backend/api/concepts.py`); document the issue for the user instead of inventing unsupported MCP calls.
 
 ---
 
@@ -38,22 +38,19 @@ A **bundle** is what one invocation of add-entity / one registration batch adds:
 
 Before adding any node or edge in the bundle:
 
-1. **Similar Concepts**
+1. **Similar entities** (Concepts and Individuals together)
    ```
-   search_entities(ontology_id, query="<keyword>", kind="concept", use_vector=true)
+   search_entities(ontology_id, query="<keyword>", kind="all", use_vector=true)
    ```
    - Always use `use_vector=true` for hybrid search when available.
-   - Reuse existing classes when they match; note parent-class candidates.
+   - Reuse existing classes when they match; note parent-class candidates and avoid duplicate Individuals.
 
-2. **Similar Individuals** (avoid duplicates)
-   ```
-   search_entities(ontology_id, query="<keyword>", kind="individual", use_vector=true)
-   ```
-
-3. **Properties** (when setting relationships)
+2. **Properties** (when setting relationships)
    ```
    search_relations(ontology_id, query="<relationship keyword>")
    ```
+
+**`kind` rule — always use `"all"`:** `search_entities` must always be called with `kind="all"`. Never pass `kind="concept"` or `kind="individual"`; using `"all"` returns both in a single pass and prevents missed matches.
 
 ---
 
