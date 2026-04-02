@@ -46,8 +46,8 @@ export function deleteOntology(id: string): Promise<void> {
 }
 
 export interface SubgraphData {
-  nodes: Array<{ data: { id: string; label: string; type: string; iri: string } }>
-  edges: Array<{ data: { id: string; source: string; target: string; label: string; type: string } }>
+  nodes: Array<{ data: { id: string; label: string; kind: string; iri: string }; classes?: string }>
+  edges: Array<{ data: { id: string; source: string; target: string; label: string; kind: string }; classes?: string }>
 }
 
 export function getSubgraph(
@@ -60,25 +60,30 @@ export function getSubgraph(
   }).then((raw: { nodes: { iri: string; label: string; kind: string }[]; edges: { source: string; target: string; propertyIri: string; propertyLabel: string }[] }) => ({
     nodes: raw.nodes.map((n) => ({
       data: { id: n.iri, label: n.label, kind: n.kind, iri: n.iri },
+      classes: n.kind === 'concept' ? 'concept' : 'individual',
     })),
-    edges: raw.edges.map((e) => ({
-      data: {
-        id: `${e.source}-${e.propertyIri}-${e.target}`,
-        source: e.source,
-        target: e.target,
-        label: (() => {
-          const raw = e.propertyLabel ?? e.propertyIri
-          if (!raw || raw === 'RELATION' || raw === 'TYPE' || raw === 'SUBCLASS_OF') {
-            const iri = e.propertyIri
-            if (iri.includes('#')) return iri.split('#').at(-1) ?? iri
-            if (iri.includes('/')) return iri.split('/').at(-1) ?? iri
-            return iri
-          }
-          return raw
-        })(),
-        kind: (e.propertyIri === 'SUBCLASS_OF' || e.propertyIri === 'TYPE') ? 'subclass' : 'object',
-      },
-    })),
+    edges: raw.edges.map((e) => {
+      const isSubclass = e.propertyIri === 'SUBCLASS_OF' || e.propertyIri === 'TYPE'
+      return {
+        data: {
+          id: `${e.source}-${e.propertyIri}-${e.target}`,
+          source: e.source,
+          target: e.target,
+          label: (() => {
+            const raw = e.propertyLabel ?? e.propertyIri
+            if (!raw || raw === 'RELATION' || raw === 'TYPE' || raw === 'SUBCLASS_OF') {
+              const iri = e.propertyIri
+              if (iri.includes('#')) return iri.split('#').at(-1) ?? iri
+              if (iri.includes('/')) return iri.split('/').at(-1) ?? iri
+              return iri
+            }
+            return raw
+          })(),
+          kind: isSubclass ? 'subclass' : 'object',
+        },
+        classes: isSubclass ? 'subclass' : 'object-property',
+      }
+    }),
   }))
 }
 

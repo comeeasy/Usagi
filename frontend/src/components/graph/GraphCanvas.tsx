@@ -15,6 +15,7 @@ export interface CyElement {
     iri?: string
   }
   group?: 'nodes' | 'edges'
+  classes?: string
 }
 
 interface GraphCanvasProps {
@@ -41,7 +42,21 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
       elements: elements as cytoscape.ElementDefinition[],
       style: [
         {
-          selector: 'node[kind = "concept"]',
+          selector: 'node',
+          style: {
+            'background-color': '#8B949E',
+            'label': 'data(label)',
+            'color': '#E6EDF3',
+            'font-size': 11,
+            'text-valign': 'center',
+            'text-halign': 'center',
+            'width': 80,
+            'height': 30,
+            'shape': 'round-rectangle',
+          },
+        },
+        {
+          selector: 'node.concept',
           style: {
             'background-color': '#2F81F7',
             'label': 'data(label)',
@@ -57,7 +72,7 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
           },
         },
         {
-          selector: 'node[kind = "individual"]',
+          selector: 'node.individual',
           style: {
             'background-color': '#3FB950',
             'label': 'data(label)',
@@ -73,21 +88,21 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
           },
         },
         {
-          selector: 'node',
+          selector: 'edge',
           style: {
-            'background-color': '#8B949E',
+            'line-color': '#30363D',
+            'target-arrow-color': '#30363D',
+            'target-arrow-shape': 'triangle',
+            'curve-style': 'bezier',
             'label': 'data(label)',
-            'color': '#E6EDF3',
-            'font-size': 11,
-            'text-valign': 'center',
-            'text-halign': 'center',
-            'width': 80,
-            'height': 30,
-            'shape': 'round-rectangle',
+            'font-size': 9,
+            'color': '#8B949E',
+            'text-rotation': 'autorotate',
+            'width': 1.5,
           },
         },
         {
-          selector: 'edge[kind = "object"]',
+          selector: 'edge.object-property',
           style: {
             'line-color': '#A371F7',
             'target-arrow-color': '#A371F7',
@@ -101,7 +116,7 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
           },
         },
         {
-          selector: 'edge[kind = "subclass"]',
+          selector: 'edge.subclass',
           style: {
             'line-color': '#30363D',
             'target-arrow-color': '#30363D',
@@ -113,20 +128,6 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
             'text-rotation': 'autorotate',
             'width': 1.5,
             'line-style': 'dashed',
-          },
-        },
-        {
-          selector: 'edge',
-          style: {
-            'line-color': '#30363D',
-            'target-arrow-color': '#30363D',
-            'target-arrow-shape': 'triangle',
-            'curve-style': 'bezier',
-            'label': 'data(label)',
-            'font-size': 9,
-            'color': '#8B949E',
-            'text-rotation': 'autorotate',
-            'width': 1.5,
           },
         },
         {

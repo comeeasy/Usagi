@@ -59,8 +59,8 @@ export default function GraphPage() {
   const loadGraph = async (iris: string[], d: number) => {
     const result = await subgraphMutation.mutateAsync({ rootIris: iris.length > 0 ? iris : undefined, depth: d })
     const cyElements: CyElement[] = [
-      ...result.nodes.map((n) => ({ group: 'nodes' as const, data: n.data as CyElement['data'] })),
-      ...result.edges.map((e) => ({ group: 'edges' as const, data: e.data as CyElement['data'] })),
+      ...result.nodes.map((n) => ({ group: 'nodes' as const, data: n.data as CyElement['data'], classes: n.classes })),
+      ...result.edges.map((e) => ({ group: 'edges' as const, data: e.data as CyElement['data'], classes: e.classes })),
     ]
     setElements(cyElements)
     setHasLoaded(true)
