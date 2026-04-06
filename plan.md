@@ -106,12 +106,13 @@ Neo4j Cypher BFS → Python-side iterative SPARQL BFS
 
 - [x] 브랜치 생성: `feat/replace-neo4j-with-jena`
 - [x] 계획 수립 및 문서화 (plan.md)
-- [ ] Step 1: 설정/의존성 변경 (config.py, requirements.txt, docker-compose.yml)
-- [ ] Step 2: ontology_store.py 재작성 (Fuseki HTTP 클라이언트)
-- [ ] Step 3: import_service.py 재작성 (rdflib 통일)
-- [ ] Step 4: csv_importer.py 수정 (Phase 2 제거)
-- [ ] Step 5: reasoner_service.py 수정 (pyoxigraph 제거)
-- [ ] Step 6: main.py 수정
-- [ ] Step 7: API 수정 (ontologies, individuals, subgraph, sources)
-- [ ] Step 8: app_mcp/tools.py 수정
-- [ ] Step 9: 삭제 파일 제거 (graph_store, sync_service, sync_worker)
+- [x] Step 1: 설정/의존성 변경 (config.py, requirements.txt, docker-compose.yml)
+- [x] Step 2: ontology_store.py 재작성 (Fuseki HTTP 클라이언트)
+- [x] Step 3: import_service.py 재작성 (rdflib 통일)
+- [x] Step 4: csv_importer.py 수정 (Phase 2 제거)
+- [x] Step 5: reasoner_service.py 수정 (pyoxigraph 제거)
+- [x] Step 6: main.py 수정
+- [x] Step 7: API 수정 (ontologies, concepts, individuals, subgraph, sources)
+- [x] Step 8: app_mcp/tools.py 수정
+- [x] Step 9: 삭제 파일 제거 (graph_store, sync_service, sync_worker)
+- [x] 테스트 수정 (conftest, test_mcp_tools, test_service_*)
