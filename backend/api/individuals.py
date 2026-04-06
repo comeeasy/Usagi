@@ -173,7 +173,7 @@ SELECT ?iri ?type WHERE {{
         for row in rows
     ]
 
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    return {"items": items, "total": total, "page": page, "page_size": page_size, "has_next": (page * page_size) < total}
 
 
 # ── 생성 ──────────────────────────────────────────────────────────────────

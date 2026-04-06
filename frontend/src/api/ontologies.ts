@@ -11,10 +11,18 @@ function detailFromFastApiBody(body: unknown): string | undefined {
 }
 import type { Ontology, OntologyCreate, OntologyUpdate, PaginatedResponse } from '@/types/ontology'
 
-// Backend returns {label, iri} but frontend types use {name, base_iri}
+// Backend returns {label, iri, stats:{concepts,individuals,object_properties,data_properties}}
+// Frontend types use {name, base_iri, stats:{class_count,individual_count,property_count,triple_count}}
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapOntology(data: any): Ontology {
-  return { ...data, name: data.label ?? data.name, base_iri: data.iri ?? data.base_iri }
+  const s = data.stats ?? {}
+  const stats = {
+    class_count: s.class_count ?? s.concepts ?? 0,
+    individual_count: s.individual_count ?? s.individuals ?? 0,
+    property_count: s.property_count ?? ((s.object_properties ?? 0) + (s.data_properties ?? 0)),
+    triple_count: s.triple_count ?? 0,
+  }
+  return { ...data, name: data.label ?? data.name, base_iri: data.iri ?? data.base_iri, stats }
 }
 
 export function listOntologies(params?: { page?: number; pageSize?: number; dataset?: string }): Promise<PaginatedResponse<Ontology>> {

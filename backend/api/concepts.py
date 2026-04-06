@@ -177,7 +177,7 @@ ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
         )
         for r in rows
     ]
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    return {"items": items, "total": total, "page": page, "page_size": page_size, "has_next": (page * page_size) < total}
 
 
 # ── 직계 하위 클래스 (트리 lazy load) ────────────────────────────────────────
@@ -230,7 +230,7 @@ ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
         )
         for r in rows
     ]
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    return {"items": items, "total": total, "page": page, "page_size": page_size, "has_next": (page * page_size) < total}
 
 
 # ── 생성 ──────────────────────────────────────────────────────────────────

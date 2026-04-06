@@ -101,7 +101,7 @@ async def list_ontologies(
             stats=OntologyStats(**stats_dict),
         ))
 
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    return {"items": items, "total": total, "page": page, "page_size": page_size, "has_next": (page * page_size) < total}
 
 
 # ── 생성 ──────────────────────────────────────────────────────────────────

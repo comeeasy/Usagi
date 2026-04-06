@@ -204,7 +204,7 @@ SELECT DISTINCT ?iri WHERE {{
         for r in data_rows:
             items.append(await _fetch_data_property(store, _v(r.get("iri")), ontology_id, kg, dataset=dataset))
 
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    return {"items": items, "total": total, "page": page, "page_size": page_size, "has_next": (page * page_size) < total}
 
 
 # ── 생성 ──────────────────────────────────────────────────────────────────

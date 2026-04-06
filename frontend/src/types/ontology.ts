@@ -34,7 +34,7 @@ export interface PaginatedResponse<T> {
   total: number
   page: number
   page_size: number
-  has_next: boolean
+  has_next?: boolean
 }
 
 export interface ErrorResponse {
