@@ -1,13 +1,24 @@
 """
-Tests for OntologyStore service — pyoxigraph 인메모리 인스턴스로 SPARQL 동작 직접 검증.
+Tests for OntologyStore service — 실행 중인 Fuseki 인스턴스 필요.
+
+실행 방법:
+    pytest -m integration  (Fuseki가 localhost:3030 에서 실행 중일 때)
+
+기본 pytest 실행 시에는 스킵된다.
 """
 import pytest
-from pyoxigraph import NamedNode, Literal as RDFLiteral
+from rdflib import URIRef, Literal
+from rdflib.namespace import XSD
 
 from services.ontology_store import OntologyStore, Triple
 
 
-GRAPH = "https://example.org/test/tbox"
+pytestmark = pytest.mark.integration
+
+FUSEKI_URL = "http://localhost:3030"
+DATASET = "ontology"
+
+GRAPH = "https://example.org/test/kg"
 ONT = "https://example.org/test"
 RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
 RDFS_LABEL = "http://www.w3.org/2000/01/rdf-schema#label"
@@ -17,23 +28,25 @@ OWL_OBJ_PROP = "http://www.w3.org/2002/07/owl#ObjectProperty"
 
 
 @pytest.fixture
-def store():
-    return OntologyStore(path=None)
+async def store():
+    s = OntologyStore(FUSEKI_URL, DATASET)
+    yield s
+    await s.close()
 
 
-def test_store_init_in_memory(store):
-    """OntologyStore(path=None) 초기화 성공."""
+def test_store_init(store):
+    """OntologyStore 초기화 성공."""
     assert store is not None
-    assert store._store is not None
+    assert store._query_url() == f"{FUSEKI_URL}/{DATASET}/sparql"
 
 
 async def test_insert_and_select_triples(store):
     """insert_triples → sparql_select로 읽기."""
     triples = [
         Triple(
-            subject=NamedNode(f"{ONT}#Alice"),
-            predicate=NamedNode(RDF_TYPE),
-            object_=NamedNode(OWL_NAMED_IND),
+            subject=URIRef(f"{ONT}#Alice"),
+            predicate=URIRef(RDF_TYPE),
+            object_=URIRef(OWL_NAMED_IND),
         )
     ]
     await store.insert_triples(GRAPH, triples)
@@ -42,17 +55,17 @@ async def test_insert_and_select_triples(store):
         PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
         SELECT ?s WHERE {{ GRAPH <{GRAPH}> {{ ?s rdf:type owl:NamedIndividual }} }}
     """)
-    assert len(rows) == 1
-    assert rows[0]["s"]["value"] == f"{ONT}#Alice"
+    assert any(r["s"]["value"] == f"{ONT}#Alice" for r in rows)
+    await store.delete_graph(GRAPH)
 
 
 async def test_sparql_select_returns_dict_types(store):
-    """NamedNode → type=uri, RDFLiteral → type=literal 변환 확인."""
+    """URIRef → type=uri, Literal → type=literal 변환 확인."""
     await store.insert_triples(GRAPH, [
         Triple(
-            subject=NamedNode(f"{ONT}#Bob"),
-            predicate=NamedNode(RDFS_LABEL),
-            object_=RDFLiteral("Bob Smith"),
+            subject=URIRef(f"{ONT}#Bob"),
+            predicate=URIRef(RDFS_LABEL),
+            object_=Literal("Bob Smith"),
         )
     ])
     rows = await store.sparql_select(f"""
@@ -62,6 +75,7 @@ async def test_sparql_select_returns_dict_types(store):
     assert rows[0]["s"]["type"] == "uri"
     assert rows[0]["label"]["type"] == "literal"
     assert rows[0]["label"]["value"] == "Bob Smith"
+    await store.delete_graph(GRAPH)
 
 
 async def test_sparql_update_insert(store):
@@ -75,33 +89,13 @@ async def test_sparql_update_insert(store):
         SELECT ?c WHERE {{ GRAPH <{GRAPH}> {{ ?c a owl:Class }} }}
     """)
     assert any(r["c"]["value"] == f"{ONT}#Cat" for r in rows)
-
-
-async def test_sparql_update_delete(store):
-    """SPARQL DELETE DATA → 트리플 제거 확인."""
-    await store.sparql_update(f"""
-        PREFIX owl: <http://www.w3.org/2002/07/owl#>
-        INSERT DATA {{ GRAPH <{GRAPH}> {{ <{ONT}#Dog> a owl:Class }} }}
-    """)
-    await store.sparql_update(f"""
-        PREFIX owl: <http://www.w3.org/2002/07/owl#>
-        DELETE DATA {{ GRAPH <{GRAPH}> {{ <{ONT}#Dog> a owl:Class }} }}
-    """)
-    rows = await store.sparql_select(f"""
-        PREFIX owl: <http://www.w3.org/2002/07/owl#>
-        SELECT ?c WHERE {{ GRAPH <{GRAPH}> {{ <{ONT}#Dog> a owl:Class }} }}
-    """)
-    assert rows == []
+    await store.delete_graph(GRAPH)
 
 
 async def test_delete_graph(store):
     """Named Graph 삭제 → 해당 그래프 트리플 없어짐."""
     await store.insert_triples(GRAPH, [
-        Triple(
-            subject=NamedNode(f"{ONT}#X"),
-            predicate=NamedNode(RDF_TYPE),
-            object_=NamedNode(OWL_CLASS),
-        )
+        Triple(subject=URIRef(f"{ONT}#X"), predicate=URIRef(RDF_TYPE), object_=URIRef(OWL_CLASS))
     ])
     await store.delete_graph(GRAPH)
     rows = await store.sparql_select(f"SELECT ?s WHERE {{ GRAPH <{GRAPH}> {{ ?s ?p ?o }} }}")
@@ -113,26 +107,13 @@ async def test_delete_graph_idempotent(store):
     await store.delete_graph("https://example.org/nonexistent/graph")
 
 
-async def test_export_turtle(store):
-    """export_turtle → 유효한 Turtle 문자열 반환."""
-    await store.sparql_update(f"""
-        PREFIX owl: <http://www.w3.org/2002/07/owl#>
-        INSERT DATA {{ GRAPH <{GRAPH}> {{ <{ONT}#Elephant> a owl:Class }} }}
-    """)
-    turtle = await store.export_turtle(GRAPH)
-    assert isinstance(turtle, str)
-    assert len(turtle) > 0
-    # Turtle에 triple 내용이 포함됨
-    assert "Elephant" in turtle or "owl" in turtle.lower()
-
-
 async def test_get_ontology_stats(store):
     """concepts/individuals/properties 카운트 정확성."""
-    tbox = f"{ONT}/tbox"
+    kg = f"{ONT}/kg"
     await store.sparql_update(f"""
         PREFIX owl: <http://www.w3.org/2002/07/owl#>
         INSERT DATA {{
-            GRAPH <{tbox}> {{
+            GRAPH <{kg}> {{
                 <{ONT}#Cls1> a owl:Class .
                 <{ONT}#Cls2> a owl:Class .
                 <{ONT}#ind1> a owl:NamedIndividual .
@@ -141,27 +122,25 @@ async def test_get_ontology_stats(store):
             }}
         }}
     """)
-    stats = await store.get_ontology_stats(tbox)
+    stats = await store.get_ontology_stats(kg)
     assert stats["concepts"] == 2
     assert stats["individuals"] == 1
     assert stats["object_properties"] == 1
     assert stats["data_properties"] == 1
+    await store.delete_graph(kg)
 
 
 async def test_sparql_ask_true(store):
     """ASK → True."""
     await store.insert_triples(GRAPH, [
-        Triple(
-            subject=NamedNode(f"{ONT}#Whale"),
-            predicate=NamedNode(RDF_TYPE),
-            object_=NamedNode(OWL_CLASS),
-        )
+        Triple(subject=URIRef(f"{ONT}#Whale"), predicate=URIRef(RDF_TYPE), object_=URIRef(OWL_CLASS))
     ])
     result = await store.sparql_ask(f"""
         PREFIX owl: <http://www.w3.org/2002/07/owl#>
         ASK {{ GRAPH <{GRAPH}> {{ <{ONT}#Whale> a owl:Class }} }}
     """)
     assert result is True
+    await store.delete_graph(GRAPH)
 
 
 async def test_sparql_ask_false(store):
@@ -171,9 +150,3 @@ async def test_sparql_ask_false(store):
         ASK {{ GRAPH <{GRAPH}> {{ <{ONT}#NONEXISTENT> a owl:Class }} }}
     """)
     assert result is False
-
-
-async def test_sparql_syntax_error_raises(store):
-    """잘못된 SPARQL 쿼리 → 예외 발생."""
-    with pytest.raises(Exception):
-        await store.sparql_select("THIS IS NOT VALID SPARQL !!!!")

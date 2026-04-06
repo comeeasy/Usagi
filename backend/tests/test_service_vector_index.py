@@ -13,7 +13,7 @@ from services.vector_index import VectorIndex, VectorIndexManager
 from services.ontology_store import OntologyStore
 
 BASE = "https://test-vector.example.org"
-TBOX = f"{BASE}/tbox"
+KG = f"{BASE}/kg"
 
 _P = """
 PREFIX owl:  <http://www.w3.org/2002/07/owl#>
@@ -103,7 +103,7 @@ async def store_with_data():
     store = OntologyStore(path=None)
     await store.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Person>     a owl:Class ; rdfs:label "Person" .
         <{BASE}#Department> a owl:Class ; rdfs:label "Department" .
         <{BASE}#Employee>   a owl:NamedIndividual ; rdfs:label "Employee Alice" .
@@ -151,7 +151,7 @@ async def test_manager_invalidate_rebuilds(store_with_data):
     # 새 클래스 추가 후 invalidate
     await store_with_data.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Manager> a owl:Class ; rdfs:label "Manager" .
     }}
 }}""")

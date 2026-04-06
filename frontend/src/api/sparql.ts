@@ -14,10 +14,12 @@ export interface SparqlResults {
   bindings: Record<string, SparqlBinding>[]
 }
 
-export function executeSparql(ontologyId: string, query: string): Promise<SparqlResults> {
-  return apiPost(`/ontologies/${ontologyId}/sparql`, { query })
+export function executeSparql(ontologyId: string, query: string, dataset?: string): Promise<SparqlResults> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${ontologyId}/sparql${qs}`, { query })
 }
 
-export function executeSparqlUpdate(ontologyId: string, update: string): Promise<void> {
-  return apiPost(`/ontologies/${ontologyId}/sparql/update`, { update })
+export function executeSparqlUpdate(ontologyId: string, update: string, dataset?: string): Promise<void> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${ontologyId}/sparql/update${qs}`, { update })
 }

@@ -13,6 +13,14 @@ export interface PropertyRestriction {
   cardinality?: number
 }
 
+export interface PropertyValue {
+  predicate: string
+  value: string
+  value_type: 'uri' | 'literal'
+  datatype?: string
+  language?: string
+}
+
 export interface Concept {
   iri: string
   label?: string
@@ -22,7 +30,10 @@ export interface Concept {
   equivalent_classes: string[]
   disjoint_with: string[]
   restrictions: PropertyRestriction[]
-  is_deprecated: boolean
+  individual_count: number
+  subclass_count: number
+  properties: PropertyValue[]
+  is_deprecated?: boolean
 }
 
 export interface ConceptCreate {

@@ -34,15 +34,15 @@ async def test_detect_conflicts_no_conflict(ontology_store: OntologyStore) -> No
     """겹치는 IRI 없는 두 TBox → conflicts=[], auto_mergeable_count>0."""
     svc = MergeService(ontology_store)
 
-    tbox_a = f"{BASE_IRI_A}/tbox"
-    tbox_b = f"{BASE_IRI_B}/tbox"
+    kg_a = f"{BASE_IRI_A}/kg"
+    kg_b = f"{BASE_IRI_B}/kg"
 
     await ontology_store.sparql_update(f"""
 PREFIX owl: <http://www.w3.org/2002/07/owl#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 INSERT DATA {{
-    GRAPH <{tbox_a}> {{ <{BASE_IRI_A}#Person> a owl:Class ; rdfs:label "Person" . }}
-    GRAPH <{tbox_b}> {{ <{BASE_IRI_B}#Department> a owl:Class ; rdfs:label "Department" . }}
+    GRAPH <{kg_a}> {{ <{BASE_IRI_A}#Person> a owl:Class ; rdfs:label "Person" . }}
+    GRAPH <{kg_b}> {{ <{BASE_IRI_B}#Department> a owl:Class ; rdfs:label "Department" . }}
 }}""")
 
     result = await svc.detect_conflicts(BASE_IRI_A, BASE_IRI_B)
@@ -55,14 +55,14 @@ async def test_detect_conflicts_label_conflict(ontology_store: OntologyStore) ->
     """동일 IRI에 다른 label → conflict_type='label'."""
     svc = MergeService(ontology_store)
     shared = "https://shared.example.org#Person"
-    tbox_a = f"{BASE_IRI_A}/tbox"
-    tbox_b = f"{BASE_IRI_B}/tbox"
+    kg_a = f"{BASE_IRI_A}/kg"
+    kg_b = f"{BASE_IRI_B}/kg"
 
     await ontology_store.sparql_update(f"""
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 INSERT DATA {{
-    GRAPH <{tbox_a}> {{ <{shared}> rdfs:label "Person" . }}
-    GRAPH <{tbox_b}> {{ <{shared}> rdfs:label "PersonAlt" . }}
+    GRAPH <{kg_a}> {{ <{shared}> rdfs:label "Person" . }}
+    GRAPH <{kg_b}> {{ <{shared}> rdfs:label "PersonAlt" . }}
 }}""")
 
     result = await svc.detect_conflicts(BASE_IRI_A, BASE_IRI_B)
@@ -78,14 +78,14 @@ async def test_detect_conflicts_domain_conflict(ontology_store: OntologyStore) -
     """동일 Property IRI에 다른 domain → conflict_type='domain'."""
     svc = MergeService(ontology_store)
     prop = "https://shared.example.org#worksIn"
-    tbox_a = f"{BASE_IRI_A}/tbox"
-    tbox_b = f"{BASE_IRI_B}/tbox"
+    kg_a = f"{BASE_IRI_A}/kg"
+    kg_b = f"{BASE_IRI_B}/kg"
 
     await ontology_store.sparql_update(f"""
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 INSERT DATA {{
-    GRAPH <{tbox_a}> {{ <{prop}> rdfs:domain <https://shared.example.org#Employee> . }}
-    GRAPH <{tbox_b}> {{ <{prop}> rdfs:domain <https://shared.example.org#Person> . }}
+    GRAPH <{kg_a}> {{ <{prop}> rdfs:domain <https://shared.example.org#Employee> . }}
+    GRAPH <{kg_b}> {{ <{prop}> rdfs:domain <https://shared.example.org#Person> . }}
 }}""")
 
     result = await svc.detect_conflicts(BASE_IRI_A, BASE_IRI_B)
@@ -97,15 +97,15 @@ async def test_detect_conflicts_range_conflict(ontology_store: OntologyStore) ->
     """동일 Property IRI에 다른 range → conflict_type='range'."""
     svc = MergeService(ontology_store)
     prop = "https://shared.example.org#hasName"
-    tbox_a = f"{BASE_IRI_A}/tbox"
-    tbox_b = f"{BASE_IRI_B}/tbox"
+    kg_a = f"{BASE_IRI_A}/kg"
+    kg_b = f"{BASE_IRI_B}/kg"
 
     await ontology_store.sparql_update(f"""
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
 INSERT DATA {{
-    GRAPH <{tbox_a}> {{ <{prop}> rdfs:range xsd:string . }}
-    GRAPH <{tbox_b}> {{ <{prop}> rdfs:range xsd:anyURI . }}
+    GRAPH <{kg_a}> {{ <{prop}> rdfs:range xsd:string . }}
+    GRAPH <{kg_b}> {{ <{prop}> rdfs:range xsd:anyURI . }}
 }}""")
 
     result = await svc.detect_conflicts(BASE_IRI_A, BASE_IRI_B)
@@ -116,14 +116,14 @@ INSERT DATA {{
 async def test_merge_no_resolutions(ontology_store: OntologyStore) -> None:
     """resolutions=[] → 소스 트리플이 타겟에 추가됨."""
     svc = MergeService(ontology_store)
-    tbox_a = f"{BASE_IRI_A}/tbox"
-    tbox_b = f"{BASE_IRI_B}/tbox"
+    kg_a = f"{BASE_IRI_A}/kg"
+    kg_b = f"{BASE_IRI_B}/kg"
 
     await ontology_store.sparql_update(f"""
 PREFIX owl: <http://www.w3.org/2002/07/owl#>
 INSERT DATA {{
-    GRAPH <{tbox_a}> {{ <{BASE_IRI_A}#Person> a owl:Class . }}
-    GRAPH <{tbox_b}> {{ <{BASE_IRI_B}#Department> a owl:Class . }}
+    GRAPH <{kg_a}> {{ <{BASE_IRI_A}#Person> a owl:Class . }}
+    GRAPH <{kg_b}> {{ <{BASE_IRI_B}#Department> a owl:Class . }}
 }}""")
 
     result = await svc.merge(BASE_IRI_A, BASE_IRI_B, [])
@@ -133,7 +133,7 @@ INSERT DATA {{
     # Department가 타겟 TBox에 추가됐는지 확인
     rows = await ontology_store.sparql_select(f"""
 PREFIX owl: <http://www.w3.org/2002/07/owl#>
-SELECT ?c WHERE {{ GRAPH <{tbox_a}> {{ ?c a owl:Class }} }}""")
+SELECT ?c WHERE {{ GRAPH <{kg_a}> {{ ?c a owl:Class }} }}""")
     iris = [r["c"]["value"] for r in rows]
     assert f"{BASE_IRI_B}#Department" in iris
 
@@ -143,14 +143,14 @@ async def test_merge_keep_target(ontology_store: OntologyStore) -> None:
     """keep-target → 타겟 label 유지, 소스 label 무시."""
     svc = MergeService(ontology_store)
     shared = "https://shared.example.org#Thing"
-    tbox_a = f"{BASE_IRI_A}/tbox"
-    tbox_b = f"{BASE_IRI_B}/tbox"
+    kg_a = f"{BASE_IRI_A}/kg"
+    kg_b = f"{BASE_IRI_B}/kg"
 
     await ontology_store.sparql_update(f"""
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 INSERT DATA {{
-    GRAPH <{tbox_a}> {{ <{shared}> rdfs:label "TargetLabel" . }}
-    GRAPH <{tbox_b}> {{ <{shared}> rdfs:label "SourceLabel" . }}
+    GRAPH <{kg_a}> {{ <{shared}> rdfs:label "TargetLabel" . }}
+    GRAPH <{kg_b}> {{ <{shared}> rdfs:label "SourceLabel" . }}
 }}""")
 
     from api.merge import ConflictResolution
@@ -159,7 +159,7 @@ INSERT DATA {{
 
     rows = await ontology_store.sparql_select(f"""
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-SELECT ?l WHERE {{ GRAPH <{tbox_a}> {{ <{shared}> rdfs:label ?l }} }}""")
+SELECT ?l WHERE {{ GRAPH <{kg_a}> {{ <{shared}> rdfs:label ?l }} }}""")
     labels = [r["l"]["value"] for r in rows]
     # keep-target이므로 TargetLabel이 반드시 존재해야 함
     # (SourceLabel이 있어도 TargetLabel이 유지되면 됨)
@@ -171,14 +171,14 @@ async def test_merge_keep_source(ontology_store: OntologyStore) -> None:
     """keep-source → 소스 label로 교체."""
     svc = MergeService(ontology_store)
     shared = "https://shared.example.org#Thing2"
-    tbox_a = f"{BASE_IRI_A}/tbox"
-    tbox_b = f"{BASE_IRI_B}/tbox"
+    kg_a = f"{BASE_IRI_A}/kg"
+    kg_b = f"{BASE_IRI_B}/kg"
 
     await ontology_store.sparql_update(f"""
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 INSERT DATA {{
-    GRAPH <{tbox_a}> {{ <{shared}> rdfs:label "OldLabel" . }}
-    GRAPH <{tbox_b}> {{ <{shared}> rdfs:label "NewLabel" . }}
+    GRAPH <{kg_a}> {{ <{shared}> rdfs:label "OldLabel" . }}
+    GRAPH <{kg_b}> {{ <{shared}> rdfs:label "NewLabel" . }}
 }}""")
 
     from api.merge import ConflictResolution
@@ -187,7 +187,7 @@ INSERT DATA {{
 
     rows = await ontology_store.sparql_select(f"""
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-SELECT ?l WHERE {{ GRAPH <{tbox_a}> {{ <{shared}> rdfs:label ?l }} }}""")
+SELECT ?l WHERE {{ GRAPH <{kg_a}> {{ <{shared}> rdfs:label ?l }} }}""")
     labels = [r["l"]["value"] for r in rows]
     assert "NewLabel" in labels
     assert "OldLabel" not in labels
@@ -198,14 +198,14 @@ async def test_merge_both(ontology_store: OntologyStore) -> None:
     """merge-both → 타겟 + 소스 값 모두 존재."""
     svc = MergeService(ontology_store)
     shared = "https://shared.example.org#Thing3"
-    tbox_a = f"{BASE_IRI_A}/tbox"
-    tbox_b = f"{BASE_IRI_B}/tbox"
+    kg_a = f"{BASE_IRI_A}/kg"
+    kg_b = f"{BASE_IRI_B}/kg"
 
     await ontology_store.sparql_update(f"""
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 INSERT DATA {{
-    GRAPH <{tbox_a}> {{ <{shared}> rdfs:label "LabelA" . }}
-    GRAPH <{tbox_b}> {{ <{shared}> rdfs:label "LabelB" . }}
+    GRAPH <{kg_a}> {{ <{shared}> rdfs:label "LabelA" . }}
+    GRAPH <{kg_b}> {{ <{shared}> rdfs:label "LabelB" . }}
 }}""")
 
     from api.merge import ConflictResolution
@@ -214,7 +214,7 @@ INSERT DATA {{
 
     rows = await ontology_store.sparql_select(f"""
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-SELECT ?l WHERE {{ GRAPH <{tbox_a}> {{ <{shared}> rdfs:label ?l }} }}""")
+SELECT ?l WHERE {{ GRAPH <{kg_a}> {{ <{shared}> rdfs:label ?l }} }}""")
     labels = [r["l"]["value"] for r in rows]
     assert "LabelA" in labels
     assert "LabelB" in labels

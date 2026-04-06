@@ -7,7 +7,7 @@ from services.ontology_store import OntologyStore
 from services.search_service import search_entities, search_relations, vector_search
 
 ONT_IRI = "https://test.example.org/onto"
-TBOX = f"{ONT_IRI}/tbox"
+KG = f"{ONT_IRI}/kg"
 
 _PREFIXES = """
 PREFIX owl:  <http://www.w3.org/2002/07/owl#>
@@ -21,7 +21,7 @@ async def store_with_data():
     store = OntologyStore(path=None)
     await store.sparql_update(f"""{_PREFIXES}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{ONT_IRI}#Person>     a owl:Class ; rdfs:label "Person" .
         <{ONT_IRI}#Employee>   a owl:Class ; rdfs:label "Employee" .
         <{ONT_IRI}#Alice>      a owl:NamedIndividual ; rdfs:label "Alice" .

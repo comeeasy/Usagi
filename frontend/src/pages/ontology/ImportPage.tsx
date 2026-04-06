@@ -4,7 +4,25 @@ import { Upload, Link, BookOpen, CheckCircle } from 'lucide-react'
 import OntologyTabs from '@/components/layout/OntologyTabs'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import { useMutation } from '@tanstack/react-query'
-import { importOntologyFile, importOntologyUrl, importOntologyStandard } from '@/api/ontologies'
+import { ApiError } from '@/api/client'
+import {
+  importOntologyFile,
+  importOntologyUrl,
+  importOntologyStandard,
+  type ImportResult,
+} from '@/api/ontologies'
+import { useDataset } from '@/contexts/DatasetContext'
+
+type FileImportProgress = { phase: 'upload' | 'server'; uploadPct?: number }
+
+function formatImportError(err: unknown): string {
+  if (err instanceof ApiError) {
+    const parts = [err.error, err.detail].filter(Boolean)
+    return parts.length ? parts.join(': ') : err.message
+  }
+  if (err instanceof Error) return err.message
+  return 'Unknown error'
+}
 
 type ImportMode = 'file' | 'url' | 'standard'
 
@@ -20,30 +38,44 @@ const FORMATS = ['turtle', 'rdf-xml', 'json-ld', 'n-triples', 'n-quads']
 
 export default function ImportPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
+  const { dataset } = useDataset()
   const [mode, setMode] = useState<ImportMode>('file')
   const [file, setFile] = useState<File | null>(null)
   const [url, setUrl] = useState('')
   const [format, setFormat] = useState('turtle')
   const [selectedStandard, setSelectedStandard] = useState<string | null>(null)
+  const [fileImportProgress, setFileImportProgress] = useState<FileImportProgress | null>(null)
 
   const importMutation = useMutation({
-    mutationFn: (fn: () => Promise<{ message: string; triples_imported?: number }>) => fn(),
+    mutationFn: (fn: () => Promise<ImportResult>) => fn(),
+    onSettled: () => setFileImportProgress(null),
   })
 
   const handleFileImport = (e: React.FormEvent) => {
     e.preventDefault()
     if (!file) return
-    importMutation.mutate(() => importOntologyFile(ontologyId!, file))
+    setFileImportProgress({ phase: 'upload', uploadPct: 0 })
+    importMutation.mutate(() =>
+      importOntologyFile(ontologyId!, file, dataset, (p) => {
+        if (p.phase === 'upload') {
+          const uploadPct =
+            p.total > 0 ? Math.round((100 * p.loaded) / p.total) : undefined
+          setFileImportProgress({ phase: 'upload', uploadPct })
+        } else {
+          setFileImportProgress({ phase: 'server' })
+        }
+      }),
+    )
   }
 
   const handleUrlImport = (e: React.FormEvent) => {
     e.preventDefault()
-    importMutation.mutate(() => importOntologyUrl(ontologyId!, url))
+    importMutation.mutate(() => importOntologyUrl(ontologyId!, url, dataset))
   }
 
   const handleStandardImport = () => {
     if (!selectedStandard) return
-    importMutation.mutate(() => importOntologyStandard(ontologyId!, selectedStandard))
+    importMutation.mutate(() => importOntologyStandard(ontologyId!, selectedStandard, dataset))
   }
 
   const inputStyle = {
@@ -88,24 +120,55 @@ export default function ImportPage() {
         </div>
 
         {/* Success */}
-        {importMutation.isSuccess && (
+        {importMutation.isSuccess && importMutation.data && (
           <div
-            className="flex items-center gap-2 p-3 rounded-lg border mb-4 text-sm"
-            style={{ borderColor: 'var(--color-success)', color: 'var(--color-success)', backgroundColor: 'rgba(63,185,80,0.1)' }}
+            role="status"
+            aria-live="polite"
+            className="p-4 rounded-lg border mb-4 text-sm"
+            style={{
+              borderColor: 'var(--color-success)',
+              color: 'var(--color-text-primary)',
+              backgroundColor: 'rgba(63,185,80,0.12)',
+            }}
           >
-            <CheckCircle size={16} />
-            {importMutation.data?.message ?? 'Import successful'}
-            {importMutation.data?.triples_imported !== undefined && ` (${importMutation.data.triples_imported} triples)`}
+            <div className="flex items-center gap-2 font-semibold mb-2" style={{ color: 'var(--color-success)' }}>
+              <CheckCircle size={18} />
+              Import finished successfully
+            </div>
+            <p className="mb-1">{importMutation.data.message}</p>
+            {importMutation.data.timing_ms && (
+              <p className="text-xs mt-2 font-mono" style={{ color: 'var(--color-text-muted)' }}>
+                Server timing: read {importMutation.data.timing_ms.read} ms · parse{' '}
+                {importMutation.data.timing_ms.parse} ms · store {importMutation.data.timing_ms.store} ms · total{' '}
+                {importMutation.data.timing_ms.total} ms
+              </p>
+            )}
+            {(importMutation.data.format || importMutation.data.graph_iri) && (
+              <ul className="text-xs mt-2 space-y-0.5 font-mono" style={{ color: 'var(--color-text-muted)' }}>
+                {importMutation.data.format != null && importMutation.data.format !== '' && (
+                  <li>Detected format: {importMutation.data.format}</li>
+                )}
+                {importMutation.data.graph_iri != null && importMutation.data.graph_iri !== '' && (
+                  <li className="break-all" title={importMutation.data.graph_iri}>
+                    Target graph: {importMutation.data.graph_iri}
+                  </li>
+                )}
+              </ul>
+            )}
           </div>
         )}
 
         {/* Error */}
-        {importMutation.error && (
+        {importMutation.isError && importMutation.error && (
           <div
-            className="p-3 rounded-lg border mb-4 text-sm"
+            role="alert"
+            className="p-4 rounded-lg border mb-4 text-sm"
             style={{ borderColor: 'var(--color-error)', color: 'var(--color-error)', backgroundColor: 'rgba(248,81,73,0.1)' }}
           >
-            Import failed: {importMutation.error.message}
+            <p className="font-semibold mb-1">Import failed</p>
+            <p className="break-words" style={{ color: 'var(--color-text-primary)' }}>
+              {formatImportError(importMutation.error)}
+            </p>
           </div>
         )}
 
@@ -132,25 +195,78 @@ export default function ImportPage() {
                   {file ? file.name : 'Click to select file'}
                 </p>
                 <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-                  .ttl, .rdf, .owl, .jsonld, .nt, .nq
+                  .ttl, .rdf, .owl, .xml, .jsonld, .nt, .n3, .trig, .nq
                 </p>
               </div>
               <input
                 id="file-input"
                 type="file"
                 className="hidden"
-                accept=".ttl,.rdf,.owl,.xml,.jsonld,.json,.nt,.nq"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                accept=".ttl,.rdf,.owl,.xml,.jsonld,.json,.nt,.n3,.trig,.nq"
+                onChange={(e) => {
+                  importMutation.reset()
+                  setFile(e.target.files?.[0] ?? null)
+                }}
               />
             </div>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              Large files may take a while. Keep this page open until you see the result below.
+            </p>
+            {importMutation.isPending && fileImportProgress && (
+              <div
+                role="status"
+                aria-live="polite"
+                aria-busy="true"
+                className="p-3 rounded-lg border text-sm"
+                style={{
+                  borderColor: 'var(--color-border)',
+                  backgroundColor: 'var(--color-bg-elevated)',
+                  color: 'var(--color-text-primary)',
+                }}
+              >
+                <p className="mb-2 font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                  {fileImportProgress.phase === 'upload'
+                    ? 'Uploading file to API…'
+                    : 'Writing RDF to Fuseki (graph store)…'}
+                </p>
+                {fileImportProgress.phase === 'upload' && fileImportProgress.uploadPct != null ? (
+                  <>
+                    <progress
+                      className="import-progress w-full h-2.5 rounded"
+                      value={fileImportProgress.uploadPct}
+                      max={100}
+                      aria-valuenow={fileImportProgress.uploadPct}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    />
+                    <p className="text-xs mt-1.5 font-mono tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
+                      {fileImportProgress.uploadPct}%
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div
+                      className="import-progress-indeterminate-track w-full h-2.5 rounded overflow-hidden"
+                      role="progressbar"
+                      aria-valuetext="Writing to Fuseki"
+                      aria-busy="true"
+                    >
+                      <div className="import-progress-indeterminate-fill" />
+                    </div>
+                    <p className="text-xs mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                      Large files can take a while; waiting for Fuseki to finish the request.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
             <button
               type="submit"
               disabled={!file || importMutation.isPending}
               className="flex items-center justify-center gap-2 px-4 py-2 rounded text-sm font-medium hover:opacity-80 disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
             >
-              {importMutation.isPending && <LoadingSpinner size="sm" />}
-              {importMutation.isPending ? 'Importing...' : 'Import File'}
+              {importMutation.isPending ? 'Importing…' : 'Import File'}
             </button>
           </form>
         )}
@@ -167,7 +283,7 @@ export default function ImportPage() {
             </div>
             <div>
               <label className="block text-xs mb-1 font-medium" style={{ color: 'var(--color-text-secondary)' }}>URL *</label>
-              <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} required
+              <input type="url" value={url} onChange={(e) => { importMutation.reset(); setUrl(e.target.value) }} required
                 placeholder="https://example.org/ontology.ttl"
                 className="w-full px-3 py-1.5 rounded border text-sm focus:outline-none font-mono" style={inputStyle} />
             </div>
@@ -197,7 +313,10 @@ export default function ImportPage() {
                   name="standard"
                   value={std.id}
                   checked={selectedStandard === std.id}
-                  onChange={(e) => setSelectedStandard(e.target.value)}
+                  onChange={(e) => {
+                    importMutation.reset()
+                    setSelectedStandard(e.target.value)
+                  }}
                   className="w-4 h-4"
                 />
                 <div>

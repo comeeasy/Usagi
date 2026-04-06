@@ -2,14 +2,15 @@
 pytest fixtures for ontology platform tests.
 
 테스트 전략:
-  - OntologyStore: pyoxigraph 인메모리 Store (path=None) — 실제 SPARQL 동작 검증
-  - GraphStore: AsyncMock — Neo4j 없이 테스트
+  - OntologyStore: AsyncMock (Fuseki 없이 단위 테스트)
   - KafkaProducer: MagicMock — Kafka 없이 테스트
   - FastAPI 테스트 앱: 프로덕션 lifespan 대신 테스트 lifespan으로 state 주입
+
+  Fuseki가 필요한 통합 테스트는 @pytest.mark.integration 마커로 분리.
+  실행: pytest -m integration (Fuseki 실행 중일 때)
 """
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,7 +20,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from httpx import AsyncClient, ASGITransport
 
 from services.ontology_store import OntologyStore
-from services.graph_store import GraphStore
 from services.reasoner_service import ReasonerService
 from services.merge_service import MergeService
 from services.ingestion.kafka_producer import KafkaProducer
@@ -27,17 +27,21 @@ from services.ingestion.kafka_producer import KafkaProducer
 
 # ── 서비스 Fixtures ────────────────────────────────────────────────────────────
 
-@pytest_asyncio.fixture
-async def ontology_store():
-    """인메모리 Oxigraph OntologyStore — 각 테스트마다 새 인스턴스."""
-    return OntologyStore(path=None)
-
-
 @pytest.fixture
-def mock_graph_store():
-    """Neo4j GraphStore Mock — 실제 DB 연결 없음."""
-    mock = AsyncMock(spec=GraphStore)
-    mock.get_subgraph.return_value = {"nodes": [], "edges": []}
+def ontology_store():
+    """OntologyStore AsyncMock — Fuseki 없이 단위 테스트."""
+    mock = AsyncMock(spec=OntologyStore)
+    mock.sparql_select.return_value = []
+    mock.sparql_ask.return_value = False
+    mock.sparql_update.return_value = None
+    mock.sparql_construct.return_value = []
+    mock.insert_triples.return_value = None
+    mock.delete_graph.return_value = None
+    mock.list_ontologies.return_value = ([], 0)
+    mock.get_ontology_stats.return_value = {
+        "concepts": 0, "individuals": 0,
+        "object_properties": 0, "data_properties": 0, "named_graphs": 0,
+    }
     mock.close.return_value = None
     return mock
 
@@ -54,7 +58,7 @@ def mock_kafka_producer():
 # ── 테스트 FastAPI 앱 ──────────────────────────────────────────────────────────
 
 @pytest.fixture
-def app(ontology_store, mock_graph_store, mock_kafka_producer):
+def app(ontology_store, mock_kafka_producer):
     """
     테스트용 FastAPI 앱.
 
@@ -71,7 +75,6 @@ def app(ontology_store, mock_graph_store, mock_kafka_producer):
 
     # state 직접 주입 — lifespan 없이도 request.app.state.xxx 접근 가능
     test_app.state.ontology_store = ontology_store
-    test_app.state.graph_store = mock_graph_store
     test_app.state.reasoner_service = ReasonerService(ontology_store)
     test_app.state.merge_service = MergeService(ontology_store)
     test_app.state.kafka_producer = mock_kafka_producer

@@ -18,12 +18,14 @@ import {
   updateDataProperty,
 } from '@/api/relations'
 import { getOntology } from '@/api/ontologies'
+import { useDataset } from '@/contexts/DatasetContext'
 import type { ObjectProperty, DataProperty, ObjectPropertyCreate, DataPropertyCreate } from '@/types/property'
 
 type RelTab = 'object' | 'data'
 
 export default function RelationsPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
+  const { dataset } = useDataset()
   const queryClient = useQueryClient()
 
   const [tab, setTab] = useState<RelTab>('object')
@@ -35,26 +37,38 @@ export default function RelationsPage() {
   const PAGE_SIZE = 20
 
   const ontologyQuery = useQuery({
-    queryKey: ['ontology', ontologyId],
-    queryFn: () => getOntology(ontologyId!),
+    queryKey: ['ontology', ontologyId, dataset],
+    queryFn: () => getOntology(ontologyId!, dataset),
     enabled: !!ontologyId,
   })
   const iriPrefix = ontologyQuery.data?.base_iri ? `${ontologyQuery.data.base_iri}#` : ''
 
   const objectQuery = useQuery({
-    queryKey: ['object-properties', ontologyId, page, searchQuery],
-    queryFn: () => listObjectProperties(ontologyId!, { page, pageSize: PAGE_SIZE, ...(searchQuery ? { search: searchQuery } : {}) }),
+    queryKey: ['object-properties', ontologyId, dataset, page, searchQuery],
+    queryFn: () =>
+      listObjectProperties(ontologyId!, {
+        page,
+        pageSize: PAGE_SIZE,
+        dataset,
+        ...(searchQuery ? { search: searchQuery } : {}),
+      }),
     enabled: !!ontologyId && tab === 'object',
   })
 
   const dataQuery = useQuery({
-    queryKey: ['data-properties', ontologyId, page, searchQuery],
-    queryFn: () => listDataProperties(ontologyId!, { page, pageSize: PAGE_SIZE, ...(searchQuery ? { search: searchQuery } : {}) }),
+    queryKey: ['data-properties', ontologyId, dataset, page, searchQuery],
+    queryFn: () =>
+      listDataProperties(ontologyId!, {
+        page,
+        pageSize: PAGE_SIZE,
+        dataset,
+        ...(searchQuery ? { search: searchQuery } : {}),
+      }),
     enabled: !!ontologyId && tab === 'data',
   })
 
   const createObjectMutation = useMutation({
-    mutationFn: (data: Parameters<typeof createObjectProperty>[1]) => createObjectProperty(ontologyId!, data),
+    mutationFn: (data: Parameters<typeof createObjectProperty>[1]) => createObjectProperty(ontologyId!, data, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['object-properties', ontologyId] })
       setShowCreateForm(false)
@@ -62,7 +76,7 @@ export default function RelationsPage() {
   })
 
   const createDataMutation = useMutation({
-    mutationFn: (data: Parameters<typeof createDataProperty>[1]) => createDataProperty(ontologyId!, data),
+    mutationFn: (data: Parameters<typeof createDataProperty>[1]) => createDataProperty(ontologyId!, data, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['data-properties', ontologyId] })
       setShowCreateForm(false)
@@ -71,7 +85,7 @@ export default function RelationsPage() {
 
   const updateObjectMutation = useMutation({
     mutationFn: ({ iri, data }: { iri: string; data: Partial<ObjectPropertyCreate> }) =>
-      updateObjectProperty(ontologyId!, iri, data),
+      updateObjectProperty(ontologyId!, iri, data, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['object-properties', ontologyId] })
       setEditingProperty(null)
@@ -80,7 +94,7 @@ export default function RelationsPage() {
 
   const updateDataMutation = useMutation({
     mutationFn: ({ iri, data }: { iri: string; data: Partial<DataPropertyCreate> }) =>
-      updateDataProperty(ontologyId!, iri, data),
+      updateDataProperty(ontologyId!, iri, data, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['data-properties', ontologyId] })
       setEditingProperty(null)

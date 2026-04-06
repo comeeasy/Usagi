@@ -2,7 +2,7 @@
 Tests for RDFTransformer service.
 """
 import pytest
-from pyoxigraph import NamedNode, Literal as RDFLiteral
+from rdflib import URIRef, Literal
 
 from services.ingestion.rdf_transformer import (
     RDFTransformer,
@@ -47,23 +47,23 @@ def test_transform_produces_rdf_type_triple():
     transformer = RDFTransformer()
     triples = transformer.transform(make_event(), make_source())
     type_triple = next(
-        (t for t in triples if str(t.predicate.value) == RDF_TYPE),
+        (t for t in triples if str(t.predicate) == RDF_TYPE),
         None,
     )
     assert type_triple is not None
-    assert str(type_triple.object_.value) == CONCEPT_IRI
+    assert str(type_triple.object_) == CONCEPT_IRI
 
 
 def test_transform_subject_iri_from_template():
     """subject IRI가 템플릿대로 생성됨."""
     transformer = RDFTransformer()
     triples = transformer.transform(make_event([{"emp_id": "42"}]), make_source())
-    subjects = {str(t.subject.value) for t in triples}
+    subjects = {str(t.subject) for t in triples}
     assert "https://example.org/emp/42" in subjects
 
 
 def test_transform_property_mapping_literal():
-    """DataProperty 매핑 → RDFLiteral 생성."""
+    """DataProperty 매핑 → Literal 생성."""
     mapping = PropertyMapping(
         source_field="name",
         property_iri=NAME_PROP,
@@ -72,16 +72,16 @@ def test_transform_property_mapping_literal():
     transformer = RDFTransformer()
     triples = transformer.transform(make_event(), make_source(mappings=[mapping]))
     name_triple = next(
-        (t for t in triples if str(t.predicate.value) == NAME_PROP),
+        (t for t in triples if str(t.predicate) == NAME_PROP),
         None,
     )
     assert name_triple is not None
-    assert isinstance(name_triple.object_, RDFLiteral)
-    assert str(name_triple.object_.value) == "Alice"
+    assert isinstance(name_triple.object_, Literal)
+    assert str(name_triple.object_) == "Alice"
 
 
 def test_transform_property_mapping_iri_value():
-    """값이 IRI(http/urn 시작)이면 NamedNode로 변환."""
+    """값이 IRI(http/urn 시작)이면 URIRef로 변환."""
     mapping = PropertyMapping(
         source_field="dept",
         property_iri=DEPT_PROP,
@@ -90,11 +90,11 @@ def test_transform_property_mapping_iri_value():
     records = [{"emp_id": "1", "dept": "https://example.org/dept/Engineering"}]
     triples = transformer.transform(make_event(records), make_source(mappings=[mapping]))
     dept_triple = next(
-        (t for t in triples if str(t.predicate.value) == DEPT_PROP),
+        (t for t in triples if str(t.predicate) == DEPT_PROP),
         None,
     )
     assert dept_triple is not None
-    assert isinstance(dept_triple.object_, NamedNode)
+    assert isinstance(dept_triple.object_, URIRef)
 
 
 def test_transform_provenance_generated_at_time():
@@ -102,11 +102,11 @@ def test_transform_provenance_generated_at_time():
     transformer = RDFTransformer()
     triples = transformer.transform(make_event(), make_source())
     prov_triple = next(
-        (t for t in triples if str(t.predicate.value) == PROV_GENERATED_AT_TIME),
+        (t for t in triples if str(t.predicate) == PROV_GENERATED_AT_TIME),
         None,
     )
     assert prov_triple is not None
-    assert "2026-03-25" in str(prov_triple.object_.value)
+    assert "2026-03-25" in str(prov_triple.object_)
 
 
 def test_transform_provenance_was_attributed_to():
@@ -114,11 +114,11 @@ def test_transform_provenance_was_attributed_to():
     transformer = RDFTransformer()
     triples = transformer.transform(make_event(), make_source())
     attr_triple = next(
-        (t for t in triples if str(t.predicate.value) == PROV_WAS_ATTRIBUTED_TO),
+        (t for t in triples if str(t.predicate) == PROV_WAS_ATTRIBUTED_TO),
         None,
     )
     assert attr_triple is not None
-    assert str(attr_triple.object_.value) == "src-001"
+    assert str(attr_triple.object_) == "src-001"
 
 
 def test_transform_skips_missing_template_key():
@@ -146,7 +146,7 @@ def test_transform_multiple_records():
         records=[{"emp_id": "1"}, {"emp_id": "2"}],
     )
     triples = transformer.transform(event, make_source())
-    subjects = {str(t.subject.value) for t in triples}
+    subjects = {str(t.subject) for t in triples}
     assert "https://example.org/emp/1" in subjects
     assert "https://example.org/emp/2" in subjects
 
@@ -157,7 +157,7 @@ def test_transform_skips_none_property_value():
     transformer = RDFTransformer()
     records = [{"emp_id": "1"}]  # name 필드 없음
     triples = transformer.transform(make_event(records), make_source(mappings=[mapping]))
-    name_triples = [t for t in triples if str(t.predicate.value) == NAME_PROP]
+    name_triples = [t for t in triples if str(t.predicate) == NAME_PROP]
     assert name_triples == []
 
 

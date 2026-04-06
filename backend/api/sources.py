@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 
 from models.source import BackingSource, BackingSourceCreate, BackingSourceUpdate, CSVConfig
 
@@ -127,11 +127,12 @@ async def upload_csv(
     ontology_id: str,
     source_id: str,
     file: UploadFile = File(...),
+    dataset: str | None = Query(None),
 ) -> dict:
     """
     CSV 파일 업로드 → Oxigraph + Neo4j 즉시 import.
 
-    응답: { file_name, row_count, headers, triples_inserted, neo4j_nodes_upserted, named_graph }
+    응답: { file_name, row_count, headers, triples_inserted, named_graph }
     """
     source = _source_store.get(source_id)
     if source is None or source.ontology_id != ontology_id:
@@ -155,17 +156,16 @@ async def upload_csv(
 
     # import 실행
     store = getattr(request.app.state, "ontology_store", None)
-    graph_store = getattr(request.app.state, "graph_store", None)
 
-    if store is None or graph_store is None:
+    if store is None:
         raise HTTPException(status_code=503, detail="Store not initialized")
 
     from services.ingestion.csv_importer import CSVImporter
-    importer = CSVImporter(store, graph_store)
+    importer = CSVImporter(store)
 
     try:
         preview = await importer.preview(file_path, source.config)
-        result = await importer.import_file(file_path, source, ontology_id)
+        result = await importer.import_file(file_path, source, ontology_id, dataset=dataset)
     except Exception as exc:
         logger.error("CSV import failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Import failed: {exc}") from exc
@@ -190,6 +190,7 @@ async def trigger_sync(
     request: Request,
     ontology_id: str,
     source_id: str,
+    dataset: str | None = Query(None),
 ) -> dict:
     """
     수동 즉시 동기화 트리거.
@@ -213,14 +214,13 @@ async def trigger_sync(
             raise HTTPException(status_code=404, detail=f"Uploaded file '{cfg.file_name}' not found on server.")
 
         store = getattr(request.app.state, "ontology_store", None)
-        graph_store = getattr(request.app.state, "graph_store", None)
-        if store is None or graph_store is None:
+        if store is None:
             raise HTTPException(status_code=503, detail="Store not initialized")
 
         from services.ingestion.csv_importer import CSVImporter
-        importer = CSVImporter(store, graph_store)
+        importer = CSVImporter(store)
         try:
-            result = await importer.import_file(file_path, source, ontology_id)
+            result = await importer.import_file(file_path, source, ontology_id, dataset=dataset)
         except Exception as exc:
             logger.error("CSV re-import failed: %s", exc)
             raise HTTPException(status_code=500, detail=f"Import failed: {exc}") from exc

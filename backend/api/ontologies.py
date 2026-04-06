@@ -22,6 +22,7 @@ from models.ontology import (
     OntologyUpdate,
     PaginatedResponse,
 )
+from services.ontology_graph import kg_graph_iri
 
 router = APIRouter(prefix="/ontologies", tags=["ontologies"])
 
@@ -48,15 +49,11 @@ def _store(request: Request):
     return request.app.state.ontology_store
 
 
-def _graph_store(request: Request):
-    return request.app.state.graph_store
-
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _fetch_ontology(store, ontology_id: str) -> dict:
+async def _fetch_ontology(store, ontology_id: str, dataset: str | None = None) -> dict:
     """UUID(dc:identifier)로 온톨로지 메타데이터 조회. 없으면 None."""
     rows = await store.sparql_select(f"""
         {_PREFIXES}
@@ -71,7 +68,7 @@ async def _fetch_ontology(store, ontology_id: str) -> dict:
                 OPTIONAL {{ ?iri dc:modified ?updated }}
             }}
         }} LIMIT 1
-    """)
+    """, dataset=dataset)
     return rows[0] if rows else None
 
 
@@ -82,16 +79,17 @@ async def list_ontologies(
     request: Request,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    dataset: str | None = Query(None),
 ) -> dict:
     store = _store(request)
-    items_raw, total = await store.list_ontologies(page, page_size)
+    items_raw, total = await store.list_ontologies(page, page_size, dataset=dataset)
 
     items = []
     for raw in items_raw:
         iri = raw["iri"]
         ont_id = raw.get("id", "")  # UUID (dc:identifier)
-        tbox_iri = f"{iri}/tbox"
-        stats_dict = await store.get_ontology_stats(tbox_iri)
+        kg_iri = kg_graph_iri(iri)
+        stats_dict = await store.get_ontology_stats(kg_iri, dataset=dataset)
         items.append(Ontology(
             id=ont_id,
             iri=iri,
@@ -109,20 +107,24 @@ async def list_ontologies(
 # ── 생성 ──────────────────────────────────────────────────────────────────
 
 @router.post("", response_model=Ontology, status_code=201)
-async def create_ontology(request: Request, body: OntologyCreate) -> Ontology:
+async def create_ontology(
+    request: Request,
+    body: OntologyCreate,
+    dataset: str | None = Query(None),
+) -> Ontology:
     store = _store(request)
 
     # 중복 IRI 검사
     exists = await store.sparql_ask(f"""
         {_PREFIXES}
         ASK {{ GRAPH ?g {{ <{body.iri}> a owl:Ontology }} }}
-    """)
+    """, dataset=dataset)
     if exists:
         raise HTTPException(409, detail={"code": "ONTOLOGY_IRI_DUPLICATE", "message": f"IRI already exists: {body.iri}"})
 
     ont_id = str(uuid.uuid4())
     now = _now_iso()
-    tbox_iri = f"{body.iri}/tbox"
+    kg_iri = kg_graph_iri(body.iri)
 
     desc_triple = f'<{body.iri}> dc:description "{body.description}" .' if body.description else ""
     ver_triple = f'<{body.iri}> owl:versionInfo "{body.version}" .' if body.version else ""
@@ -130,7 +132,7 @@ async def create_ontology(request: Request, body: OntologyCreate) -> Ontology:
     await store.sparql_update(f"""
         {_PREFIXES}
         INSERT DATA {{
-            GRAPH <{tbox_iri}> {{
+            GRAPH <{kg_iri}> {{
                 <{body.iri}> a owl:Ontology ;
                     rdfs:label "{body.label}" ;
                     dc:identifier "{ont_id}" ;
@@ -140,7 +142,7 @@ async def create_ontology(request: Request, body: OntologyCreate) -> Ontology:
                 {ver_triple}
             }}
         }}
-    """)
+    """, dataset=dataset)
 
     return Ontology(
         id=ont_id,
@@ -157,15 +159,19 @@ async def create_ontology(request: Request, body: OntologyCreate) -> Ontology:
 # ── 상세 조회 ─────────────────────────────────────────────────────────────
 
 @router.get("/{ontology_id}", response_model=Ontology)
-async def get_ontology(request: Request, ontology_id: str) -> Ontology:
+async def get_ontology(
+    request: Request,
+    ontology_id: str,
+    dataset: str | None = Query(None),
+) -> Ontology:
     store = _store(request)
-    raw = await _fetch_ontology(store, ontology_id)
+    raw = await _fetch_ontology(store, ontology_id, dataset=dataset)
     if not raw:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     iri = raw["iri"]["value"]
-    tbox_iri = f"{iri}/tbox"
-    stats_dict = await store.get_ontology_stats(tbox_iri)
+    kg_iri = kg_graph_iri(iri)
+    stats_dict = await store.get_ontology_stats(kg_iri, dataset=dataset)
 
     return Ontology(
         id=ontology_id,
@@ -182,14 +188,19 @@ async def get_ontology(request: Request, ontology_id: str) -> Ontology:
 # ── 수정 ──────────────────────────────────────────────────────────────────
 
 @router.put("/{ontology_id}", response_model=Ontology)
-async def update_ontology(request: Request, ontology_id: str, body: OntologyUpdate) -> Ontology:
+async def update_ontology(
+    request: Request,
+    ontology_id: str,
+    body: OntologyUpdate,
+    dataset: str | None = Query(None),
+) -> Ontology:
     store = _store(request)
-    raw = await _fetch_ontology(store, ontology_id)
+    raw = await _fetch_ontology(store, ontology_id, dataset=dataset)
     if not raw:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     iri = raw["iri"]["value"]
-    tbox_iri = f"{iri}/tbox"
+    kg_iri = kg_graph_iri(iri)
     now = _now_iso()
 
     # 변경 필드만 UPDATE
@@ -204,62 +215,44 @@ async def update_ontology(request: Request, ontology_id: str, body: OntologyUpda
     for predicate, value, _ in updates:
         await store.sparql_update(f"""
             {_PREFIXES}
-            DELETE {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} ?old }} }}
-            INSERT {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} "{value}" }} }}
-            WHERE  {{ OPTIONAL {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} ?old }} }} }}
-        """)
+            DELETE {{ GRAPH <{kg_iri}> {{ <{iri}> {predicate} ?old }} }}
+            INSERT {{ GRAPH <{kg_iri}> {{ <{iri}> {predicate} "{value}" }} }}
+            WHERE  {{ OPTIONAL {{ GRAPH <{kg_iri}> {{ <{iri}> {predicate} ?old }} }} }}
+        """, dataset=dataset)
 
     await store.sparql_update(f"""
         {_PREFIXES}
-        DELETE {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified ?old }} }}
-        INSERT {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified "{now}"^^xsd:dateTime }} }}
-        WHERE  {{ OPTIONAL {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified ?old }} }} }}
-    """)
+        DELETE {{ GRAPH <{kg_iri}> {{ <{iri}> dc:modified ?old }} }}
+        INSERT {{ GRAPH <{kg_iri}> {{ <{iri}> dc:modified "{now}"^^xsd:dateTime }} }}
+        WHERE  {{ OPTIONAL {{ GRAPH <{kg_iri}> {{ <{iri}> dc:modified ?old }} }} }}
+    """, dataset=dataset)
 
-    return await get_ontology(request, ontology_id)
+    return await get_ontology(request, ontology_id, dataset=dataset)
 
 
 # ── 삭제 ──────────────────────────────────────────────────────────────────
 
 @router.delete("/{ontology_id}", status_code=204)
-async def delete_ontology(request: Request, ontology_id: str) -> None:
+async def delete_ontology(
+    request: Request,
+    ontology_id: str,
+    dataset: str | None = Query(None),
+) -> None:
     store = _store(request)
-    graph_store = _graph_store(request)
 
-    raw = await _fetch_ontology(store, ontology_id)
+    raw = await _fetch_ontology(store, ontology_id, dataset=dataset)
     if not raw:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     iri = raw["iri"]["value"]
 
-    # 해당 온톨로지 관련 모든 Named Graph 조회
+    # 해당 온톨로지 관련 모든 Named Graph 조회 후 삭제
     graph_rows = await store.sparql_select(f"""
         SELECT DISTINCT ?g WHERE {{
             GRAPH ?g {{ ?s ?p ?o }}
             FILTER(STRSTARTS(STR(?g), "{iri}") || STRSTARTS(STR(?g), "urn:source:"))
         }}
-    """)
+    """, dataset=dataset)
 
     for row in graph_rows:
-        await store.delete_graph(_v(row.get("g")))
-
-    await graph_store.delete_ontology_data(ontology_id)
-
-
-
-# ── Neo4j 수동 동기화 ──────────────────────────────────────────────────────
-
-@router.post("/{ontology_id}/sync")
-async def sync_ontology(request: Request, ontology_id: str) -> dict:
-    """Oxigraph → Neo4j 전체 동기화 (TBox + ABox)."""
-    from services.sync_service import SyncService
-    store = _store(request)
-    graph_store = _graph_store(request)
-
-    raw = await _fetch_ontology(store, ontology_id)
-    if not raw:
-        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Not found: {ontology_id}"})
-
-    svc = SyncService(store, graph_store)
-    result = await svc.full_sync(ontology_id)
-    return result
+        await store.delete_graph(_v(row.get("g")), dataset=dataset)

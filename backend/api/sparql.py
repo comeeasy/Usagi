@@ -7,7 +7,7 @@ api/sparql.py — SPARQL 에디터 엔드포인트 라우터
 
 import re
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/ontologies/{ontology_id}", tags=["sparql"])
@@ -24,7 +24,12 @@ class SPARQLRequest(BaseModel):
 
 
 @router.post("/sparql")
-async def run_sparql(request: Request, ontology_id: str, body: SPARQLRequest) -> dict:
+async def run_sparql(
+    request: Request,
+    ontology_id: str,
+    body: SPARQLRequest,
+    dataset: str | None = Query(None),
+) -> dict:
     """
     SPARQL SELECT / ASK 실행.
     UPDATE 구문(INSERT DATA, DELETE DATA 등)은 보안상 차단.
@@ -43,10 +48,10 @@ async def run_sparql(request: Request, ontology_id: str, body: SPARQLRequest) ->
         is_ask = re.search(r"^\s*PREFIX[^A]*\bASK\b|\bASK\b\s*\{", body.query, re.IGNORECASE)
 
         if is_ask:
-            result = await store.sparql_ask(body.query)
+            result = await store.sparql_ask(body.query, dataset=dataset)
             return {"variables": ["result"], "bindings": [{"result": {"type": "literal", "value": str(result).lower()}}]}
 
-        rows = await store.sparql_select(body.query)
+        rows = await store.sparql_select(body.query, dataset=dataset)
         variables = list(rows[0].keys()) if rows else []
         return {"variables": variables, "bindings": rows}
 

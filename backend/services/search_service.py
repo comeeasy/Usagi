@@ -42,14 +42,14 @@ async def search_entities(
     if store is None:
         return []
 
-    tbox = f"{ontology_id}/tbox"
+    kg = f"{ontology_id}/kg"
     q_filter = f'FILTER(CONTAINS(LCASE(STR(?label)), "{_esc(q.lower())}"))' if q else ""
     results = []
 
     if kind in ("concept", "all", None):
         rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label WHERE {{
-    GRAPH <{tbox}> {{
+    GRAPH <{kg}> {{
         ?iri a owl:Class .
         OPTIONAL {{ ?iri rdfs:label ?label }}
         {q_filter}
@@ -67,7 +67,7 @@ SELECT DISTINCT ?iri ?label WHERE {{
         if remaining > 0:
             rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label WHERE {{
-    GRAPH <{tbox}> {{
+    GRAPH <{kg}> {{
         ?iri a owl:NamedIndividual .
         OPTIONAL {{ ?iri rdfs:label ?label }}
         {q_filter}
@@ -98,14 +98,14 @@ async def search_relations(
     if store is None:
         return []
 
-    tbox = f"{ontology_id}/tbox"
+    kg = f"{ontology_id}/kg"
     q_filter = f'FILTER(CONTAINS(LCASE(STR(?label)), "{_esc(q.lower())}"))' if q else ""
     domain_filter = f"?iri rdfs:domain <{domain_iri}> ." if domain_iri else ""
     range_filter = f"?iri rdfs:range <{range_iri}> ." if range_iri else ""
 
     rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label ?kind WHERE {{
-    GRAPH <{tbox}> {{
+    GRAPH <{kg}> {{
         {{ ?iri a owl:ObjectProperty . BIND("object" AS ?kind) }}
         UNION
         {{ ?iri a owl:DatatypeProperty . BIND("data" AS ?kind) }}

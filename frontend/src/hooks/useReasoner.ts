@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { runReasoner, getReasonerResult } from '@/api/reasoner'
+import { useDataset } from '@/contexts/DatasetContext'
 import type { ReasonerRunRequest } from '@/types/reasoner'
 
 export function useReasoner(ontologyId: string | undefined) {
+  const { dataset } = useDataset()
   const [jobId, setJobId] = useState<string | null>(null)
 
   const runMutation = useMutation({
     mutationFn: (request: ReasonerRunRequest) => {
       if (!ontologyId) throw new Error('ontologyId is required')
-      return runReasoner(ontologyId, request)
+      return runReasoner(ontologyId, request, dataset)
     },
     onSuccess: (job) => {
       setJobId(job.job_id)

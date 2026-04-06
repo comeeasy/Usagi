@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Plus, List, GitBranch } from 'lucide-react'
 import OntologyTabs from '@/components/layout/OntologyTabs'
 import EntitySearchBar from '@/components/entities/EntitySearchBar'
 import EntityTable from '@/components/entities/EntityTable'
+import ConceptTreeView from '@/components/entities/ConceptTreeView'
 import EntityDetailPanel from '@/components/entities/EntityDetailPanel'
 import ConceptForm from '@/components/entities/ConceptForm'
 import IndividualForm from '@/components/entities/IndividualForm'
@@ -12,6 +13,7 @@ import ErrorBoundary from '@/components/shared/ErrorBoundary'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { listConcepts, listIndividuals, createConcept, createIndividual, getConcept, getIndividual, updateConcept, updateIndividual, deleteConcept, deleteIndividual } from '@/api/entities'
 import { getOntology } from '@/api/ontologies'
+import { useDataset } from '@/contexts/DatasetContext'
 import type { Concept, ConceptUpdate } from '@/types/concept'
 import type { Individual, IndividualUpdate } from '@/types/individual'
 
@@ -20,10 +22,12 @@ type EntityKind = Concept | Individual
 
 export default function EntitiesPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
+  const { dataset } = useDataset()
   const location = useLocation()
   const queryClient = useQueryClient()
 
   const [tab, setTab] = useState<EntityTab>('concepts')
+  const [viewMode, setViewMode] = useState<'flat' | 'tree'>('flat')
   const [page, setPage] = useState(1)
   const [selectedIri, setSelectedIri] = useState<string | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
@@ -40,45 +44,58 @@ export default function EntitiesPage() {
     const targetTab: EntityTab = entityType === 'individual' ? 'individuals' : 'concepts'
     setTab(targetTab)
     const fetchFn = targetTab === 'concepts'
-      ? () => getConcept(ontologyId, editIri)
-      : () => getIndividual(ontologyId, editIri)
+      ? () => getConcept(ontologyId, editIri, dataset)
+      : () => getIndividual(ontologyId, editIri, dataset)
     fetchFn().then((entity) => {
       setEditingEntity(entity as EntityKind)
       setSelectedIri(editIri)
     }).catch(() => {/* 조용히 무시 */})
     // state 소비 후 history 교체 (뒤로가기 시 재진입 방지)
     window.history.replaceState({}, '')
+    // dataset captured at mount; changing dataset later does not re-apply graph navigation state
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const ontologyQuery = useQuery({
-    queryKey: ['ontology', ontologyId],
-    queryFn: () => getOntology(ontologyId!),
+    queryKey: ['ontology', ontologyId, dataset],
+    queryFn: () => getOntology(ontologyId!, dataset),
     enabled: !!ontologyId,
   })
   const iriPrefix = ontologyQuery.data?.base_iri ? `${ontologyQuery.data.base_iri}#` : ''
 
   const conceptsQuery = useQuery({
-    queryKey: ['concepts', ontologyId, page, searchQuery],
-    queryFn: () => listConcepts(ontologyId!, { page, pageSize: PAGE_SIZE, ...(searchQuery ? { search: searchQuery } : {}) }),
+    queryKey: ['concepts', ontologyId, dataset, page, searchQuery],
+    queryFn: () =>
+      listConcepts(ontologyId!, {
+        page,
+        pageSize: PAGE_SIZE,
+        dataset,
+        ...(searchQuery ? { search: searchQuery } : {}),
+      }),
     enabled: !!ontologyId && tab === 'concepts',
   })
 
   const individualsQuery = useQuery({
-    queryKey: ['individuals', ontologyId, page, searchQuery],
-    queryFn: () => listIndividuals(ontologyId!, { page, pageSize: PAGE_SIZE, ...(searchQuery ? { search: searchQuery } : {}) }),
+    queryKey: ['individuals', ontologyId, dataset, page, searchQuery],
+    queryFn: () =>
+      listIndividuals(ontologyId!, {
+        page,
+        pageSize: PAGE_SIZE,
+        dataset,
+        ...(searchQuery ? { search: searchQuery } : {}),
+      }),
     enabled: !!ontologyId && tab === 'individuals',
   })
 
   const selectedEntityQuery = useQuery<Concept | Individual>({
-    queryKey: ['entity', ontologyId, selectedIri, tab],
+    queryKey: ['entity', ontologyId, dataset, selectedIri, tab],
     queryFn: (): Promise<Concept | Individual> => tab === 'concepts'
-      ? getConcept(ontologyId!, selectedIri!)
-      : getIndividual(ontologyId!, selectedIri!),
+      ? getConcept(ontologyId!, selectedIri!, dataset)
+      : getIndividual(ontologyId!, selectedIri!, dataset),
     enabled: !!ontologyId && !!selectedIri,
   })
 
   const createConceptMutation = useMutation({
-    mutationFn: (data: Parameters<typeof createConcept>[1]) => createConcept(ontologyId!, data),
+    mutationFn: (data: Parameters<typeof createConcept>[1]) => createConcept(ontologyId!, data, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['concepts', ontologyId] })
       setShowCreateForm(false)
@@ -86,7 +103,7 @@ export default function EntitiesPage() {
   })
 
   const createIndividualMutation = useMutation({
-    mutationFn: (data: Parameters<typeof createIndividual>[1]) => createIndividual(ontologyId!, data),
+    mutationFn: (data: Parameters<typeof createIndividual>[1]) => createIndividual(ontologyId!, data, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
       setShowCreateForm(false)
@@ -106,9 +123,9 @@ export default function EntitiesPage() {
   }
 
   const updateConceptMutation = useMutation({
-    mutationFn: ({ iri, data }: { iri: string; data: ConceptUpdate }) => updateConcept(ontologyId!, iri, data),
+    mutationFn: ({ iri, data }: { iri: string; data: ConceptUpdate }) => updateConcept(ontologyId!, iri, data, dataset),
     onSuccess: (updated) => {
-      queryClient.setQueryData(['entity', ontologyId, updated.iri, 'concepts'], updated)
+      queryClient.setQueryData(['entity', ontologyId, dataset, updated.iri, 'concepts'], updated)
       queryClient.invalidateQueries({ queryKey: ['concepts', ontologyId] })
       setEditingEntity(null)
       showSaveSuccess()
@@ -117,7 +134,7 @@ export default function EntitiesPage() {
   })
 
   const deleteConceptMutation = useMutation({
-    mutationFn: (iri: string) => deleteConcept(ontologyId!, iri),
+    mutationFn: (iri: string) => deleteConcept(ontologyId!, iri, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['concepts', ontologyId] })
       setSelectedIri(null)
@@ -126,7 +143,7 @@ export default function EntitiesPage() {
   })
 
   const deleteIndividualMutation = useMutation({
-    mutationFn: (iri: string) => deleteIndividual(ontologyId!, iri),
+    mutationFn: (iri: string) => deleteIndividual(ontologyId!, iri, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
       setSelectedIri(null)
@@ -135,9 +152,9 @@ export default function EntitiesPage() {
   })
 
   const updateIndividualMutation = useMutation({
-    mutationFn: ({ iri, data }: { iri: string; data: IndividualUpdate }) => updateIndividual(ontologyId!, iri, data),
+    mutationFn: ({ iri, data }: { iri: string; data: IndividualUpdate }) => updateIndividual(ontologyId!, iri, data, dataset),
     onSuccess: (updated) => {
-      queryClient.setQueryData(['entity', ontologyId, (updated as Individual).iri, 'individuals'], updated)
+      queryClient.setQueryData(['entity', ontologyId, dataset, (updated as Individual).iri, 'individuals'], updated)
       queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
       setEditingEntity(null)
       showSaveSuccess()
@@ -164,8 +181,15 @@ export default function EntitiesPage() {
     setSelectedIri(iri)
   }
 
+  const handleIndividualSelect = (iri: string) => {
+    if (tab !== 'individuals') setTab('individuals')
+    if (editingEntity) setEditingEntity(null)
+    setSelectedIri(iri)
+  }
+
   const handleTabChange = (t: EntityTab) => {
     setTab(t)
+    setViewMode('flat')
     setPage(1)
     setSelectedIri(null)
     setEditingEntity(null)
@@ -213,14 +237,33 @@ export default function EntitiesPage() {
                 ))}
               </div>
 
-              <button
-                onClick={() => setShowCreateForm(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium hover:opacity-80"
-                style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-              >
-                <Plus size={14} />
-                New {tab === 'concepts' ? 'Concept' : 'Individual'}
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Tree/Flat 뷰 토글 */}
+                <div className="flex border rounded overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                  {(['flat', 'tree'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setViewMode(mode)}
+                      title={mode === 'flat' ? 'Flat list' : 'Tree view'}
+                      className="px-2.5 py-1.5 flex items-center transition-colors"
+                      style={{
+                        backgroundColor: viewMode === mode ? 'var(--color-primary)' : 'var(--color-bg-elevated)',
+                        color: viewMode === mode ? '#fff' : 'var(--color-text-secondary)',
+                      }}
+                    >
+                      {mode === 'flat' ? <List size={14} /> : <GitBranch size={14} />}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setShowCreateForm(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
+                >
+                  <Plus size={14} />
+                  New {tab === 'concepts' ? 'Concept' : 'Individual'}
+                </button>
+              </div>
             </div>
 
             <EntitySearchBar
@@ -273,34 +316,46 @@ export default function EntitiesPage() {
               </div>
             )}
 
-            {/* Table */}
-            {activeQuery.isLoading && (
-              <div className="flex items-center justify-center py-12">
-                <LoadingSpinner size="lg" />
-              </div>
-            )}
-
-            {activeQuery.error && (
-              <div
-                className="p-4 rounded-lg border text-sm"
-                style={{ borderColor: 'var(--color-error)', color: 'var(--color-error)' }}
-              >
-                Error: {activeQuery.error.message}
-              </div>
-            )}
-
-            {!activeQuery.isLoading && !activeQuery.error && (
+            {/* Tree view */}
+            {viewMode === 'tree' ? (
               <div className="flex-1 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--color-border)' }}>
-                <EntityTable
-                  items={items}
-                  total={activeQuery.data?.total ?? 0}
-                  page={page}
-                  pageSize={PAGE_SIZE}
-                  onPageChange={setPage}
-                  onEntitySelect={handleEntitySelect}
+                <ConceptTreeView
+                  ontologyId={ontologyId!}
+                  dataset={dataset}
                   selectedIri={selectedIri}
+                  onSelect={tab === 'concepts' ? handleEntitySelect : () => {}}
+                  onSelectIndividual={handleIndividualSelect}
                 />
               </div>
+            ) : (
+              <>
+                {activeQuery.isLoading && (
+                  <div className="flex items-center justify-center py-12">
+                    <LoadingSpinner size="lg" />
+                  </div>
+                )}
+                {activeQuery.error && (
+                  <div
+                    className="p-4 rounded-lg border text-sm"
+                    style={{ borderColor: 'var(--color-error)', color: 'var(--color-error)' }}
+                  >
+                    Error: {activeQuery.error.message}
+                  </div>
+                )}
+                {!activeQuery.isLoading && !activeQuery.error && (
+                  <div className="flex-1 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--color-border)' }}>
+                    <EntityTable
+                      items={items}
+                      total={activeQuery.data?.total ?? 0}
+                      page={page}
+                      pageSize={PAGE_SIZE}
+                      onPageChange={setPage}
+                      onEntitySelect={handleEntitySelect}
+                      selectedIri={selectedIri}
+                    />
+                  </div>
+                )}
+              </>
             )}
           </div>
 

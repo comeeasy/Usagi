@@ -28,20 +28,23 @@ export function deleteSource(ontologyId: string, sourceId: string): Promise<void
   return apiDelete(`/ontologies/${ontologyId}/sources/${sourceId}`)
 }
 
-export function triggerSync(ontologyId: string, sourceId: string): Promise<JobResponse> {
-  return apiPost(`/ontologies/${ontologyId}/sources/${sourceId}/sync`, {})
+export function triggerSync(ontologyId: string, sourceId: string, dataset?: string): Promise<JobResponse> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${ontologyId}/sources/${sourceId}/sync${qs}`, {})
 }
 
 export async function uploadCsvFile(
   ontologyId: string,
   sourceId: string,
   file: File,
+  dataset?: string,
 ): Promise<UploadResult> {
   const form = new FormData()
   form.append('file', file)
   // apiPost는 JSON만 지원하므로 fetch 직접 사용
   const base = (await import('./client')).API_BASE_URL
-  const res = await fetch(`${base}/ontologies/${ontologyId}/sources/${sourceId}/upload`, {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  const res = await fetch(`${base}/ontologies/${ontologyId}/sources/${sourceId}/upload${qs}`, {
     method: 'POST',
     body: form,
   })

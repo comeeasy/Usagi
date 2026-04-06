@@ -7,12 +7,8 @@ pydantic>=2.8.2
 pydantic-settings>=2.5.2
 
 # RDF / Ontology
-pyoxigraph==0.4.0
 rdflib==7.0.0
 owlready2==0.46
-
-# Graph database
-neo4j==5.23.0
 
 # Messaging
 kafka-python==2.0.2

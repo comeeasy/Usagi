@@ -1,156 +1,200 @@
 ---
 name: kgcon
-description: Knowledge Graph Construction — extract entities and relationships from documents (PDF, Markdown, plain text) or user input, then register them into a Usagi ontology. Handles both Concepts (classes) and Individuals (instances).
-argument-hint: [file path or text description]
+description: Knowledge Graph Construction — extract entities and relationships from documents, register them in a Usagi ontology using MCP, and iterate via a two-level Ralph loop until OWL reasoning passes and subgraph coverage matches the source.
+argument-hint: [file path or text content]
 ---
 
 # Knowledge Graph Construction (kgcon)
 
-You are a knowledge graph construction specialist.
-Your task is to extract ontology entities and relationships from a given source and register them using Usagi MCP tools.
+You are a knowledge graph construction specialist. Build a faithful OWL representation of the source using a **two-level Ralph loop**:
+
+- **Outer loop** — coverage: compare source claims to the subgraph; register what is missing
+- **Inner loop** — consistency: run `run_reasoner`, fix violations, re-reason until clean
+
+Both loops persist state to `./kgcon-progress.md` so a fresh context can resume without losing work.
 
 ---
 
-## Step 1 — Identify the Input Source
+## Ralph Loop Principles
 
-Use `$ARGUMENTS` as the input if provided.
+Progress lives in **files, not chat memory**. Treat `kgcon-progress.md` as the single source of truth:
 
-Handle each input type as follows:
-- **File path** (`.pdf`, `.md`, `.txt`, etc.): Read the file content with the Read tool
-- **URL**: Fetch the content
-- **Plain text / sentence**: Use it directly as the analysis target
-- **No argument**: Ask the user: "Please provide a document or content to analyze."
+1. Write **machine-verifiable success criteria** as checkboxes before the first bundle.
+2. Update `kgcon-progress.md` after every outer iteration (new IRIs, subgraph summary, checklist state, reasoner outcome).
+3. If the context window fills up, a new agent instance reads `kgcon-progress.md` and continues exactly where the previous one stopped.
+4. **Gutter detection**: if the same violations repeat for 3+ inner fix cycles with no progress, stop the inner loop, document the failure as a guardrail, and report to the user.
+5. **Guardrails**: log failed patterns (wrong type, missing target IRI, class mismatch, …) so the same mistake is not repeated in later bundles.
 
 ---
 
-## Step 2 — Select the Target Ontology
+## Step 1 — Read Source
+
+Read the input file with the Read tool (PDF, MD, TXT, …) or use the provided plain text directly.
+Keep the full source text available throughout for the coverage check in Step 5.
+
+---
+
+## Step 2 — Select Ontology
 
 ```
 list_ontologies()
 ```
 
-Present the results to the user and ask them to choose which ontology to add entities to.
-
-Example output:
-```
-Available ontologies:
-1. JC3IEDM (https://infiniq.co.kr/jc3iedm/) — Military operations ontology
-2. ...
-
-Which ontology would you like to add entities to?
-```
-
-Store the selected ontology IRI as `ONTOLOGY_ID`.
+Show the result and let the user confirm the target. Store as `ONTOLOGY_ID`.
 
 ---
 
-## Step 3 — Understand the Ontology Structure
-
-Before extracting entities, get familiar with the existing ontology:
+## Step 3 — Understand Ontology Structure
 
 ```
 get_ontology_summary(ONTOLOGY_ID)
 ```
 
-Note the key Concept classes and Properties available for mapping during extraction.
+Note available classes and properties; this shapes bundle planning in Step 4.
 
 ---
 
-## Step 4 — Extract Entities
+## Step 4 — Outer Loop: Extract → Register → Coverage
 
-Analyze the input source and extract the following two types of entities.
+Repeat until **coverage is satisfied** (Step 5) or the user stops.
 
-### Extraction Criteria
+### 4a — Initialise the progress file
 
-**Concept (class/category):**
-- A new kind or category not yet present in the ontology
-- An abstract classification that multiple Individuals can belong to
-- Examples: a new unit type, a new equipment category
+On the **first** outer iteration, write `./kgcon-progress.md`:
 
-**Individual (specific instance):**
-- A concrete, named entity
-- Dates, locations, persons, units, equipment with unique identity
-- Examples: "3rd Marine Regiment", "Operation Iron Wing", "Colonel John Kim"
+```markdown
+# kgcon Progress
 
-### Language Rule
+## Source
+<file name and one-line summary>
 
-**Entity labels and literal values must follow the language of the source document.**
-- Korean source → Korean labels (e.g., `label="제3해병연대"`)
-- English source → English labels (e.g., `label="3rd Marine Regiment"`)
-- IRIs must always be ASCII regardless of source language
+## Ontology
+ONTOLOGY_ID: <value>
 
-### Present Extraction Results
+## Success Criteria (exit conditions)
+- [ ] Every key entity in the source has a corresponding Individual in the graph
+- [ ] Every key relationship is represented as an object_property edge
+- [ ] run_reasoner reports consistent=true with no violations for all registered IRIs
+- [ ] get_subgraph coverage checklist has no material omissions (all ✓)
 
-After extracting, show the following table to the user and wait for approval:
+## S — IRIs registered this session
+(append as you go)
 
-```
-## Extracted Entities
+## Guardrails
+(append failed patterns as you discover them)
 
-### Concepts (new classes to add)
-| Label | Proposed IRI | Parent Class | Evidence |
-|-------|-------------|--------------|----------|
-| ...   | ...         | ...          | ...      |
-
-### Individuals (new instances to add)
-| Label | Proposed IRI | Type (Concept) | Properties | Relationships |
-|-------|-------------|----------------|------------|---------------|
-| ...   | ...         | ...            | ...        | ...           |
-
-Total: X Concepts, Y Individuals to be added.
-Shall I proceed? (Let me know if you want to modify anything.)
+## Iteration Log
+(append one block per outer iteration)
 ```
 
-Wait for user confirmation before proceeding to Step 5.
+On **subsequent** iterations, append to the existing file — do not overwrite prior entries.
+
+### 4b — Extract
+
+Scan the full source text. For each implied Concept and Individual, record:
+- **Evidence**: quote or section reference
+- **Proposed IRI**
+- **Class** (`types`)
+- **Data properties**
+- **Object properties** (note target IRI; target must exist before the source is registered)
+
+Group findings into **bundles** in dependency order: Concepts first, then Individuals, with object_property targets before sources.
+
+**Optional checkpoint:** For long documents, show the extraction table and ask the user to confirm before registering.
+
+### 4c — Register bundles (inner loop)
+
+For each bundle, follow the full procedure in [add-entity.md](add-entity.md):
+
+1. `search_entities` / `search_relations` — reuse existing IRIs; avoid duplicates
+2. `add_concept` / `add_individual` in dependency order
+3. `run_reasoner` — mandatory after each bundle
+4. Inner fix loop: `search_*` → `update_individual` → re-reason (up to 5 cycles)
+5. Log guardrails for any stuck violation
+
+Track every new/updated IRI in the **S** section of `kgcon-progress.md`.
+
+### 4d — Update progress file
+
+After each bundle, append to the Iteration Log:
+
+```markdown
+### Outer iteration <N> — <bundle label>
+Bundles registered: <list>
+IRIs added to S: <list>
+Reasoner: consistent=<true/false>, violations=<count>
+Guardrails added: <list or none>
+```
+
+Report incremental status inline:
+```
+✓ Bundle: <Concepts + Individuals> — reasoner OK
+⚠ Bundle: <…> — <N> violations fixed via update_individual
+✗ Bundle: <…> — stuck after 5 inner cycles; see Guardrails
+```
 
 ---
 
-## Step 5 — Register Entities
+## Step 5 — Coverage Verification (outer exit condition)
 
-Follow the procedure in [add-entity.md](add-entity.md) to register each entity.
+When all planned bundles are registered, run the coverage check:
 
-### Registration Order (important)
+1. Collect `S` from `kgcon-progress.md`.
+2. Call:
+   ```
+   get_subgraph(
+       ontology_id = ONTOLOGY_ID,
+       entity_iris = <S>,
+       depth       = 2        # increase to 3–5 if relationships are deeper
+   )
+   ```
+3. Build an explicit **coverage checklist** comparing the subgraph to the source text:
+   - For every key entity in the source: `✓ node present` / `✗ missing`
+   - For every key relationship: `✓ edge present` / `✗ missing`
+   - For every key attribute (data property): `✓ present` / `✗ missing`
+4. **If any `✗` items are material**: go back to Step 4 — extract the gap, register a new bundle (inner loop applies), then re-run Step 5.
+5. **Exit** when the checklist has no material `✗` items.
 
-1. **Concepts first** — must exist before Individuals can reference them in `types`
-2. **Independent Individuals** — those with no `object_properties` dependencies
-3. **Related Individuals** — those linked via `object_properties` go last
-
-### Per-Entity Steps
-
-- Before adding: run `search_entities` to check for duplicates or near-matches
-- After adding: validate immediately with SPARQL
-
-### Report Progress
-
-Report progress in real time:
-```
-✓ [1/5] Concept "SpecialForces" added
-✓ [2/5] Individual "707th Special Mission Battalion" added
-⚠ [3/5] Individual "Colonel Hong" — already exists, skipped
-...
-```
+Update `kgcon-progress.md` with the subgraph summary and checklist after each Step 5 run.
 
 ---
 
 ## Step 6 — Final Report
 
-Once all registrations are complete, provide a summary:
-
 ```
 ## kgcon Complete
 
-- Input source: <file name or text summary>
-- Target ontology: <ONTOLOGY_ID>
+- Input: <file name / summary>
+- Ontology: <ONTOLOGY_ID>
+- IRIs in S: <count> — full list in kgcon-progress.md
 
-### Results
+### Coverage Checklist
+| Source claim | Graph representation | Status |
+|---|---|---|
+| <entity / relation / attribute> | <IRI or edge> | ✓ / ✗ |
+
+### Counts
 | Type       | Attempted | Succeeded | Skipped | Failed |
 |------------|-----------|-----------|---------|--------|
-| Concept    | X         | X         | X       | X      |
-| Individual | X         | X         | X       | X      |
+| Concept    |           |           |         |        |
+| Individual |           |           |         |        |
 
-### Added Entities
-- **Concepts**: <IRI list>
-- **Individuals**: <IRI list>
+### Reasoner
+Final: consistent=<true/false>, violations=<count>
 
-### Skipped / Failed
-- <IRI>: <reason>
+### Guardrails (lessons learned this session)
+- <pattern>: <why it failed and how to avoid>
+
+### Manual follow-up
+- <item>: <reason (e.g. MCP cannot update Concepts)>
 ```
+
+---
+
+## Delegation map
+
+| Concern | Where |
+|---------|-------|
+| Bundle procedure, inner Ralph loop, reasoner fix | [add-entity.md](add-entity.md) |
+| Invoking add-entity as a skill | [add-entity](../add-entity/SKILL.md) |
+| MCP tools | `list_ontologies`, `get_ontology_summary`, `search_entities`, `search_relations`, `get_subgraph`, `run_reasoner`, `add_concept`, `add_individual`, `update_individual`, `delete_individual`, `sparql_query` |

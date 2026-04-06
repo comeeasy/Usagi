@@ -1,6 +1,14 @@
 // Ontology CRUD API client
 
-import { apiFetch, apiGet, apiPost, apiPut, apiDelete } from './client'
+import { API_BASE_URL, ApiError, apiFetch, apiGet, apiPost, apiPut, apiDelete } from './client'
+
+function detailFromFastApiBody(body: unknown): string | undefined {
+  if (body == null || typeof body !== 'object') return undefined
+  const d = (body as { detail?: unknown }).detail
+  if (typeof d === 'string') return d
+  if (d && typeof d === 'object' && 'message' in d) return String((d as { message: string }).message)
+  return undefined
+}
 import type { Ontology, OntologyCreate, OntologyUpdate, PaginatedResponse } from '@/types/ontology'
 
 // Backend returns {label, iri} but frontend types use {name, base_iri}
@@ -9,10 +17,11 @@ function mapOntology(data: any): Ontology {
   return { ...data, name: data.label ?? data.name, base_iri: data.iri ?? data.base_iri }
 }
 
-export function listOntologies(params?: { page?: number; pageSize?: number }): Promise<PaginatedResponse<Ontology>> {
+export function listOntologies(params?: { page?: number; pageSize?: number; dataset?: string }): Promise<PaginatedResponse<Ontology>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
+  if (params?.dataset) qs.set('dataset', params.dataset)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies${query}`).then((res: PaginatedResponse<Ontology>) => ({
     ...res,
@@ -20,12 +29,14 @@ export function listOntologies(params?: { page?: number; pageSize?: number }): P
   }))
 }
 
-export function getOntology(id: string): Promise<Ontology> {
-  return apiGet(`/ontologies/${id}`).then(mapOntology)
+export function getOntology(id: string, dataset?: string): Promise<Ontology> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiGet(`/ontologies/${id}${qs}`).then(mapOntology)
 }
 
-export function createOntology(data: OntologyCreate): Promise<Ontology> {
-  return apiPost(`/ontologies`, {
+export function createOntology(data: OntologyCreate, dataset?: string): Promise<Ontology> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies${qs}`, {
     label: data.name,
     iri: data.base_iri,
     description: data.description,
@@ -33,20 +44,23 @@ export function createOntology(data: OntologyCreate): Promise<Ontology> {
   }).then(mapOntology)
 }
 
-export function updateOntology(id: string, data: OntologyUpdate): Promise<Ontology> {
-  return apiPut(`/ontologies/${id}`, {
+export function updateOntology(id: string, data: OntologyUpdate, dataset?: string): Promise<Ontology> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPut(`/ontologies/${id}${qs}`, {
     label: data.name,
     description: data.description,
     version: data.version,
   }).then(mapOntology)
 }
 
-export function deleteOntology(id: string): Promise<void> {
-  return apiDelete(`/ontologies/${id}`)
+export function deleteOntology(id: string, dataset?: string): Promise<void> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiDelete(`/ontologies/${id}${qs}`)
 }
 
-export function syncOntology(id: string): Promise<{ tbox_count: number; abox_count: number; elapsed_seconds: number }> {
-  return apiPost(`/ontologies/${id}/sync`, {})
+export function syncOntology(id: string, dataset?: string): Promise<{ tbox_count: number; abox_count: number; elapsed_seconds: number }> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${id}/sync${qs}`, {})
 }
 
 export interface SubgraphData {
@@ -56,9 +70,10 @@ export interface SubgraphData {
 
 export function getSubgraph(
   ontologyId: string,
-  params: { rootIris?: string[]; depth?: number; includeIndividuals?: boolean },
+  params: { rootIris?: string[]; depth?: number; includeIndividuals?: boolean; dataset?: string },
 ): Promise<SubgraphData> {
-  return apiPost(`/ontologies/${ontologyId}/subgraph`, {
+  const qs = params.dataset ? `?dataset=${params.dataset}` : ''
+  return apiPost(`/ontologies/${ontologyId}/subgraph${qs}`, {
     entity_iris: params.rootIris ?? [],
     depth: params.depth ?? 2,
   }).then((raw: { nodes: { iri: string; label: string; kind: string }[]; edges: { source: string; target: string; propertyIri: string; propertyLabel: string }[] }) => ({
@@ -91,32 +106,116 @@ export function getSubgraph(
   }))
 }
 
+export type ImportResult = {
+  message: string
+  triples_imported: number
+  graph_iri?: string
+  format?: string
+  /** 파일 import 시 서버가 측정한 단계별 ms (read / parse / store / total) */
+  timing_ms?: Record<string, number>
+}
+
+/** TTL 등 파일 업로드 진행 (브라우저 → API 게이트웨이 구간) */
+export type ImportFileProgress =
+  | { phase: 'upload'; loaded: number; total: number }
+  | { phase: 'server' }
+
+/**
+ * 파일 import — XMLHttpRequest로 업로드 진행률을 알 수 있음. 완료 후 서버 처리 구간은 phase=server.
+ */
 export function importOntologyFile(
   ontologyId: string,
   file: File,
-): Promise<{ message: string; triples_imported?: number }> {
-  const form = new FormData()
-  form.append('file', file)
-  return apiFetch<{ imported: number }>(`/ontologies/${ontologyId}/import/file`, {
-    method: 'POST',
-    body: form,
-  }).then((res) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
+  dataset?: string,
+  onProgress?: (p: ImportFileProgress) => void,
+): Promise<ImportResult> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  const url = `${API_BASE_URL}/ontologies/${ontologyId}/import/file${qs}`
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const form = new FormData()
+    form.append('file', file)
+
+    xhr.upload.addEventListener('progress', (ev) => {
+      if (ev.lengthComputable) {
+        onProgress?.({ phase: 'upload', loaded: ev.loaded, total: ev.total })
+      }
+    })
+    xhr.upload.addEventListener('load', () => {
+      onProgress?.({ phase: 'server' })
+    })
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const res = JSON.parse(xhr.responseText || '{}') as {
+            imported: number
+            graph_iri: string
+            format: string
+            timing_ms?: Record<string, number>
+          }
+          resolve({
+            message: `Imported ${res.imported.toLocaleString()} triples`,
+            triples_imported: res.imported,
+            graph_iri: res.graph_iri,
+            format: res.format,
+            timing_ms: res.timing_ms,
+          })
+        } catch {
+          reject(new Error('Invalid JSON from import response'))
+        }
+        return
+      }
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(xhr.responseText || '{}')
+      } catch {
+        parsed = {}
+      }
+      const detail = detailFromFastApiBody(parsed)
+      reject(new ApiError(xhr.status, xhr.statusText, detail))
+    })
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Network error during import'))
+    })
+
+    xhr.open('POST', url)
+    xhr.send(form)
+  })
 }
 
 export function importOntologyUrl(
   ontologyId: string,
   url: string,
-): Promise<{ message: string; triples_imported?: number }> {
-  return apiPost(`/ontologies/${ontologyId}/import/url`, { url })
-    .then((res: { imported: number }) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
+  dataset?: string,
+): Promise<ImportResult> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${ontologyId}/import/url${qs}`, { url }).then(
+    (res: { imported: number; graph_iri: string; format: string }) => ({
+      message: `Imported ${res.imported.toLocaleString()} triples`,
+      triples_imported: res.imported,
+      graph_iri: res.graph_iri,
+      format: res.format,
+    }),
+  )
 }
 
 export function importOntologyStandard(
   ontologyId: string,
   name: string,
-): Promise<{ message: string; triples_imported?: number }> {
-  return apiPost(`/ontologies/${ontologyId}/import/standard`, { name })
-    .then((res: { imported: number }) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
+  dataset?: string,
+): Promise<ImportResult> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${ontologyId}/import/standard${qs}`, { name }).then(
+    (res: { imported: number; graph_iri: string; format: string }) => ({
+      message: `Imported ${res.imported.toLocaleString()} triples`,
+      triples_imported: res.imported,
+      graph_iri: res.graph_iri,
+      format: res.format,
+    }),
+  )
 }
 
 /** @deprecated Use importOntologyFile / importOntologyUrl / importOntologyStandard */
@@ -145,14 +244,37 @@ export interface ConflictResolution {
 export function previewMerge(
   targetId: string,
   sourceId: string,
+  dataset?: string,
 ): Promise<{ conflicts: ConflictItem[]; conflict_count: number; auto_mergeable_count: number }> {
-  return apiPost(`/ontologies/${targetId}/merge/preview`, { source_ontology_id: sourceId })
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${targetId}/merge/preview${qs}`, { source_ontology_id: sourceId })
 }
 
 export function mergeOntologies(
   targetId: string,
   sourceId: string,
   resolutions: ConflictResolution[] = [],
+  dataset?: string,
 ): Promise<{ merged: boolean; triple_count: number }> {
-  return apiPost(`/ontologies/${targetId}/merge`, { source_ontology_id: sourceId, resolutions })
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${targetId}/merge${qs}`, { source_ontology_id: sourceId, resolutions })
+}
+
+// ── Datasets API ────────────────────────────────────────────────────────────
+
+export interface DatasetInfo {
+  name: string
+  type: string
+}
+
+export function listDatasets(): Promise<DatasetInfo[]> {
+  return apiGet('/datasets')
+}
+
+export function createDataset(name: string, dbType = 'TDB2'): Promise<{ name: string; db_type: string; status: string }> {
+  return apiPost('/datasets', { name, db_type: dbType })
+}
+
+export function deleteDataset(name: string): Promise<void> {
+  return apiDelete(`/datasets/${name}`)
 }

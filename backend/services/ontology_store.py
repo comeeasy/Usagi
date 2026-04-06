@@ -1,11 +1,15 @@
 """
-services/ontology_store.py — Oxigraph RDF Triple Store SPARQL 래퍼
+services/ontology_store.py — Apache Jena Fuseki SPARQL HTTP 래퍼
 
 Named Graph 관리 규칙:
-  - TBox (스키마):      <{ontology_iri}/tbox>
-  - ABox (인스턴스):    <{source_id}/{timestamp}>
-  - 추론 결과:          <{ontology_iri}/inferred>
-  - Provenance 메타:    <{ontology_iri}/prov>
+  - 온톨로지 본문(스키마+인스턴스): <{ontology_iri}/kg>
+  - 추론 결과(선택):              <{ontology_iri}/inferred>
+
+Fuseki HTTP 엔드포인트:
+  - SPARQL Query  : POST {fuseki_url}/{dataset}/sparql   (application/sparql-query)
+  - SPARQL Update : POST {fuseki_url}/{dataset}/update   (application/sparql-update)
+  - GSP (Graph Store Protocol): GET/POST/PUT {fuseki_url}/{dataset}/data?graph=<iri>
+    · POST = 그래프에 추가 · PUT = 그래프 전체 교체
 """
 
 import asyncio
@@ -13,202 +17,286 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-import pyoxigraph
-from pyoxigraph import (
-    NamedNode,
-    Literal as RDFLiteral,
-    BlankNode,
-    Quad,
-    Store,
-    RdfFormat,
-)
+import httpx
+from rdflib import URIRef, Literal, BNode
 
 from config import settings
 
 logger = logging.getLogger(__name__)
 
-# OWL / RDF 상수
-OWL_ONTOLOGY = NamedNode("http://www.w3.org/2002/07/owl#Ontology")
-OWL_CLASS = NamedNode("http://www.w3.org/2002/07/owl#Class")
-OWL_NAMED_INDIVIDUAL = NamedNode("http://www.w3.org/2002/07/owl#NamedIndividual")
-OWL_OBJECT_PROPERTY = NamedNode("http://www.w3.org/2002/07/owl#ObjectProperty")
-OWL_DATATYPE_PROPERTY = NamedNode("http://www.w3.org/2002/07/owl#DatatypeProperty")
-RDF_TYPE = NamedNode("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
-RDFS_LABEL = NamedNode("http://www.w3.org/2000/01/rdf-schema#label")
-RDFS_COMMENT = NamedNode("http://www.w3.org/2000/01/rdf-schema#comment")
-XSD_STRING = NamedNode("http://www.w3.org/2001/XMLSchema#string")
-
 
 @dataclass
 class Triple:
     """RDF 트리플 (subject, predicate, object)."""
-    subject: NamedNode | BlankNode
-    predicate: NamedNode
-    object_: NamedNode | BlankNode | RDFLiteral
+    subject: URIRef | BNode
+    predicate: URIRef
+    object_: URIRef | BNode | Literal
 
 
-def _term_to_dict(term: Any) -> dict:
-    """pyoxigraph 항 → SPARQL 결과 딕셔너리 변환."""
-    if isinstance(term, NamedNode):
-        return {"type": "uri", "value": str(term.value)}
-    if isinstance(term, RDFLiteral):
-        result: dict = {"type": "literal", "value": str(term.value)}
-        if term.datatype:
-            result["datatype"] = str(term.datatype.value)
-        if term.language:
-            result["xml:lang"] = term.language
+def _term_to_dict(term: dict) -> dict:
+    """Fuseki SPARQL JSON 결과 항 → 내부 딕셔너리 변환 (기존 API 호환)."""
+    t = term.get("type", "")
+    if t == "uri":
+        return {"type": "uri", "value": term["value"]}
+    if t == "literal":
+        result: dict = {"type": "literal", "value": term["value"]}
+        if "datatype" in term:
+            result["datatype"] = term["datatype"]
+        if "xml:lang" in term:
+            result["xml:lang"] = term["xml:lang"]
         return result
-    if isinstance(term, BlankNode):
-        return {"type": "bnode", "value": str(term.value)}
+    if t == "bnode":
+        return {"type": "bnode", "value": term["value"]}
     return {"type": "unknown", "value": str(term)}
+
+
+def _term_to_sparql(term: Any) -> str:
+    """rdflib 항 → SPARQL 문자열 직렬화."""
+    if isinstance(term, URIRef):
+        return f"<{term}>"
+    if isinstance(term, BNode):
+        return f"_:{term}"
+    if isinstance(term, Literal):
+        escaped = (
+            str(term)
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+        )
+        if term.language:
+            return f'"{escaped}"@{term.language}'
+        if term.datatype:
+            return f'"{escaped}"^^<{term.datatype}>'
+        return f'"{escaped}"'
+    return f"<{term}>"
 
 
 class OntologyStore:
     """
-    pyoxigraph.Store 래퍼.
-    블로킹 호출은 모두 executor를 통해 스레드 풀에서 실행한다.
+    Apache Jena Fuseki HTTP 클라이언트 래퍼.
+    모든 I/O는 비동기(httpx.AsyncClient) 로 처리한다.
+
+    dataset 파라미터를 각 메서드에 전달하면 해당 dataset으로 요청을 보낸다.
+    생략하면 초기화 시 지정한 default dataset을 사용한다.
     """
 
-    def __init__(self, path: str | None = None):
-        if path:
-            self._store = Store(path=path)
-        else:
-            self._store = Store()
-        self._write_lock = asyncio.Lock()
-        logger.info("OntologyStore initialized (path=%s)", path)
+    def __init__(self, fuseki_url: str, dataset: str = "ontology"):
+        self._fuseki_base = fuseki_url
+        self._default_dataset = dataset
+        self._client = httpx.AsyncClient(
+            timeout=settings.sparql_timeout_seconds,
+            follow_redirects=True,
+            auth=settings.fuseki_basic_auth(),
+        )
+        logger.info("OntologyStore initialized (fuseki=%s, dataset=%s)", fuseki_url, dataset)
+
+    def _ds(self, dataset: str | None) -> str:
+        return dataset or self._default_dataset
+
+    def _query_url(self, dataset: str | None = None) -> str:
+        return f"{self._fuseki_base}/{self._ds(dataset)}/sparql"
+
+    def _update_url(self, dataset: str | None = None) -> str:
+        return f"{self._fuseki_base}/{self._ds(dataset)}/update"
+
+    def _gsp_url(self, dataset: str | None = None) -> str:
+        return f"{self._fuseki_base}/{self._ds(dataset)}/data"
+
+    async def close(self) -> None:
+        await self._client.aclose()
+        logger.info("OntologyStore closed.")
 
     # ── 내부 헬퍼 ─────────────────────────────────────────────────────────
 
-    def _tbox_iri(self, ontology_iri: str) -> NamedNode:
-        return NamedNode(f"{ontology_iri}/tbox")
-
-    def _inferred_iri(self, ontology_iri: str) -> NamedNode:
-        return NamedNode(f"{ontology_iri}/inferred")
-
-    async def _run(self, fn, *args):
-        """블로킹 함수를 executor에서 실행."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, fn, *args)
+    def _inferred_iri(self, ontology_iri: str) -> str:
+        return f"{ontology_iri}/inferred"
 
     # ── SPARQL 읽기 ───────────────────────────────────────────────────────
 
-    async def sparql_select(self, query: str) -> list[dict]:
+    async def count_graph_triples(self, graph_iri: str, dataset: str | None = None) -> int:
+        """Named Graph 안의 트리플 개수 (SPARQL COUNT). graph_iri는 임의 문자를 허용하도록 STR 비교."""
+        esc = graph_iri.replace("\\", "\\\\").replace('"', '\\"')
+        q = (
+            "SELECT (COUNT(?s) AS ?cnt) WHERE { "
+            f'GRAPH ?g {{ ?s ?p ?o }} FILTER(STR(?g) = "{esc}") '
+            "}"
+        )
+        rows = await self.sparql_select(q, dataset)
+        if not rows or "cnt" not in rows[0]:
+            return 0
+        return int(rows[0]["cnt"]["value"])
+
+    async def sparql_select(self, query: str, dataset: str | None = None) -> list[dict]:
         """
         SPARQL SELECT 실행 → [{변수명: {type, value, ...}}] 반환.
-        타임아웃: settings.sparql_timeout_seconds
+        Fuseki가 반환하는 W3C SPARQL JSON 포맷을 파싱한다.
         """
-        def _exec():
-            results = self._store.query(query)
-            # variables는 results에 있음; 변수명에서 앞의 '?' 제거
-            var_names = [str(v).lstrip("?") for v in results.variables]
-            rows = []
-            for solution in results:
-                row = {}
-                for i, name in enumerate(var_names):
-                    term = solution[i]
-                    if term is not None:
-                        row[name] = _term_to_dict(term)
-                rows.append(row)
-            return rows
-
-        return await asyncio.wait_for(
-            self._run(_exec),
-            timeout=settings.sparql_timeout_seconds,
+        resp = await self._client.post(
+            self._query_url(dataset),
+            content=query.encode("utf-8"),
+            headers={
+                "Content-Type": "application/sparql-query",
+                "Accept": "application/sparql-results+json",
+            },
         )
+        resp.raise_for_status()
+        data = resp.json()
+        # W3C SPARQL JSON: variables live under head.vars, not results.vars
+        vars_ = data.get("head", {}).get("vars", [])
+        rows = []
+        for binding in data.get("results", {}).get("bindings", []):
+            row = {}
+            for var in vars_:
+                if var in binding:
+                    row[var] = _term_to_dict(binding[var])
+            rows.append(row)
+        return rows
 
-    async def sparql_ask(self, query: str) -> bool:
+    async def sparql_ask(self, query: str, dataset: str | None = None) -> bool:
         """SPARQL ASK 실행 → bool 반환."""
-        def _exec():
-            return bool(self._store.query(query))
-
-        return await asyncio.wait_for(
-            self._run(_exec),
-            timeout=settings.sparql_timeout_seconds,
+        resp = await self._client.post(
+            self._query_url(dataset),
+            content=query.encode("utf-8"),
+            headers={
+                "Content-Type": "application/sparql-query",
+                "Accept": "application/sparql-results+json",
+            },
         )
+        resp.raise_for_status()
+        return resp.json().get("boolean", False)
 
-    async def sparql_construct(self, query: str) -> list[Triple]:
+    async def sparql_construct(self, query: str, dataset: str | None = None) -> list[Triple]:
         """SPARQL CONSTRUCT 실행 → Triple 목록 반환."""
-        def _exec():
-            triples = []
-            for triple in self._store.query(query):
-                triples.append(Triple(triple.subject, triple.predicate, triple.object))
-            return triples
-
-        return await asyncio.wait_for(
-            self._run(_exec),
-            timeout=settings.sparql_timeout_seconds,
+        resp = await self._client.post(
+            self._query_url(dataset),
+            content=query.encode("utf-8"),
+            headers={
+                "Content-Type": "application/sparql-query",
+                "Accept": "text/turtle",
+            },
         )
+        resp.raise_for_status()
+        import rdflib
+        g = rdflib.Graph()
+        g.parse(data=resp.text, format="turtle")
+        return [
+            Triple(subject=s, predicate=p, object_=o)
+            for s, p, o in g
+        ]
 
     # ── SPARQL 쓰기 ───────────────────────────────────────────────────────
 
-    async def sparql_update(self, update: str) -> None:
-        """
-        SPARQL UPDATE 실행 (INSERT/DELETE 등).
-        asyncio.Lock으로 동시 쓰기 직렬화.
-        """
-        async with self._write_lock:
-            await self._run(self._store.update, update)
+    async def sparql_update(self, update: str, dataset: str | None = None) -> None:
+        """SPARQL UPDATE 실행 (INSERT DATA / DELETE / DROP 등)."""
+        resp = await self._client.post(
+            self._update_url(dataset),
+            content=update.encode("utf-8"),
+            headers={"Content-Type": "application/sparql-update"},
+        )
+        resp.raise_for_status()
 
     # ── 트리플 배치 삽입 ──────────────────────────────────────────────────
 
-    async def insert_triples(self, graph_iri: str, triples: list[Triple]) -> None:
-        """Named Graph에 트리플 배치 삽입."""
-        graph_node = NamedNode(graph_iri)
-
-        def _exec():
-            quads = [
-                Quad(t.subject, t.predicate, t.object_, graph_node)
-                for t in triples
-            ]
-            self._store.extend(quads)
-
-        async with self._write_lock:
-            await self._run(_exec)
+    async def insert_triples(self, graph_iri: str, triples: list[Triple], dataset: str | None = None) -> None:
+        """Named Graph에 트리플 배치 삽입 (SPARQL INSERT DATA)."""
+        if not triples:
+            return
+        lines = [
+            f"    {_term_to_sparql(t.subject)} "
+            f"{_term_to_sparql(t.predicate)} "
+            f"{_term_to_sparql(t.object_)} ."
+            for t in triples
+        ]
+        update = (
+            f"INSERT DATA {{ GRAPH <{graph_iri}> {{\n"
+            + "\n".join(lines)
+            + "\n} }"
+        )
+        await self.sparql_update(update, dataset)
 
     # ── Named Graph 삭제 ──────────────────────────────────────────────────
 
-    async def delete_graph(self, graph_iri: str) -> None:
+    async def delete_graph(self, graph_iri: str, dataset: str | None = None) -> None:
         """Named Graph와 그 안의 모든 트리플 삭제 (idempotent)."""
-        node = NamedNode(graph_iri)
+        await self.sparql_update(f"DROP SILENT GRAPH <{graph_iri}>", dataset)
 
-        def _exec():
-            try:
-                self._store.remove_graph(node)
-            except Exception:
-                pass  # 존재하지 않으면 무시
+    # ── GSP 직렬화 ────────────────────────────────────────────────────────
 
-        async with self._write_lock:
-            await self._run(_exec)
+    async def export_turtle(self, graph_iri: str, dataset: str | None = None) -> str:
+        """Named Graph를 Turtle 문자열로 직렬화 (GSP GET)."""
+        resp = await self._client.get(
+            self._gsp_url(dataset),
+            params={"graph": graph_iri},
+            headers={"Accept": "text/turtle"},
+        )
+        resp.raise_for_status()
+        return resp.text
 
-    # ── Turtle 직렬화 ─────────────────────────────────────────────────────
+    async def export_rdfxml(self, graph_iri: str, dataset: str | None = None) -> bytes:
+        """Named Graph를 RDF/XML bytes로 직렬화 (GSP GET)."""
+        resp = await self._client.get(
+            self._gsp_url(dataset),
+            params={"graph": graph_iri},
+            headers={"Accept": "application/rdf+xml"},
+        )
+        resp.raise_for_status()
+        return resp.content
 
-    async def export_turtle(self, tbox_iri: str) -> str:
-        """TBox Named Graph를 Turtle 문자열로 직렬화."""
-        import io
-        graph_node = NamedNode(tbox_iri)
+    async def post_graph_rdf(
+        self,
+        graph_iri: str,
+        body: bytes,
+        content_type: str,
+        dataset: str | None = None,
+    ) -> None:
+        """
+        GSP HTTP POST — Named Graph에 RDF 본문을 Content-Type에 맞게 추가(merge).
+        Fuseki/Jena가 지원하는 표준 시리얼라이제이션(Turtle, RDF/XML, NT, JSON-LD, TriG, N-Quads 등)에 사용.
+        """
+        resp = await self._client.post(
+            self._gsp_url(dataset),
+            params={"graph": graph_iri},
+            content=body,
+            headers={"Content-Type": content_type},
+        )
+        resp.raise_for_status()
 
-        def _exec():
-            buf = io.BytesIO()
-            self._store.dump(buf, RdfFormat.TURTLE, from_graph=graph_node)
-            return buf.getvalue().decode("utf-8")
+    async def post_graph_turtle(
+        self,
+        graph_iri: str,
+        turtle: bytes | str,
+        dataset: str | None = None,
+    ) -> None:
+        """
+        GSP HTTP POST — 해당 Named Graph에 Turtle을 추가(merge). 기존 트리플은 유지.
+        배치 INSERT DATA 대신 한 번의 요청으로 대량 적재할 때 사용.
+        """
+        body = turtle if isinstance(turtle, bytes) else turtle.encode("utf-8")
+        await self.post_graph_rdf(graph_iri, body, "text/turtle", dataset=dataset)
 
-        return await self._run(_exec)
-
-    async def export_rdfxml(self, tbox_iri: str) -> bytes:
-        """TBox Named Graph를 RDF/XML bytes로 직렬화."""
-        import io
-        graph_node = NamedNode(tbox_iri)
-
-        def _exec():
-            buf = io.BytesIO()
-            self._store.dump(buf, RdfFormat.RDF_XML, from_graph=graph_node)
-            return buf.getvalue()
-
-        return await self._run(_exec)
+    async def put_graph_turtle(
+        self,
+        graph_iri: str,
+        turtle: bytes | str,
+        dataset: str | None = None,
+    ) -> None:
+        """
+        GSP HTTP PUT — Named Graph 내용을 Turtle로 전부 교체. 기존 그래프는 삭제됨.
+        온톨로지 메타(owl:Ontology 등)가 같은 그래프에 있으면 함께 사라지므로 주의.
+        """
+        body = turtle if isinstance(turtle, bytes) else turtle.encode("utf-8")
+        resp = await self._client.put(
+            self._gsp_url(dataset),
+            params={"graph": graph_iri},
+            content=body,
+            headers={"Content-Type": "text/turtle"},
+        )
+        resp.raise_for_status()
 
     # ── 온톨로지 목록 ─────────────────────────────────────────────────────
 
-    async def list_ontologies(self, page: int = 1, page_size: int = 20) -> tuple[list[dict], int]:
+    async def list_ontologies(self, page: int = 1, page_size: int = 20, dataset: str | None = None) -> tuple[list[dict], int]:
         """
         owl:Ontology 목록 조회.
         반환: (items, total)
@@ -238,8 +326,8 @@ class OntologyStore:
         """
 
         count_rows, items_rows = await asyncio.gather(
-            self.sparql_select(count_q),
-            self.sparql_select(select_q),
+            self.sparql_select(count_q, dataset),
+            self.sparql_select(select_q, dataset),
         )
 
         total = int(count_rows[0]["cnt"]["value"]) if count_rows else 0
@@ -256,12 +344,12 @@ class OntologyStore:
 
     # ── 통계 ──────────────────────────────────────────────────────────────
 
-    async def get_ontology_stats(self, tbox_iri: str) -> dict:
+    async def get_ontology_stats(self, kg_iri: str, dataset: str | None = None) -> dict:
         """
-        온톨로지 TBox Named Graph 기반 통계 집계.
+        단일 kg Named Graph 기준 통계 (클래스/속성/개체 수 등).
         asyncio.gather로 병렬 실행.
         """
-        g = f"<{tbox_iri}>"
+        g = f"<{kg_iri}>"
 
         def _count_q(rdf_type: str) -> str:
             return f"""
@@ -269,24 +357,23 @@ class OntologyStore:
                 SELECT (COUNT(?x) AS ?cnt) WHERE {{ GRAPH {g} {{ ?x a {rdf_type} }} }}
             """
 
+        base = kg_iri.replace("/kg", "", 1) if kg_iri.endswith("/kg") else kg_iri
         named_graphs_q = f"""
             SELECT (COUNT(DISTINCT ?g) AS ?cnt) WHERE {{ GRAPH ?g {{ ?s ?p ?o }}
-            FILTER(STRSTARTS(STR(?g), "{tbox_iri.replace('/tbox', '')}")) }}
+            FILTER(STRSTARTS(STR(?g), "{base}")) }}
         """
 
-        # Individuals는 tbox가 아닌 abox(manual/source) 그래프에 저장되므로
-        # GRAPH ?g로 전체 그래프에서 조회
-        individual_count_q = """
+        individual_count_q = f"""
             PREFIX owl: <http://www.w3.org/2002/07/owl#>
-            SELECT (COUNT(DISTINCT ?x) AS ?cnt) WHERE { GRAPH ?g { ?x a owl:NamedIndividual } }
+            SELECT (COUNT(DISTINCT ?x) AS ?cnt) WHERE {{ GRAPH {g} {{ ?x a owl:NamedIndividual }} }}
         """
 
         results = await asyncio.gather(
-            self.sparql_select(_count_q("owl:Class")),
-            self.sparql_select(individual_count_q),
-            self.sparql_select(_count_q("owl:ObjectProperty")),
-            self.sparql_select(_count_q("owl:DatatypeProperty")),
-            self.sparql_select(named_graphs_q),
+            self.sparql_select(_count_q("owl:Class"), dataset),
+            self.sparql_select(individual_count_q, dataset),
+            self.sparql_select(_count_q("owl:ObjectProperty"), dataset),
+            self.sparql_select(_count_q("owl:DatatypeProperty"), dataset),
+            self.sparql_select(named_graphs_q, dataset),
         )
 
         def _cnt(rows: list[dict]) -> int:
