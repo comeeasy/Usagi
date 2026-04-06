@@ -134,12 +134,13 @@ async def _get_subgraph_sparql(
         values = _values_clause(set(visited_list))
         detail_rows = await store.sparql_select(f"""
             {_PREFIXES}
+            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             SELECT ?n ?label ?type WHERE {{
                 GRAPH <{kg_iri}> {{
                     ?n a ?type .
                     OPTIONAL {{ ?n rdfs:label ?label }}
                     VALUES ?n {{ {values} }}
-                    FILTER(?type IN (owl:Class, owl:NamedIndividual))
+                    FILTER(?type IN (owl:Class, rdfs:Class, owl:NamedIndividual))
                 }}
             }}
         """, dataset=dataset)
@@ -148,7 +149,11 @@ async def _get_subgraph_sparql(
             if not iri or iri in nodes:
                 continue
             type_val = _v(r.get("type"))
-            kind = "concept" if "Class" in type_val else "individual"
+            _CLASS_IRIS = {
+                "http://www.w3.org/2002/07/owl#Class",
+                "http://www.w3.org/2000/01/rdf-schema#Class",
+            }
+            kind = "concept" if type_val in _CLASS_IRIS else "individual"
             label = _v(r.get("label")) or iri.split("#")[-1] if "#" in iri else iri.split("/")[-1]
             nodes[iri] = {
                 "iri": iri,

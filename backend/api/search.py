@@ -211,6 +211,10 @@ WHERE {{
         {{ ?iri a owl:ObjectProperty . BIND("object" AS ?kind) }}
         UNION
         {{ ?iri a owl:DatatypeProperty . BIND("data" AS ?kind) }}
+        UNION
+        {{ ?iri a rdf:Property .
+           FILTER NOT EXISTS {{ ?iri a owl:DatatypeProperty }}
+           BIND("object" AS ?kind) }}
         OPTIONAL {{ ?iri rdfs:label  ?label  }}
         OPTIONAL {{ ?iri rdfs:domain ?domain . FILTER(isIRI(?domain)) }}
         OPTIONAL {{ ?iri rdfs:range  ?range  }}

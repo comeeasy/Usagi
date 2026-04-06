@@ -177,29 +177,39 @@ async def list_properties(
     domain_f = f"?iri rdfs:domain <{domain}> ." if domain else ""
     range_f = f"?iri rdfs:range <{range_}> ." if range_ else ""
 
-    async def fetch_type(owl_type: str) -> tuple[int, list]:
+    async def fetch_pattern(pattern: str) -> tuple[int, list]:
+        """SPARQL 패턴으로 property IRI 목록·개수 조회."""
         cnt = await store.sparql_select(f"""{_P}
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
-    GRAPH <{kg}> {{ ?iri a {owl_type} . {domain_f} {range_f} }}
+    GRAPH <{kg}> {{ {pattern} {domain_f} {range_f} }}
 }}""", dataset=dataset)
         total = int(_v(cnt[0].get("total"), "0")) if cnt else 0
         rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri WHERE {{
-    GRAPH <{kg}> {{ ?iri a {owl_type} . {domain_f} {range_f} }}
+    GRAPH <{kg}> {{ {pattern} {domain_f} {range_f} }}
 }} ORDER BY ?iri LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
         return total, rows
+
+    # rdf:Property: OWL 어휘가 아닌 non-OWL 어휘(DC Terms 등)에서 사용하는 상위 타입.
+    # owl:ObjectProperty / owl:DatatypeProperty 는 이미 rdf:Property 의 하위타입이지만
+    # Fuseki TDB2 는 추론을 수행하지 않으므로 명시 선언만 매칭됨 → 중복 없음.
+    _OBJ_PATTERN = (
+        "{ ?iri a owl:ObjectProperty }"
+        " UNION "
+        "{ ?iri a rdf:Property . FILTER NOT EXISTS { ?iri a owl:DatatypeProperty } }"
+    )
 
     items: list = []
     total = 0
 
     if kind != "data":
-        obj_total, obj_rows = await fetch_type("owl:ObjectProperty")
+        obj_total, obj_rows = await fetch_pattern(_OBJ_PATTERN)
         total += obj_total
         for r in obj_rows:
             items.append(await _fetch_object_property(store, _v(r.get("iri")), ontology_id, kg, dataset=dataset))
 
     if kind != "object":
-        data_total, data_rows = await fetch_type("owl:DatatypeProperty")
+        data_total, data_rows = await fetch_pattern("?iri a owl:DatatypeProperty")
         total += data_total
         for r in data_rows:
             items.append(await _fetch_data_property(store, _v(r.get("iri")), ontology_id, kg, dataset=dataset))
