@@ -95,8 +95,11 @@ def _parse_list(val: Any) -> list | None:
 
 
 @mcp.tool()
-async def list_ontologies() -> list[dict]:
+async def list_ontologies(dataset: str = "ontology") -> list[dict]:
     """온톨로지 목록 조회 MCP 도구.
+
+    Args:
+        dataset: Fuseki dataset 이름 (기본: "ontology")
 
     Returns:
         온톨로지 목록 (iri, label, version 포함)
@@ -104,16 +107,17 @@ async def list_ontologies() -> list[dict]:
     store = _services.get("store")
     if store is None:
         return []
-    items, _total = await store.list_ontologies(1, 50)
+    items, _total = await store.list_ontologies(1, 50, dataset=dataset)
     return items
 
 
 @mcp.tool()
-async def get_ontology_summary(ontology_id: str) -> dict:
+async def get_ontology_summary(ontology_id: str, dataset: str = "ontology") -> dict:
     """온톨로지 요약 및 통계 조회.
 
     Args:
         ontology_id: 온톨로지 IRI
+        dataset: Fuseki dataset 이름 (기본: "ontology")
 
     Returns:
         통계 딕셔너리 (concepts, individuals, object_properties, data_properties, named_graphs)
@@ -122,7 +126,7 @@ async def get_ontology_summary(ontology_id: str) -> dict:
     if store is None:
         return {"error": "store not available"}
     tbox_iri = f"{ontology_id}/tbox"
-    stats = await store.get_ontology_stats(tbox_iri)
+    stats = await store.get_ontology_stats(tbox_iri, dataset=dataset)
     return {"ontology_id": ontology_id, "stats": stats}
 
 
@@ -133,6 +137,7 @@ async def search_entities(
     kind: str = "all",
     limit: int = 10,
     use_vector: bool = True,
+    dataset: str = "ontology",
 ) -> list[dict]:
     """Entity 검색 MCP 도구 (키워드 + 벡터 하이브리드).
 
@@ -169,7 +174,7 @@ async def search_entities(
             }}
             LIMIT {limit}
         """
-        rows = await store.sparql_select(sparql)
+        rows = await store.sparql_select(sparql, dataset=dataset)
         for row in rows:
             iri = row.get("iri", {}).get("value", "")
             label = row.get("label", {}).get("value", iri)
@@ -192,7 +197,7 @@ async def search_entities(
                 }}
                 LIMIT {remaining}
             """
-            rows = await store.sparql_select(sparql)
+            rows = await store.sparql_select(sparql, dataset=dataset)
             for row in rows:
                 iri = row.get("iri", {}).get("value", "")
                 label = row.get("label", {}).get("value", iri)
@@ -224,6 +229,7 @@ async def search_relations(
     ontology_id: str,
     query: str = "",
     limit: int = 10,
+    dataset: str = "ontology",
 ) -> list[dict]:
     """Property(Relation) 검색 MCP 도구.
 
@@ -262,7 +268,7 @@ async def search_relations(
         LIMIT {limit}
     """
 
-    rows = await store.sparql_select(sparql)
+    rows = await store.sparql_select(sparql, dataset=dataset)
     results = []
     for row in rows:
         iri = row.get("iri", {}).get("value", "")
@@ -278,6 +284,7 @@ async def get_subgraph(
     ontology_id: str,
     entity_iris: list[str],
     depth: int = 2,
+    dataset: str = "ontology",
 ) -> dict:
     """서브그래프 조회 MCP 도구.
 
@@ -294,11 +301,11 @@ async def get_subgraph(
         return {"nodes": [], "edges": [], "error": "store not available"}
     from api.subgraph import _get_subgraph_sparql
     depth = max(1, min(depth, 5))
-    return await _get_subgraph_sparql(store, ontology_id, entity_iris, depth, ont_iri=None)
+    return await _get_subgraph_sparql(store, ontology_id, entity_iris, depth, ont_iri=None, dataset=dataset)
 
 
 @mcp.tool()
-async def sparql_query(ontology_id: str, query: str) -> dict:
+async def sparql_query(ontology_id: str, query: str, dataset: str = "ontology") -> dict:
     """SPARQL 쿼리 실행 MCP 도구 (SELECT / ASK만 허용).
 
     Args:
@@ -318,7 +325,7 @@ async def sparql_query(ontology_id: str, query: str) -> dict:
         if forbidden in upper:
             return {"error": f"Mutating SPARQL operation '{forbidden}' is not allowed"}
 
-    rows = await store.sparql_select(query)
+    rows = await store.sparql_select(query, dataset=dataset)
     return {"results": rows}
 
 
@@ -326,6 +333,7 @@ async def sparql_query(ontology_id: str, query: str) -> dict:
 async def run_reasoner(
     ontology_id: str,
     entity_iris: list[str] | None = None,
+    dataset: str = "ontology",
 ) -> dict:
     """OWL 2 추론 실행 MCP 도구.
 
@@ -341,7 +349,7 @@ async def run_reasoner(
         return {"error": "reasoner not available"}
 
     # Start reasoner job and poll until completion (max 120s)
-    job_id = await reasoner.run(ontology_id, entity_iris)
+    job_id = await reasoner.run(ontology_id, entity_iris, dataset=dataset)
 
     timeout = 120.0
     poll_interval = 1.0
@@ -384,6 +392,7 @@ async def add_individual(
     object_properties: list[dict] | None = None,
     same_as: list[str] | None = None,
     different_from: list[str] | None = None,
+    dataset: str = "ontology",
 ) -> dict:
     """Individual(owl:NamedIndividual) 생성 MCP 도구.
 
@@ -435,7 +444,7 @@ async def add_individual(
 
     # IRI 중복 확인
     exists = await store.sparql_ask(
-        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}"
+        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset
     )
     if exists:
         return {"error": f"IRI already exists: {iri}"}
@@ -470,7 +479,8 @@ async def add_individual(
     await store.sparql_update(
         f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{graph_iri}> {{\n"
         + "\n".join(triples)
-        + "\n} }"
+        + "\n} }",
+        dataset=dataset,
     )
 
     logger.info("add_individual: created %s in %s", iri, graph_iri)
@@ -487,6 +497,7 @@ async def update_individual(
     object_properties: list[dict] | None = None,
     same_as: list[str] | None = None,
     different_from: list[str] | None = None,
+    dataset: str = "ontology",
 ) -> dict:
     """Individual 수정 MCP 도구.
 
@@ -523,7 +534,7 @@ async def update_individual(
     different_from = _parse_list(different_from)
 
     exists = await store.sparql_ask(
-        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}"
+        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset
     )
     if not exists:
         return {"error": f"Individual not found: {iri}"}
@@ -534,50 +545,50 @@ async def update_individual(
         await store.sparql_update(f"""{_SPARQL_PREFIXES}
 DELETE {{ GRAPH <{g}> {{ <{iri}> rdfs:label ?o }} }}
 INSERT {{ GRAPH <{g}> {{ <{iri}> rdfs:label "{_esc(label)}" }} }}
-WHERE  {{ OPTIONAL {{ GRAPH <{g}> {{ <{iri}> rdfs:label ?o }} }} }}""")
+WHERE  {{ OPTIONAL {{ GRAPH <{g}> {{ <{iri}> rdfs:label ?o }} }} }}""", dataset=dataset)
 
     if types is not None:
         await store.sparql_update(f"""{_SPARQL_PREFIXES}
 DELETE {{ GRAPH <{g}> {{ <{iri}> rdf:type ?t }} }}
-WHERE  {{ GRAPH <{g}> {{ <{iri}> rdf:type ?t . FILTER(?t != owl:NamedIndividual) }} }}""")
+WHERE  {{ GRAPH <{g}> {{ <{iri}> rdf:type ?t . FILTER(?t != owl:NamedIndividual) }} }}""", dataset=dataset)
         if types:
             triples = "\n".join([f"    <{iri}> rdf:type <{t}> ." for t in types])
-            await store.sparql_update(f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{g}> {{\n{triples}\n}} }}")
+            await store.sparql_update(f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{g}> {{\n{triples}\n}} }}", dataset=dataset)
 
     if data_properties is not None:
         await store.sparql_update(f"""{_SPARQL_PREFIXES}
 DELETE {{ GRAPH <{g}> {{ <{iri}> ?p ?o }} }}
 WHERE  {{ GRAPH <{g}> {{ <{iri}> ?p ?o . FILTER(isLiteral(?o))
-    FILTER(?p NOT IN (rdfs:label, prov:generatedAtTime, prov:wasAttributedTo)) }} }}""")
+    FILTER(?p NOT IN (rdfs:label, prov:generatedAtTime, prov:wasAttributedTo)) }} }}""", dataset=dataset)
         if data_properties:
             triples = "\n".join([
                 f'    <{iri}> <{dp["property_iri"]}> "{_esc(str(dp["value"]))}"^^<{_xsd_full(dp.get("datatype", "xsd:string"))}> .'
                 for dp in data_properties if dp.get("property_iri")
             ])
             if triples:
-                await store.sparql_update(f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{g}> {{\n{triples}\n}} }}")
+                await store.sparql_update(f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{g}> {{\n{triples}\n}} }}", dataset=dataset)
 
     if object_properties is not None:
         await store.sparql_update(f"""{_SPARQL_PREFIXES}
 DELETE {{ GRAPH <{g}> {{ <{iri}> ?p ?o }} }}
 WHERE  {{ GRAPH <{g}> {{ <{iri}> ?p ?o . FILTER(isIRI(?o))
-    FILTER(?p NOT IN (rdf:type, owl:sameAs, owl:differentFrom)) }} }}""")
+    FILTER(?p NOT IN (rdf:type, owl:sameAs, owl:differentFrom)) }} }}""", dataset=dataset)
         if object_properties:
             triples = "\n".join([
                 f"    <{iri}> <{op['property_iri']}> <{op['target_iri']}> ."
                 for op in object_properties if op.get("property_iri") and op.get("target_iri")
             ])
             if triples:
-                await store.sparql_update(f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{g}> {{\n{triples}\n}} }}")
+                await store.sparql_update(f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{g}> {{\n{triples}\n}} }}", dataset=dataset)
 
     for pred_str, vals in [("owl:sameAs", same_as), ("owl:differentFrom", different_from)]:
         if vals is not None:
             await store.sparql_update(f"""{_SPARQL_PREFIXES}
 DELETE {{ GRAPH <{g}> {{ <{iri}> {pred_str} ?o }} }}
-WHERE  {{ GRAPH <{g}> {{ <{iri}> {pred_str} ?o }} }}""")
+WHERE  {{ GRAPH <{g}> {{ <{iri}> {pred_str} ?o }} }}""", dataset=dataset)
             if vals:
                 triples = "\n".join([f"    <{iri}> {pred_str} <{v}> ." for v in vals])
-                await store.sparql_update(f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{g}> {{\n{triples}\n}} }}")
+                await store.sparql_update(f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{g}> {{\n{triples}\n}} }}", dataset=dataset)
 
     logger.info("update_individual: updated %s", iri)
     return {"status": "updated", "iri": iri}
@@ -590,6 +601,7 @@ async def add_concept(
     label: str,
     super_classes: list[str] | None = None,
     description: str | None = None,
+    dataset: str = "ontology",
 ) -> dict:
     """Concept(owl:Class) 생성 MCP 도구.
 
@@ -626,7 +638,7 @@ async def add_concept(
 
     # IRI 중복 확인
     exists = await store.sparql_ask(
-        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:Class }} }}"
+        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:Class }} }}", dataset=dataset
     )
     if exists:
         return {"error": f"IRI already exists: {iri}"}
@@ -650,7 +662,8 @@ async def add_concept(
     await store.sparql_update(
         f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{tbox_graph}> {{\n"
         + "\n".join(triples)
-        + "\n} }"
+        + "\n} }",
+        dataset=dataset,
     )
 
     logger.info("add_concept: created %s in %s", iri, tbox_graph)
@@ -658,7 +671,7 @@ async def add_concept(
 
 
 @mcp.tool()
-async def delete_individual(ontology_id: str, iri: str) -> dict:
+async def delete_individual(ontology_id: str, iri: str, dataset: str = "ontology") -> dict:
     """Individual 삭제 MCP 도구.
 
     모든 Named Graph에서 해당 IRI를 주어(subject)로 갖는 트리플을 전부 삭제합니다.
@@ -677,7 +690,7 @@ async def delete_individual(ontology_id: str, iri: str) -> dict:
         return {"error": "store not available"}
 
     exists = await store.sparql_ask(
-        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}"
+        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset
     )
     if not exists:
         return {"error": f"Individual not found: {iri}"}
@@ -685,9 +698,9 @@ async def delete_individual(ontology_id: str, iri: str) -> dict:
     # 모든 Named Graph에서 해당 Individual의 트리플 삭제
     await store.sparql_update(f"""{_SPARQL_PREFIXES}
 DELETE {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}
-WHERE  {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}""")
+WHERE  {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}""", dataset=dataset)
     # Default graph 트리플도 삭제
-    await store.sparql_update(f"{_SPARQL_PREFIXES}\nDELETE WHERE {{ <{iri}> ?p ?o }}")
+    await store.sparql_update(f"{_SPARQL_PREFIXES}\nDELETE WHERE {{ <{iri}> ?p ?o }}", dataset=dataset)
 
     logger.info("delete_individual: deleted %s", iri)
     return {"status": "deleted", "iri": iri}

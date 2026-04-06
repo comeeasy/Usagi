@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   nginx:
     image: nginx:1.25-alpine
@@ -25,8 +23,10 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - fuseki
-      - kafka
+      fuseki:
+        condition: service_healthy
+      kafka:
+        condition: service_started
     networks:
       - ontology-net
     restart: unless-stopped
@@ -39,7 +39,7 @@ services:
       - ontology-net
 
   fuseki:
-    image: stain/jena-fuseki:5.3.0
+    image: stain/jena-fuseki:5.1.0
     ports:
       - "3030:3030"
     volumes:
@@ -47,7 +47,14 @@ services:
     environment:
       - ADMIN_PASSWORD=admin
       - JVM_ARGS=-Xmx2g
-    command: --tdb2 --update --loc /fuseki/ontology /ontology
+      - TDB=2
+      - FUSEKI_DATASET_1=ontology
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3030/ontology/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 40s
     networks:
       - ontology-net
     restart: unless-stopped

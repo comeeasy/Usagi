@@ -9,10 +9,11 @@ function mapOntology(data: any): Ontology {
   return { ...data, name: data.label ?? data.name, base_iri: data.iri ?? data.base_iri }
 }
 
-export function listOntologies(params?: { page?: number; pageSize?: number }): Promise<PaginatedResponse<Ontology>> {
+export function listOntologies(params?: { page?: number; pageSize?: number; dataset?: string }): Promise<PaginatedResponse<Ontology>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
+  if (params?.dataset) qs.set('dataset', params.dataset)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies${query}`).then((res: PaginatedResponse<Ontology>) => ({
     ...res,
@@ -20,12 +21,14 @@ export function listOntologies(params?: { page?: number; pageSize?: number }): P
   }))
 }
 
-export function getOntology(id: string): Promise<Ontology> {
-  return apiGet(`/ontologies/${id}`).then(mapOntology)
+export function getOntology(id: string, dataset?: string): Promise<Ontology> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiGet(`/ontologies/${id}${qs}`).then(mapOntology)
 }
 
-export function createOntology(data: OntologyCreate): Promise<Ontology> {
-  return apiPost(`/ontologies`, {
+export function createOntology(data: OntologyCreate, dataset?: string): Promise<Ontology> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies${qs}`, {
     label: data.name,
     iri: data.base_iri,
     description: data.description,
@@ -33,20 +36,23 @@ export function createOntology(data: OntologyCreate): Promise<Ontology> {
   }).then(mapOntology)
 }
 
-export function updateOntology(id: string, data: OntologyUpdate): Promise<Ontology> {
-  return apiPut(`/ontologies/${id}`, {
+export function updateOntology(id: string, data: OntologyUpdate, dataset?: string): Promise<Ontology> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPut(`/ontologies/${id}${qs}`, {
     label: data.name,
     description: data.description,
     version: data.version,
   }).then(mapOntology)
 }
 
-export function deleteOntology(id: string): Promise<void> {
-  return apiDelete(`/ontologies/${id}`)
+export function deleteOntology(id: string, dataset?: string): Promise<void> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiDelete(`/ontologies/${id}${qs}`)
 }
 
-export function syncOntology(id: string): Promise<{ tbox_count: number; abox_count: number; elapsed_seconds: number }> {
-  return apiPost(`/ontologies/${id}/sync`, {})
+export function syncOntology(id: string, dataset?: string): Promise<{ tbox_count: number; abox_count: number; elapsed_seconds: number }> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${id}/sync${qs}`, {})
 }
 
 export interface SubgraphData {
@@ -56,9 +62,10 @@ export interface SubgraphData {
 
 export function getSubgraph(
   ontologyId: string,
-  params: { rootIris?: string[]; depth?: number; includeIndividuals?: boolean },
+  params: { rootIris?: string[]; depth?: number; includeIndividuals?: boolean; dataset?: string },
 ): Promise<SubgraphData> {
-  return apiPost(`/ontologies/${ontologyId}/subgraph`, {
+  const qs = params.dataset ? `?dataset=${params.dataset}` : ''
+  return apiPost(`/ontologies/${ontologyId}/subgraph${qs}`, {
     entity_iris: params.rootIris ?? [],
     depth: params.depth ?? 2,
   }).then((raw: { nodes: { iri: string; label: string; kind: string }[]; edges: { source: string; target: string; propertyIri: string; propertyLabel: string }[] }) => ({
@@ -94,10 +101,12 @@ export function getSubgraph(
 export function importOntologyFile(
   ontologyId: string,
   file: File,
+  dataset?: string,
 ): Promise<{ message: string; triples_imported?: number }> {
   const form = new FormData()
   form.append('file', file)
-  return apiFetch<{ imported: number }>(`/ontologies/${ontologyId}/import/file`, {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiFetch<{ imported: number }>(`/ontologies/${ontologyId}/import/file${qs}`, {
     method: 'POST',
     body: form,
   }).then((res) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
@@ -106,16 +115,20 @@ export function importOntologyFile(
 export function importOntologyUrl(
   ontologyId: string,
   url: string,
+  dataset?: string,
 ): Promise<{ message: string; triples_imported?: number }> {
-  return apiPost(`/ontologies/${ontologyId}/import/url`, { url })
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${ontologyId}/import/url${qs}`, { url })
     .then((res: { imported: number }) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
 }
 
 export function importOntologyStandard(
   ontologyId: string,
   name: string,
+  dataset?: string,
 ): Promise<{ message: string; triples_imported?: number }> {
-  return apiPost(`/ontologies/${ontologyId}/import/standard`, { name })
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${ontologyId}/import/standard${qs}`, { name })
     .then((res: { imported: number }) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
 }
 
@@ -145,14 +158,37 @@ export interface ConflictResolution {
 export function previewMerge(
   targetId: string,
   sourceId: string,
+  dataset?: string,
 ): Promise<{ conflicts: ConflictItem[]; conflict_count: number; auto_mergeable_count: number }> {
-  return apiPost(`/ontologies/${targetId}/merge/preview`, { source_ontology_id: sourceId })
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${targetId}/merge/preview${qs}`, { source_ontology_id: sourceId })
 }
 
 export function mergeOntologies(
   targetId: string,
   sourceId: string,
   resolutions: ConflictResolution[] = [],
+  dataset?: string,
 ): Promise<{ merged: boolean; triple_count: number }> {
-  return apiPost(`/ontologies/${targetId}/merge`, { source_ontology_id: sourceId, resolutions })
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${targetId}/merge${qs}`, { source_ontology_id: sourceId, resolutions })
+}
+
+// ── Datasets API ────────────────────────────────────────────────────────────
+
+export interface DatasetInfo {
+  name: string
+  type: string
+}
+
+export function listDatasets(): Promise<DatasetInfo[]> {
+  return apiGet('/datasets')
+}
+
+export function createDataset(name: string, dbType = 'TDB2'): Promise<{ name: string; db_type: string; status: string }> {
+  return apiPost('/datasets', { name, db_type: dbType })
+}
+
+export function deleteDataset(name: string): Promise<void> {
+  return apiDelete(`/datasets/${name}`)
 }

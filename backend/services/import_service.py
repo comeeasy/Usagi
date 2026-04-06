@@ -97,12 +97,12 @@ async def import_standard(name: str) -> list[Triple]:
     return await parse_url(url)
 
 
-async def bulk_insert(store: OntologyStore, triples: list[Triple], graph_iri: str) -> int:
+async def bulk_insert(store: OntologyStore, triples: list[Triple], graph_iri: str, dataset: str | None = None) -> int:
     """OntologyStore.insert_triples() 배치 호출 (BATCH_SIZE씩)."""
     total = 0
     for i in range(0, len(triples), BATCH_SIZE):
         batch = triples[i:i + BATCH_SIZE]
-        await store.insert_triples(graph_iri, batch)
+        await store.insert_triples(graph_iri, batch, dataset=dataset)
         total += len(batch)
         logger.debug("Inserted batch %d/%d", i + len(batch), len(triples))
     return total

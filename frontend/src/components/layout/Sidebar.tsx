@@ -12,6 +12,7 @@ import {
   Box,
 } from 'lucide-react'
 import { useOntologies } from '@/hooks/useOntology'
+import DatasetSelector from './DatasetSelector'
 
 const navItems = [
   { path: 'graph', label: 'Graph', icon: Network },
@@ -47,6 +48,9 @@ export default function Sidebar() {
           Ontology Platform
         </span>
       </div>
+
+      {/* Dataset selector */}
+      <DatasetSelector />
 
       {/* Ontology selector */}
       <div className="px-3 py-2 border-b" style={{ borderColor: 'var(--color-border)' }}>

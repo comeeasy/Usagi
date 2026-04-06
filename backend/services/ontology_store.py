@@ -77,17 +77,31 @@ class OntologyStore:
     """
     Apache Jena Fuseki HTTP 클라이언트 래퍼.
     모든 I/O는 비동기(httpx.AsyncClient) 로 처리한다.
+
+    dataset 파라미터를 각 메서드에 전달하면 해당 dataset으로 요청을 보낸다.
+    생략하면 초기화 시 지정한 default dataset을 사용한다.
     """
 
     def __init__(self, fuseki_url: str, dataset: str = "ontology"):
-        self._query_url = f"{fuseki_url}/{dataset}/sparql"
-        self._update_url = f"{fuseki_url}/{dataset}/update"
-        self._gsp_url = f"{fuseki_url}/{dataset}/data"
+        self._fuseki_base = fuseki_url
+        self._default_dataset = dataset
         self._client = httpx.AsyncClient(
             timeout=settings.sparql_timeout_seconds,
             follow_redirects=True,
         )
         logger.info("OntologyStore initialized (fuseki=%s, dataset=%s)", fuseki_url, dataset)
+
+    def _ds(self, dataset: str | None) -> str:
+        return dataset or self._default_dataset
+
+    def _query_url(self, dataset: str | None = None) -> str:
+        return f"{self._fuseki_base}/{self._ds(dataset)}/sparql"
+
+    def _update_url(self, dataset: str | None = None) -> str:
+        return f"{self._fuseki_base}/{self._ds(dataset)}/update"
+
+    def _gsp_url(self, dataset: str | None = None) -> str:
+        return f"{self._fuseki_base}/{self._ds(dataset)}/data"
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -103,13 +117,13 @@ class OntologyStore:
 
     # ── SPARQL 읽기 ───────────────────────────────────────────────────────
 
-    async def sparql_select(self, query: str) -> list[dict]:
+    async def sparql_select(self, query: str, dataset: str | None = None) -> list[dict]:
         """
         SPARQL SELECT 실행 → [{변수명: {type, value, ...}}] 반환.
         Fuseki가 반환하는 W3C SPARQL JSON 포맷을 파싱한다.
         """
         resp = await self._client.post(
-            self._query_url,
+            self._query_url(dataset),
             content=query.encode("utf-8"),
             headers={
                 "Content-Type": "application/sparql-query",
@@ -128,10 +142,10 @@ class OntologyStore:
             rows.append(row)
         return rows
 
-    async def sparql_ask(self, query: str) -> bool:
+    async def sparql_ask(self, query: str, dataset: str | None = None) -> bool:
         """SPARQL ASK 실행 → bool 반환."""
         resp = await self._client.post(
-            self._query_url,
+            self._query_url(dataset),
             content=query.encode("utf-8"),
             headers={
                 "Content-Type": "application/sparql-query",
@@ -141,10 +155,10 @@ class OntologyStore:
         resp.raise_for_status()
         return resp.json().get("boolean", False)
 
-    async def sparql_construct(self, query: str) -> list[Triple]:
+    async def sparql_construct(self, query: str, dataset: str | None = None) -> list[Triple]:
         """SPARQL CONSTRUCT 실행 → Triple 목록 반환."""
         resp = await self._client.post(
-            self._query_url,
+            self._query_url(dataset),
             content=query.encode("utf-8"),
             headers={
                 "Content-Type": "application/sparql-query",
@@ -162,10 +176,10 @@ class OntologyStore:
 
     # ── SPARQL 쓰기 ───────────────────────────────────────────────────────
 
-    async def sparql_update(self, update: str) -> None:
+    async def sparql_update(self, update: str, dataset: str | None = None) -> None:
         """SPARQL UPDATE 실행 (INSERT DATA / DELETE / DROP 등)."""
         resp = await self._client.post(
-            self._update_url,
+            self._update_url(dataset),
             content=update.encode("utf-8"),
             headers={"Content-Type": "application/sparql-update"},
         )
@@ -173,7 +187,7 @@ class OntologyStore:
 
     # ── 트리플 배치 삽입 ──────────────────────────────────────────────────
 
-    async def insert_triples(self, graph_iri: str, triples: list[Triple]) -> None:
+    async def insert_triples(self, graph_iri: str, triples: list[Triple], dataset: str | None = None) -> None:
         """Named Graph에 트리플 배치 삽입 (SPARQL INSERT DATA)."""
         if not triples:
             return
@@ -188,30 +202,30 @@ class OntologyStore:
             + "\n".join(lines)
             + "\n} }"
         )
-        await self.sparql_update(update)
+        await self.sparql_update(update, dataset)
 
     # ── Named Graph 삭제 ──────────────────────────────────────────────────
 
-    async def delete_graph(self, graph_iri: str) -> None:
+    async def delete_graph(self, graph_iri: str, dataset: str | None = None) -> None:
         """Named Graph와 그 안의 모든 트리플 삭제 (idempotent)."""
-        await self.sparql_update(f"DROP SILENT GRAPH <{graph_iri}>")
+        await self.sparql_update(f"DROP SILENT GRAPH <{graph_iri}>", dataset)
 
     # ── GSP 직렬화 ────────────────────────────────────────────────────────
 
-    async def export_turtle(self, tbox_iri: str) -> str:
+    async def export_turtle(self, tbox_iri: str, dataset: str | None = None) -> str:
         """TBox Named Graph를 Turtle 문자열로 직렬화 (GSP GET)."""
         resp = await self._client.get(
-            self._gsp_url,
+            self._gsp_url(dataset),
             params={"graph": tbox_iri},
             headers={"Accept": "text/turtle"},
         )
         resp.raise_for_status()
         return resp.text
 
-    async def export_rdfxml(self, tbox_iri: str) -> bytes:
+    async def export_rdfxml(self, tbox_iri: str, dataset: str | None = None) -> bytes:
         """TBox Named Graph를 RDF/XML bytes로 직렬화 (GSP GET)."""
         resp = await self._client.get(
-            self._gsp_url,
+            self._gsp_url(dataset),
             params={"graph": tbox_iri},
             headers={"Accept": "application/rdf+xml"},
         )
@@ -220,7 +234,7 @@ class OntologyStore:
 
     # ── 온톨로지 목록 ─────────────────────────────────────────────────────
 
-    async def list_ontologies(self, page: int = 1, page_size: int = 20) -> tuple[list[dict], int]:
+    async def list_ontologies(self, page: int = 1, page_size: int = 20, dataset: str | None = None) -> tuple[list[dict], int]:
         """
         owl:Ontology 목록 조회.
         반환: (items, total)
@@ -250,8 +264,8 @@ class OntologyStore:
         """
 
         count_rows, items_rows = await asyncio.gather(
-            self.sparql_select(count_q),
-            self.sparql_select(select_q),
+            self.sparql_select(count_q, dataset),
+            self.sparql_select(select_q, dataset),
         )
 
         total = int(count_rows[0]["cnt"]["value"]) if count_rows else 0
@@ -268,7 +282,7 @@ class OntologyStore:
 
     # ── 통계 ──────────────────────────────────────────────────────────────
 
-    async def get_ontology_stats(self, tbox_iri: str) -> dict:
+    async def get_ontology_stats(self, tbox_iri: str, dataset: str | None = None) -> dict:
         """
         온톨로지 TBox Named Graph 기반 통계 집계.
         asyncio.gather로 병렬 실행.
@@ -292,11 +306,11 @@ class OntologyStore:
         """
 
         results = await asyncio.gather(
-            self.sparql_select(_count_q("owl:Class")),
-            self.sparql_select(individual_count_q),
-            self.sparql_select(_count_q("owl:ObjectProperty")),
-            self.sparql_select(_count_q("owl:DatatypeProperty")),
-            self.sparql_select(named_graphs_q),
+            self.sparql_select(_count_q("owl:Class"), dataset),
+            self.sparql_select(individual_count_q, dataset),
+            self.sparql_select(_count_q("owl:ObjectProperty"), dataset),
+            self.sparql_select(_count_q("owl:DatatypeProperty"), dataset),
+            self.sparql_select(named_graphs_q, dataset),
         )
 
         def _cnt(rows: list[dict]) -> int:

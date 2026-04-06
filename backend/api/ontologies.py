@@ -52,7 +52,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _fetch_ontology(store, ontology_id: str) -> dict:
+async def _fetch_ontology(store, ontology_id: str, dataset: str | None = None) -> dict:
     """UUID(dc:identifier)로 온톨로지 메타데이터 조회. 없으면 None."""
     rows = await store.sparql_select(f"""
         {_PREFIXES}
@@ -67,7 +67,7 @@ async def _fetch_ontology(store, ontology_id: str) -> dict:
                 OPTIONAL {{ ?iri dc:modified ?updated }}
             }}
         }} LIMIT 1
-    """)
+    """, dataset=dataset)
     return rows[0] if rows else None
 
 
@@ -78,16 +78,17 @@ async def list_ontologies(
     request: Request,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    dataset: str = Query("ontology"),
 ) -> dict:
     store = _store(request)
-    items_raw, total = await store.list_ontologies(page, page_size)
+    items_raw, total = await store.list_ontologies(page, page_size, dataset=dataset)
 
     items = []
     for raw in items_raw:
         iri = raw["iri"]
         ont_id = raw.get("id", "")  # UUID (dc:identifier)
         tbox_iri = f"{iri}/tbox"
-        stats_dict = await store.get_ontology_stats(tbox_iri)
+        stats_dict = await store.get_ontology_stats(tbox_iri, dataset=dataset)
         items.append(Ontology(
             id=ont_id,
             iri=iri,
@@ -105,14 +106,18 @@ async def list_ontologies(
 # ── 생성 ──────────────────────────────────────────────────────────────────
 
 @router.post("", response_model=Ontology, status_code=201)
-async def create_ontology(request: Request, body: OntologyCreate) -> Ontology:
+async def create_ontology(
+    request: Request,
+    body: OntologyCreate,
+    dataset: str = Query("ontology"),
+) -> Ontology:
     store = _store(request)
 
     # 중복 IRI 검사
     exists = await store.sparql_ask(f"""
         {_PREFIXES}
         ASK {{ GRAPH ?g {{ <{body.iri}> a owl:Ontology }} }}
-    """)
+    """, dataset=dataset)
     if exists:
         raise HTTPException(409, detail={"code": "ONTOLOGY_IRI_DUPLICATE", "message": f"IRI already exists: {body.iri}"})
 
@@ -136,7 +141,7 @@ async def create_ontology(request: Request, body: OntologyCreate) -> Ontology:
                 {ver_triple}
             }}
         }}
-    """)
+    """, dataset=dataset)
 
     return Ontology(
         id=ont_id,
@@ -153,15 +158,19 @@ async def create_ontology(request: Request, body: OntologyCreate) -> Ontology:
 # ── 상세 조회 ─────────────────────────────────────────────────────────────
 
 @router.get("/{ontology_id}", response_model=Ontology)
-async def get_ontology(request: Request, ontology_id: str) -> Ontology:
+async def get_ontology(
+    request: Request,
+    ontology_id: str,
+    dataset: str = Query("ontology"),
+) -> Ontology:
     store = _store(request)
-    raw = await _fetch_ontology(store, ontology_id)
+    raw = await _fetch_ontology(store, ontology_id, dataset=dataset)
     if not raw:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     iri = raw["iri"]["value"]
     tbox_iri = f"{iri}/tbox"
-    stats_dict = await store.get_ontology_stats(tbox_iri)
+    stats_dict = await store.get_ontology_stats(tbox_iri, dataset=dataset)
 
     return Ontology(
         id=ontology_id,
@@ -178,9 +187,14 @@ async def get_ontology(request: Request, ontology_id: str) -> Ontology:
 # ── 수정 ──────────────────────────────────────────────────────────────────
 
 @router.put("/{ontology_id}", response_model=Ontology)
-async def update_ontology(request: Request, ontology_id: str, body: OntologyUpdate) -> Ontology:
+async def update_ontology(
+    request: Request,
+    ontology_id: str,
+    body: OntologyUpdate,
+    dataset: str = Query("ontology"),
+) -> Ontology:
     store = _store(request)
-    raw = await _fetch_ontology(store, ontology_id)
+    raw = await _fetch_ontology(store, ontology_id, dataset=dataset)
     if not raw:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
@@ -203,25 +217,29 @@ async def update_ontology(request: Request, ontology_id: str, body: OntologyUpda
             DELETE {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} ?old }} }}
             INSERT {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} "{value}" }} }}
             WHERE  {{ OPTIONAL {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} ?old }} }} }}
-        """)
+        """, dataset=dataset)
 
     await store.sparql_update(f"""
         {_PREFIXES}
         DELETE {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified ?old }} }}
         INSERT {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified "{now}"^^xsd:dateTime }} }}
         WHERE  {{ OPTIONAL {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified ?old }} }} }}
-    """)
+    """, dataset=dataset)
 
-    return await get_ontology(request, ontology_id)
+    return await get_ontology(request, ontology_id, dataset=dataset)
 
 
 # ── 삭제 ──────────────────────────────────────────────────────────────────
 
 @router.delete("/{ontology_id}", status_code=204)
-async def delete_ontology(request: Request, ontology_id: str) -> None:
+async def delete_ontology(
+    request: Request,
+    ontology_id: str,
+    dataset: str = Query("ontology"),
+) -> None:
     store = _store(request)
 
-    raw = await _fetch_ontology(store, ontology_id)
+    raw = await _fetch_ontology(store, ontology_id, dataset=dataset)
     if not raw:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
@@ -233,7 +251,7 @@ async def delete_ontology(request: Request, ontology_id: str) -> None:
             GRAPH ?g {{ ?s ?p ?o }}
             FILTER(STRSTARTS(STR(?g), "{iri}") || STRSTARTS(STR(?g), "urn:source:"))
         }}
-    """)
+    """, dataset=dataset)
 
     for row in graph_rows:
-        await store.delete_graph(_v(row.get("g")))
+        await store.delete_graph(_v(row.get("g")), dataset=dataset)

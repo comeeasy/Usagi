@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import AppShell from '@/components/layout/AppShell'
+import { DatasetProvider } from '@/contexts/DatasetContext'
 import HomePage from '@/pages/HomePage'
 import MCPDebugPage from '@/pages/MCPDebugPage'
 import GraphPage from '@/pages/ontology/GraphPage'
@@ -13,6 +14,7 @@ import SourcesPage from '@/pages/ontology/SourcesPage'
 
 export default function App() {
   return (
+    <DatasetProvider>
     <BrowserRouter>
       <Routes>
         {/* Home — no shell */}
@@ -43,5 +45,6 @@ export default function App() {
         />
       </Routes>
     </BrowserRouter>
+    </DatasetProvider>
   )
 }

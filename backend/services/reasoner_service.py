@@ -40,7 +40,7 @@ class ReasonerService:
         self._job_store: dict[str, dict] = {}
         self._lock = asyncio.Lock()
 
-    async def run(self, ontology_id: str, entity_iris: list[str] | None = None) -> str:
+    async def run(self, ontology_id: str, entity_iris: list[str] | None = None, dataset: str | None = None) -> str:
         """추론 실행 (비동기) → job_id 즉시 반환."""
         job_id = str(uuid4())
         self._job_store[job_id] = {
@@ -48,7 +48,7 @@ class ReasonerService:
             "ontology_id": ontology_id,
             "created_at": _now_iso(),
         }
-        asyncio.create_task(self._execute(job_id, ontology_id, entity_iris))
+        asyncio.create_task(self._execute(job_id, ontology_id, entity_iris, dataset))
         return job_id
 
     async def _execute(
@@ -56,6 +56,7 @@ class ReasonerService:
         job_id: str,
         ontology_id: str,
         entity_iris: list[str] | None,
+        dataset: str | None = None,
     ) -> None:
         """실제 추론 실행 (백그라운드 태스크)."""
         self._job_store[job_id]["status"] = "running"
@@ -71,13 +72,13 @@ class ReasonerService:
                     SELECT ?iri WHERE {{
                         GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }}
                     }} LIMIT 1
-                """)
+                """, dataset=dataset)
                 if not rows:
                     raise ValueError(f"Ontology not found: {ontology_id}")
                 ont_iri = rows[0]['iri']['value']
             tbox_iri = f"{ont_iri}/tbox"
 
-            rdfxml_bytes = await self._store.export_rdfxml(tbox_iri)
+            rdfxml_bytes = await self._store.export_rdfxml(tbox_iri, dataset=dataset)
 
             with tempfile.NamedTemporaryFile(suffix=".owl", delete=False) as f:
                 f.write(rdfxml_bytes)
@@ -107,13 +108,13 @@ class ReasonerService:
 
                 if triples:
                     await self._store.insert_triples(
-                        f"{ont_iri}/inferred", triples
+                        f"{ont_iri}/inferred", triples, dataset=dataset
                     )
 
             # SPARQL 기반 추가 위반 검출 (owlready2 불필요)
-            cardinality_violations = await self._detect_cardinality_violations(tbox_iri)
-            domain_range_violations = await self._detect_domain_range_violations(tbox_iri)
-            disjoint_violations = await self._detect_disjoint_violations(tbox_iri)
+            cardinality_violations = await self._detect_cardinality_violations(tbox_iri, dataset=dataset)
+            domain_range_violations = await self._detect_domain_range_violations(tbox_iri, dataset=dataset)
+            disjoint_violations = await self._detect_disjoint_violations(tbox_iri, dataset=dataset)
             extra = cardinality_violations + domain_range_violations + disjoint_violations
 
             if extra:
@@ -243,7 +244,7 @@ PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
 """
 
     async def _detect_cardinality_violations(
-        self, tbox_iri: str
+        self, tbox_iri: str, dataset: str | None = None
     ) -> list[ReasonerViolation]:
         """owl:maxCardinality / owl:exactCardinality 위반 검출 (SPARQL)."""
         violations: list[ReasonerViolation] = []
@@ -264,7 +265,7 @@ SELECT DISTINCT ?cls ?prop ?n ?rtype WHERE {{
             BIND("exact" AS ?rtype)
         }}
     }}
-}}""")
+}}""", dataset=dataset)
 
         for r in restriction_rows:
             cls_iri = r["cls"]["value"]
@@ -281,7 +282,7 @@ SELECT ?ind (COUNT(DISTINCT ?val) AS ?cnt) WHERE {{
     GRAPH ?g {{ ?ind a <{cls_iri}> . FILTER(isIRI(?ind)) }}
     GRAPH ?g2 {{ ?ind <{prop_iri}> ?val . }}
 }}
-GROUP BY ?ind""")
+GROUP BY ?ind""", dataset=dataset)
 
             for row in count_rows:
                 try:
@@ -316,7 +317,7 @@ GROUP BY ?ind""")
         return violations
 
     async def _detect_domain_range_violations(
-        self, tbox_iri: str
+        self, tbox_iri: str, dataset: str | None = None
     ) -> list[ReasonerViolation]:
         """rdfs:domain / rdfs:range 위반 검출 (SPARQL)."""
         violations: list[ReasonerViolation] = []
@@ -328,7 +329,7 @@ SELECT DISTINCT ?ind ?prop ?domain WHERE {{
     GRAPH ?g {{ ?ind ?prop ?val . FILTER(isIRI(?ind)) }}
     FILTER NOT EXISTS {{ GRAPH ?ga {{ ?ind a ?domain }} }}
     FILTER NOT EXISTS {{ GRAPH ?gt1 {{ ?ind a ?t }} GRAPH ?gt2 {{ ?t rdfs:subClassOf* ?domain }} }}
-}}""")
+}}""", dataset=dataset)
 
         for r in domain_rows:
             violations.append(
@@ -349,7 +350,7 @@ SELECT DISTINCT ?ind ?prop ?range ?val WHERE {{
     GRAPH ?g {{ ?ind ?prop ?val . FILTER(isIRI(?val)) }}
     FILTER NOT EXISTS {{ GRAPH ?ga {{ ?val a ?range }} }}
     FILTER NOT EXISTS {{ GRAPH ?gt1 {{ ?val a ?t }} GRAPH ?gt2 {{ ?t rdfs:subClassOf* ?range }} }}
-}}""")
+}}""", dataset=dataset)
 
         for r in range_rows:
             violations.append(
@@ -366,19 +367,19 @@ SELECT DISTINCT ?ind ?prop ?range ?val WHERE {{
         return violations
 
     async def _detect_disjoint_violations(
-        self, tbox_iri: str
+        self, tbox_iri: str, dataset: str | None = None
     ) -> list[ReasonerViolation]:
         """owl:disjointWith 위반 검출 (SPARQL) — 개체가 서로 disjoint 클래스에 동시에 속하는 경우."""
         violations: list[ReasonerViolation] = []
 
         # 먼저 TBox에 disjointWith 트리플이 있는지 확인
         dw_check = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
-SELECT ?c1 ?c2 WHERE {{ GRAPH <{tbox_iri}> {{ ?c1 owl:disjointWith ?c2 . }} }}""")
+SELECT ?c1 ?c2 WHERE {{ GRAPH <{tbox_iri}> {{ ?c1 owl:disjointWith ?c2 . }} }}""", dataset=dataset)
         logger.info("_detect_disjoint_violations: TBox disjointWith triples=%s", dw_check)
 
         # 개체 타입 확인
         ind_types = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
-SELECT ?ind ?type WHERE {{ GRAPH ?g {{ ?ind a ?type . FILTER(isIRI(?ind)) FILTER(?type != owl:NamedIndividual) }} }}""")
+SELECT ?ind ?type WHERE {{ GRAPH ?g {{ ?ind a ?type . FILTER(isIRI(?ind)) FILTER(?type != owl:NamedIndividual) }} }}""", dataset=dataset)
         logger.info("_detect_disjoint_violations: all individual types=%s", ind_types)
 
         # UNION으로 양방향(A disjointWith B, B disjointWith A) 모두 처리
@@ -393,7 +394,7 @@ SELECT DISTINCT ?ind ?c1 ?c2 WHERE {{
     GRAPH ?g2 {{ ?ind a ?c2 . }}
     FILTER(?c1 != ?c2)
     FILTER(STR(?c1) < STR(?c2))
-}}""")
+}}""", dataset=dataset)
 
         logger.info("_detect_disjoint_violations: tbox=%s rows=%d result=%s", tbox_iri, len(rows), rows)
 

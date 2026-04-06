@@ -6,8 +6,10 @@ import type { ReasonerResult, ReasonerJob, ReasonerRunRequest } from '@/types/re
 export function runReasoner(
   ontologyId: string,
   request: ReasonerRunRequest,
+  dataset?: string,
 ): Promise<ReasonerJob> {
-  return apiPost(`/ontologies/${ontologyId}/reasoner/run`, request)
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiPost(`/ontologies/${ontologyId}/reasoner/run${qs}`, request)
 }
 
 export function getReasonerResult(ontologyId: string, jobId: string): Promise<ReasonerResult> {

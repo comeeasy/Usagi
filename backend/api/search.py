@@ -29,7 +29,7 @@ def _v(term: dict | None, default: str = "") -> str:
     return str(term)
 
 
-async def _resolve_tbox(store, ontology_id: str) -> str | None:
+async def _resolve_tbox(store, ontology_id: str, dataset: str | None = None) -> str | None:
     """UUID(dc:identifier)로 온톨로지 IRI 조회 후 tbox IRI 반환. 없으면 None."""
     rows = await store.sparql_select(f"""
         PREFIX owl: <http://www.w3.org/2002/07/owl#>
@@ -37,7 +37,7 @@ async def _resolve_tbox(store, ontology_id: str) -> str | None:
         SELECT ?iri WHERE {{
             GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }}
         }} LIMIT 1
-    """)
+    """, dataset=dataset)
     if not rows:
         return None
     return f"{rows[0]['iri']['value']}/tbox"
@@ -61,13 +61,14 @@ async def search_entities(
     q: str = Query("", description="키워드"),
     kind: Literal["concept", "individual", "all"] = Query("all"),
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    dataset: str = Query("ontology"),
 ) -> list[dict]:
     """
     rdfs:label 기반 키워드 검색.
     kind: concept(owl:Class) / individual(owl:NamedIndividual) / all
     """
     store = request.app.state.ontology_store
-    tbox = await _resolve_tbox(store, ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
     if tbox is None:
         return []
 
@@ -84,7 +85,7 @@ SELECT DISTINCT ?iri ?label WHERE {{
         OPTIONAL {{ ?iri rdfs:label ?label }}
         {q_filter}
     }}
-}} ORDER BY ?label LIMIT {limit}""")
+}} ORDER BY ?label LIMIT {limit}""", dataset=dataset)
         for r in rows:
             results.append({
                 "iri": _v(r.get("iri")),
@@ -103,10 +104,10 @@ SELECT DISTINCT ?iri ?label WHERE {{
         OPTIONAL {{ ?iri rdfs:label ?label }}
     }}
     {q_filter}
-}} ORDER BY ?label LIMIT {remaining}""")
+}} ORDER BY ?label LIMIT {remaining}""", dataset=dataset)
             for r in rows:
                 type_rows = await store.sparql_select(f"""{_P}
-SELECT ?t WHERE {{ GRAPH ?g {{ <{_v(r.get("iri"))}> rdf:type ?t . FILTER(?t != owl:NamedIndividual) FILTER(isIRI(?t)) }} }}""")
+SELECT ?t WHERE {{ GRAPH ?g {{ <{_v(r.get("iri"))}> rdf:type ?t . FILTER(?t != owl:NamedIndividual) FILTER(isIRI(?t)) }} }}""", dataset=dataset)
                 results.append({
                     "iri": _v(r.get("iri")),
                     "label": _v(r.get("label")) or _v(r.get("iri")),
@@ -127,10 +128,11 @@ async def search_relations(
     domain_iri: str | None = Query(None, alias="domain"),
     range_iri: str | None = Query(None, alias="range"),
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    dataset: str = Query("ontology"),
 ) -> list[dict]:
     """ObjectProperty + DataProperty 키워드 검색."""
     store = request.app.state.ontology_store
-    tbox = await _resolve_tbox(store, ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
     if tbox is None:
         return []
 
@@ -149,15 +151,15 @@ SELECT DISTINCT ?iri ?label ?kind WHERE {{
         {domain_filter}
         {range_filter}
     }}
-}} ORDER BY ?label LIMIT {limit}""")
+}} ORDER BY ?label LIMIT {limit}""", dataset=dataset)
 
     results = []
     for r in rows:
         iri = _v(r.get("iri"))
         domain_rows = await store.sparql_select(
-            f"{_P}\nSELECT ?d WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} }}")
+            f"{_P}\nSELECT ?d WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} }}", dataset=dataset)
         range_rows = await store.sparql_select(
-            f"{_P}\nSELECT ?r WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?r }} }}")
+            f"{_P}\nSELECT ?r WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?r }} }}", dataset=dataset)
         results.append({
             "iri": iri,
             "label": _v(r.get("label")) or iri,
@@ -172,7 +174,12 @@ SELECT DISTINCT ?iri ?label ?kind WHERE {{
 # ── 벡터 검색 ─────────────────────────────────────────────────────────────
 
 @router.post("/vector")
-async def vector_search(request: Request, ontology_id: str, body: VectorSearchRequest) -> list[dict]:
+async def vector_search(
+    request: Request,
+    ontology_id: str,
+    body: VectorSearchRequest,
+    dataset: str = Query("ontology"),
+) -> list[dict]:
     """
     fastembed 기반 코사인 유사도 검색.
     인덱스 미구축 또는 빈 온톨로지 시 키워드 검색으로 폴백.
@@ -180,7 +187,7 @@ async def vector_search(request: Request, ontology_id: str, body: VectorSearchRe
     store = request.app.state.ontology_store
     manager = getattr(request.app.state, "vector_index_manager", None)
 
-    tbox = await _resolve_tbox(store, ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
     if tbox is None:
         return []
 
@@ -195,4 +202,4 @@ async def vector_search(request: Request, ontology_id: str, body: VectorSearchRe
             pass  # 임베딩 모델 로드 실패 등 → 폴백
 
     # 폴백: 키워드 검색
-    return await search_entities(request, ontology_id, q=body.text, kind="all", limit=body.k)
+    return await search_entities(request, ontology_id, q=body.text, kind="all", limit=body.k, dataset=dataset)

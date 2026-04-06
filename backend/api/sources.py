@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 
 from models.source import BackingSource, BackingSourceCreate, BackingSourceUpdate, CSVConfig
 
@@ -127,6 +127,7 @@ async def upload_csv(
     ontology_id: str,
     source_id: str,
     file: UploadFile = File(...),
+    dataset: str = Query("ontology"),
 ) -> dict:
     """
     CSV 파일 업로드 → Oxigraph + Neo4j 즉시 import.
@@ -164,7 +165,7 @@ async def upload_csv(
 
     try:
         preview = await importer.preview(file_path, source.config)
-        result = await importer.import_file(file_path, source, ontology_id)
+        result = await importer.import_file(file_path, source, ontology_id, dataset=dataset)
     except Exception as exc:
         logger.error("CSV import failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Import failed: {exc}") from exc
@@ -189,6 +190,7 @@ async def trigger_sync(
     request: Request,
     ontology_id: str,
     source_id: str,
+    dataset: str = Query("ontology"),
 ) -> dict:
     """
     수동 즉시 동기화 트리거.
@@ -218,7 +220,7 @@ async def trigger_sync(
         from services.ingestion.csv_importer import CSVImporter
         importer = CSVImporter(store)
         try:
-            result = await importer.import_file(file_path, source, ontology_id)
+            result = await importer.import_file(file_path, source, ontology_id, dataset=dataset)
         except Exception as exc:
             logger.error("CSV re-import failed: %s", exc)
             raise HTTPException(status_code=500, detail=f"Import failed: {exc}") from exc

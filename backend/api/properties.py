@@ -55,7 +55,7 @@ _CHAR_FULL = {
 }
 
 
-async def _resolve_tbox(store, ontology_id: str) -> str | None:
+async def _resolve_tbox(store, ontology_id: str, dataset: str | None = None) -> str | None:
     """UUID(dc:identifier)로 온톨로지 IRI 조회 후 tbox IRI 반환. 없으면 None."""
     rows = await store.sparql_select(f"""
         PREFIX owl: <http://www.w3.org/2002/07/owl#>
@@ -63,7 +63,7 @@ async def _resolve_tbox(store, ontology_id: str) -> str | None:
         SELECT ?iri WHERE {{
             GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }}
         }} LIMIT 1
-    """)
+    """, dataset=dataset)
     if not rows:
         return None
     return f"{rows[0]['iri']['value']}/tbox"
@@ -95,7 +95,7 @@ def _xsd_short(full: str) -> str:
 
 # ── 내부 fetch 헬퍼 ──────────────────────────────────────────────────────
 
-async def _fetch_object_property(store, iri: str, ontology_id: str, tbox: str) -> ObjectProperty:
+async def _fetch_object_property(store, iri: str, ontology_id: str, tbox: str, dataset: str | None = None) -> ObjectProperty:
     basic = await store.sparql_select(f"""{_P}
 SELECT ?label ?comment ?inv WHERE {{
     GRAPH <{tbox}> {{ <{iri}> a owl:ObjectProperty .
@@ -103,18 +103,18 @@ SELECT ?label ?comment ?inv WHERE {{
         OPTIONAL {{ <{iri}> rdfs:comment ?comment }}
         OPTIONAL {{ <{iri}> owl:inverseOf ?inv }}
     }}
-}} LIMIT 1""")
+}} LIMIT 1""", dataset=dataset)
     b = basic[0] if basic else {}
     label = _v(b.get("label")) or iri
     comment = _v(b.get("comment")) or None
     inverse_of = _v(b.get("inv")) or None
 
     domain = [_v(r.get("d")) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?d WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} }}")]
+        f"{_P}\nSELECT ?d WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} }}", dataset=dataset)]
     range_ = [_v(r.get("r")) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?r WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?r . FILTER(isIRI(?r)) }} }}")]
+        f"{_P}\nSELECT ?r WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?r . FILTER(isIRI(?r)) }} }}", dataset=dataset)]
     super_props = [_v(r.get("sp")) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?sp WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subPropertyOf ?sp . FILTER(isIRI(?sp)) }} }}")]
+        f"{_P}\nSELECT ?sp WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subPropertyOf ?sp . FILTER(isIRI(?sp)) }} }}", dataset=dataset)]
 
     char_rows = await store.sparql_select(f"""{_P}
 SELECT ?t WHERE {{
@@ -124,7 +124,7 @@ SELECT ?t WHERE {{
                       owl:TransitiveProperty, owl:SymmetricProperty,
                       owl:AsymmetricProperty, owl:ReflexiveProperty, owl:IrreflexiveProperty))
     }}
-}}""")
+}}""", dataset=dataset)
     characteristics = [_CHAR_FULL[_v(r.get("t"))] for r in char_rows if _v(r.get("t")) in _CHAR_FULL]
 
     return ObjectProperty(
@@ -134,25 +134,25 @@ SELECT ?t WHERE {{
     )
 
 
-async def _fetch_data_property(store, iri: str, ontology_id: str, tbox: str) -> DataProperty:
+async def _fetch_data_property(store, iri: str, ontology_id: str, tbox: str, dataset: str | None = None) -> DataProperty:
     basic = await store.sparql_select(f"""{_P}
 SELECT ?label ?comment WHERE {{
     GRAPH <{tbox}> {{ <{iri}> a owl:DatatypeProperty .
         OPTIONAL {{ <{iri}> rdfs:label ?label }}
         OPTIONAL {{ <{iri}> rdfs:comment ?comment }}
     }}
-}} LIMIT 1""")
+}} LIMIT 1""", dataset=dataset)
     b = basic[0] if basic else {}
 
     domain = [_v(r.get("d")) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?d WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} }}")]
+        f"{_P}\nSELECT ?d WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} }}", dataset=dataset)]
     range_ = [_xsd_short(_v(r.get("r"))) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?r WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?r }} }}")
+        f"{_P}\nSELECT ?r WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?r }} }}", dataset=dataset)
                if r.get("r")]
     super_props = [_v(r.get("sp")) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?sp WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subPropertyOf ?sp . FILTER(isIRI(?sp)) }} }}")]
+        f"{_P}\nSELECT ?sp WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subPropertyOf ?sp . FILTER(isIRI(?sp)) }} }}", dataset=dataset)]
     is_functional = await store.sparql_ask(
-        f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty }} }}")
+        f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty }} }}", dataset=dataset)
 
     return DataProperty(
         iri=iri, ontology_id=ontology_id,
@@ -174,9 +174,10 @@ async def list_properties(
     range_: str | None = Query(None, alias="range"),
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    dataset: str = Query("ontology"),
 ) -> dict:
     store = request.app.state.ontology_store
-    tbox = await _resolve_tbox(store, ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
     if tbox is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     offset = (page - 1) * page_size
@@ -188,12 +189,12 @@ async def list_properties(
         cnt = await store.sparql_select(f"""{_P}
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
     GRAPH <{tbox}> {{ ?iri a {owl_type} . {domain_f} {range_f} }}
-}}""")
+}}""", dataset=dataset)
         total = int(_v(cnt[0].get("total"), "0")) if cnt else 0
         rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri WHERE {{
     GRAPH <{tbox}> {{ ?iri a {owl_type} . {domain_f} {range_f} }}
-}} ORDER BY ?iri LIMIT {page_size} OFFSET {offset}""")
+}} ORDER BY ?iri LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
         return total, rows
 
     items: list = []
@@ -203,13 +204,13 @@ SELECT DISTINCT ?iri WHERE {{
         obj_total, obj_rows = await fetch_type("owl:ObjectProperty")
         total += obj_total
         for r in obj_rows:
-            items.append(await _fetch_object_property(store, _v(r.get("iri")), ontology_id, tbox))
+            items.append(await _fetch_object_property(store, _v(r.get("iri")), ontology_id, tbox, dataset=dataset))
 
     if kind != "object":
         data_total, data_rows = await fetch_type("owl:DatatypeProperty")
         total += data_total
         for r in data_rows:
-            items.append(await _fetch_data_property(store, _v(r.get("iri")), ontology_id, tbox))
+            items.append(await _fetch_data_property(store, _v(r.get("iri")), ontology_id, tbox, dataset=dataset))
 
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
@@ -221,16 +222,17 @@ async def create_property(
     request: Request,
     ontology_id: str,
     body: Union[ObjectPropertyCreate, DataPropertyCreate],
+    dataset: str = Query("ontology"),
 ):
     store = request.app.state.ontology_store
-    tbox = await _resolve_tbox(store, ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
     if tbox is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     dup = await store.sparql_ask(f"""{_P}
 ASK {{ GRAPH <{tbox}> {{
     {{ <{body.iri}> a owl:ObjectProperty }} UNION {{ <{body.iri}> a owl:DatatypeProperty }}
-}} }}""")
+}} }}""", dataset=dataset)
     if dup:
         raise HTTPException(409, detail={"code": "PROPERTY_IRI_DUPLICATE", "message": f"IRI exists: {body.iri}"})
 
@@ -265,32 +267,37 @@ ASK {{ GRAPH <{tbox}> {{
     await store.sparql_update(f"""{_P}
 INSERT DATA {{ GRAPH <{tbox}> {{
 {chr(10).join(triples)}
-}} }}""")
+}} }}""", dataset=dataset)
 
     if isinstance(body, ObjectPropertyCreate):
-        return await _fetch_object_property(store, body.iri, ontology_id, tbox)
-    return await _fetch_data_property(store, body.iri, ontology_id, tbox)
+        return await _fetch_object_property(store, body.iri, ontology_id, tbox, dataset=dataset)
+    return await _fetch_data_property(store, body.iri, ontology_id, tbox, dataset=dataset)
 
 
 # ── 상세 조회 ─────────────────────────────────────────────────────────────
 
 @router.get("/{iri:path}")
-async def get_property(request: Request, ontology_id: str, iri: str):
+async def get_property(
+    request: Request,
+    ontology_id: str,
+    iri: str,
+    dataset: str = Query("ontology"),
+):
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = await _resolve_tbox(store, ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
     if tbox is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    is_obj = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:ObjectProperty }} }}")
-    is_data = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:DatatypeProperty }} }}")
+    is_obj = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:ObjectProperty }} }}", dataset=dataset)
+    is_data = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:DatatypeProperty }} }}", dataset=dataset)
 
     if not is_obj and not is_data:
         raise HTTPException(404, detail={"code": "PROPERTY_NOT_FOUND", "message": f"Not found: {iri}"})
 
-    return (await _fetch_object_property(store, iri, ontology_id, tbox)
+    return (await _fetch_object_property(store, iri, ontology_id, tbox, dataset=dataset)
             if is_obj else
-            await _fetch_data_property(store, iri, ontology_id, tbox))
+            await _fetch_data_property(store, iri, ontology_id, tbox, dataset=dataset))
 
 
 # ── 수정 ──────────────────────────────────────────────────────────────────
@@ -301,15 +308,16 @@ async def update_property(
     ontology_id: str,
     iri: str,
     body: Union[ObjectPropertyUpdate, DataPropertyUpdate],
+    dataset: str = Query("ontology"),
 ):
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = await _resolve_tbox(store, ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
     if tbox is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    is_obj = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:ObjectProperty }} }}")
-    is_data = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:DatatypeProperty }} }}")
+    is_obj = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:ObjectProperty }} }}", dataset=dataset)
+    is_data = await store.sparql_ask(f"{_P}\nASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:DatatypeProperty }} }}", dataset=dataset)
     if not is_obj and not is_data:
         raise HTTPException(404, detail={"code": "PROPERTY_NOT_FOUND", "message": f"Not found: {iri}"})
 
@@ -319,17 +327,17 @@ async def update_property(
         await store.sparql_update(f"""{_P}
 DELETE {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }}
 INSERT {{ GRAPH <{tbox}> {{ <{iri}> {pred} "{_esc(new_val)}" }} }}
-WHERE  {{ OPTIONAL {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }} }}""")
+WHERE  {{ OPTIONAL {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }} }}""", dataset=dataset)
 
     async def _replace_iris(pred: str, iris: list[str] | None):
         if iris is None:
             return
         await store.sparql_update(f"""{_P}
 DELETE {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }}
-WHERE  {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }}""")
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }}""", dataset=dataset)
         if iris:
             triples = "\n".join([f"    <{iri}> {pred} <{v}> ." for v in iris])
-            await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{triples}\n}} }}")
+            await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{triples}\n}} }}", dataset=dataset)
 
     await _replace("rdfs:label", body.label)
     await _replace("rdfs:comment", body.comment)
@@ -339,22 +347,22 @@ WHERE  {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }}""")
     if body.range is not None:
         await store.sparql_update(f"""{_P}
 DELETE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?o }} }}
-WHERE  {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?o }} }}""")
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> rdfs:range ?o }} }}""", dataset=dataset)
         if body.range:
             if is_obj:
                 triples = "\n".join([f"    <{iri}> rdfs:range <{r}> ." for r in body.range])
             else:
                 triples = "\n".join([f"    <{iri}> rdfs:range <{_xsd_full(r)}> ." for r in body.range])
-            await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{triples}\n}} }}")
+            await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{triples}\n}} }}", dataset=dataset)
 
     if is_obj and isinstance(body, ObjectPropertyUpdate):
         if body.inverse_of is not None:
             await store.sparql_update(f"""{_P}
 DELETE {{ GRAPH <{tbox}> {{ <{iri}> owl:inverseOf ?o }} }}
-WHERE  {{ GRAPH <{tbox}> {{ <{iri}> owl:inverseOf ?o }} }}""")
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> owl:inverseOf ?o }} }}""", dataset=dataset)
             if body.inverse_of:
                 await store.sparql_update(
-                    f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{ <{iri}> owl:inverseOf <{body.inverse_of}> . }} }}")
+                    f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{ <{iri}> owl:inverseOf <{body.inverse_of}> . }} }}", dataset=dataset)
 
         if body.characteristics is not None:
             await store.sparql_update(f"""{_P}
@@ -362,46 +370,51 @@ DELETE {{ GRAPH <{tbox}> {{ <{iri}> a ?t }} }}
 WHERE  {{ GRAPH <{tbox}> {{ <{iri}> a ?t .
     FILTER(?t IN (owl:FunctionalProperty, owl:InverseFunctionalProperty,
                   owl:TransitiveProperty, owl:SymmetricProperty,
-                  owl:AsymmetricProperty, owl:ReflexiveProperty, owl:IrreflexiveProperty)) }} }}""")
+                  owl:AsymmetricProperty, owl:ReflexiveProperty, owl:IrreflexiveProperty)) }} }}""", dataset=dataset)
             if body.characteristics:
                 triples = "\n".join([
                     f"    <{iri}> a {_CHAR_MAP[c]} ."
                     for c in body.characteristics if c in _CHAR_MAP
                 ])
-                await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{triples}\n}} }}")
+                await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{triples}\n}} }}", dataset=dataset)
 
     if is_data and isinstance(body, DataPropertyUpdate) and body.is_functional is not None:
         if body.is_functional:
             await store.sparql_update(
-                f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty . }} }}")
+                f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty . }} }}", dataset=dataset)
         else:
             await store.sparql_update(f"""{_P}
 DELETE {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty }} }}
-WHERE  {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty }} }}""")
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> a owl:FunctionalProperty }} }}""", dataset=dataset)
 
-    return await get_property(request, ontology_id, iri)
+    return await get_property(request, ontology_id, iri, dataset=dataset)
 
 
 # ── 삭제 ──────────────────────────────────────────────────────────────────
 
 @router.delete("/{iri:path}", status_code=204)
-async def delete_property(request: Request, ontology_id: str, iri: str) -> None:
+async def delete_property(
+    request: Request,
+    ontology_id: str,
+    iri: str,
+    dataset: str = Query("ontology"),
+) -> None:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = await _resolve_tbox(store, ontology_id)
+    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
     if tbox is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     exists = await store.sparql_ask(f"""{_P}
 ASK {{ GRAPH <{tbox}> {{
     {{ <{iri}> a owl:ObjectProperty }} UNION {{ <{iri}> a owl:DatatypeProperty }}
-}} }}""")
+}} }}""", dataset=dataset)
     if not exists:
         raise HTTPException(404, detail={"code": "PROPERTY_NOT_FOUND", "message": f"Not found: {iri}"})
 
     await store.sparql_update(f"""{_P}
 DELETE {{ GRAPH <{tbox}> {{ <{iri}> ?p ?o }} }}
-WHERE  {{ GRAPH <{tbox}> {{ <{iri}> ?p ?o }} }}""")
+WHERE  {{ GRAPH <{tbox}> {{ <{iri}> ?p ?o }} }}""", dataset=dataset)
     await store.sparql_update(f"""{_P}
 DELETE {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}
-WHERE  {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}""")
+WHERE  {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}""", dataset=dataset)

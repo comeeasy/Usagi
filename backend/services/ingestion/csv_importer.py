@@ -84,6 +84,7 @@ class CSVImporter:
         file_path: Path,
         source: Any,  # BackingSource (source_type == 'csv-file')
         ontology_id: str,
+        dataset: str | None = None,
     ) -> dict:
         """CSV를 Fuseki에 import하고 결과를 반환."""
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -103,7 +104,7 @@ class CSVImporter:
             source.id, len(records), ontology_id,
         )
 
-        triples_inserted = await self._import_to_fuseki(records, source, named_graph, timestamp)
+        triples_inserted = await self._import_to_fuseki(records, source, named_graph, timestamp, dataset=dataset)
 
         logger.info(
             "CSV import done: triples=%d, graph=%s",
@@ -121,10 +122,11 @@ class CSVImporter:
         source: Any,
         named_graph: str,
         timestamp: str,
+        dataset: str | None = None,
     ) -> int:
         """CSV 레코드를 Triple로 변환하여 Fuseki Named Graph에 삽입."""
         # 기존 Named Graph DROP (재적재 원자적 교체)
-        await self._store.delete_graph(named_graph)
+        await self._store.delete_graph(named_graph, dataset=dataset)
 
         rdf_type_node = _RDF_TYPE
         concept_node = URIRef(source.concept_iri)
@@ -162,7 +164,7 @@ class CSVImporter:
         total = 0
         for i in range(0, len(triples), _BATCH_SIZE):
             batch = triples[i:i + _BATCH_SIZE]
-            await self._store.insert_triples(named_graph, batch)
+            await self._store.insert_triples(named_graph, batch, dataset=dataset)
             total += len(batch)
 
         return total

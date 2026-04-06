@@ -12,7 +12,7 @@ Neo4j Cypher BFS 대신 SPARQL iterative BFS 로 구현한다.
   5. { nodes: [...], edges: [...] } 반환
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/ontologies/{ontology_id}", tags=["subgraph"])
@@ -35,7 +35,7 @@ def _v(term, default: str = "") -> str:
     return str(term)
 
 
-async def _resolve_ont_iri(store, ontology_id: str) -> str | None:
+async def _resolve_ont_iri(store, ontology_id: str, dataset: str | None = None) -> str | None:
     """UUID(dc:identifier)로 온톨로지 IRI 조회."""
     rows = await store.sparql_select(f"""
         {_PREFIXES}
@@ -45,7 +45,7 @@ async def _resolve_ont_iri(store, ontology_id: str) -> str | None:
                      dc:identifier "{ontology_id}" .
             }}
         }} LIMIT 1
-    """)
+    """, dataset=dataset)
     return _v(rows[0].get("iri")) if rows else None
 
 
@@ -53,7 +53,7 @@ def _values_clause(iris: set[str]) -> str:
     return " ".join(f"<{iri}>" for iri in iris)
 
 
-async def _bfs_expand(store, frontier: set[str], visited: set[str]) -> set[str]:
+async def _bfs_expand(store, frontier: set[str], visited: set[str], dataset: str | None = None) -> set[str]:
     """frontier 에서 직/역방향 이웃 IRI 를 SPARQL 로 조회하여 반환."""
     remaining = _NODE_LIMIT - len(visited)
     if remaining <= 0 or not frontier:
@@ -76,7 +76,7 @@ async def _bfs_expand(store, frontier: set[str], visited: set[str]) -> set[str]:
                 }}
             }}
         }} LIMIT {remaining}
-    """)
+    """, dataset=dataset)
     return {_v(r.get("n")) for r in rows if r.get("n")} - visited
 
 
@@ -86,6 +86,7 @@ async def _get_subgraph_sparql(
     entity_iris: list[str],
     depth: int,
     ont_iri: str | None,
+    dataset: str | None = None,
 ) -> dict:
     depth = max(1, min(depth, 5))
 
@@ -97,7 +98,7 @@ async def _get_subgraph_sparql(
         for _ in range(depth):
             if not frontier or len(visited) >= _NODE_LIMIT:
                 break
-            new_iris = await _bfs_expand(store, frontier, visited)
+            new_iris = await _bfs_expand(store, frontier, visited, dataset=dataset)
             visited |= new_iris
             frontier = new_iris
     else:
@@ -114,7 +115,7 @@ async def _get_subgraph_sparql(
                     )
                 }}
             }} LIMIT {_NODE_LIMIT}
-        """)
+        """, dataset=dataset)
         visited = {_v(r.get("n")) for r in rows if r.get("n")}
 
     visited_list = [iri for iri in visited if iri][:_NODE_LIMIT]
@@ -133,7 +134,7 @@ async def _get_subgraph_sparql(
                     FILTER(?type IN (owl:Class, owl:NamedIndividual))
                 }}
             }}
-        """)
+        """, dataset=dataset)
         for r in detail_rows:
             iri = _v(r.get("n"))
             if not iri or iri in nodes:
@@ -176,7 +177,7 @@ async def _get_subgraph_sparql(
                     OPTIONAL {{ ?p rdfs:label ?pLabel }}
                 }}
             }}
-        """)
+        """, dataset=dataset)
         for r in rows:
             s = _v(r.get("s"))
             p = _v(r.get("p"))
@@ -205,11 +206,16 @@ class SubgraphRequest(BaseModel):
 
 
 @router.post("/subgraph")
-async def get_subgraph(request: Request, ontology_id: str, body: SubgraphRequest) -> dict:
+async def get_subgraph(
+    request: Request,
+    ontology_id: str,
+    body: SubgraphRequest,
+    dataset: str = Query("ontology"),
+) -> dict:
     """
     SPARQL iterative BFS 로 서브그래프 탐색.
     반환: { nodes: [...], edges: [...] }
     """
     store = request.app.state.ontology_store
-    ont_iri = await _resolve_ont_iri(store, ontology_id)
-    return await _get_subgraph_sparql(store, ontology_id, body.entity_iris, body.depth, ont_iri)
+    ont_iri = await _resolve_ont_iri(store, ontology_id, dataset=dataset)
+    return await _get_subgraph_sparql(store, ontology_id, body.entity_iris, body.depth, ont_iri, dataset=dataset)

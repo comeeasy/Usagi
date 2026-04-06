@@ -37,7 +37,7 @@ async def store():
 def test_store_init(store):
     """OntologyStore 초기화 성공."""
     assert store is not None
-    assert store._query_url == f"{FUSEKI_URL}/{DATASET}/sparql"
+    assert store._query_url() == f"{FUSEKI_URL}/{DATASET}/sparql"
 
 
 async def test_insert_and_select_triples(store):
