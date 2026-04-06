@@ -127,7 +127,7 @@ async def upload_csv(
     ontology_id: str,
     source_id: str,
     file: UploadFile = File(...),
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     """
     CSV 파일 업로드 → Oxigraph + Neo4j 즉시 import.
@@ -190,7 +190,7 @@ async def trigger_sync(
     request: Request,
     ontology_id: str,
     source_id: str,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     """
     수동 즉시 동기화 트리거.

@@ -166,7 +166,7 @@ async def list_properties(
     range_: str | None = Query(None, alias="range"),
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     store = request.app.state.ontology_store
     kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
@@ -214,7 +214,7 @@ async def create_property(
     request: Request,
     ontology_id: str,
     body: Union[ObjectPropertyCreate, DataPropertyCreate],
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ):
     store = request.app.state.ontology_store
     kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
@@ -273,7 +273,7 @@ async def get_property(
     request: Request,
     ontology_id: str,
     iri: str,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ):
     store = request.app.state.ontology_store
     iri = unquote(iri)
@@ -300,7 +300,7 @@ async def update_property(
     ontology_id: str,
     iri: str,
     body: Union[ObjectPropertyUpdate, DataPropertyUpdate],
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ):
     store = request.app.state.ontology_store
     iri = unquote(iri)
@@ -389,7 +389,7 @@ async def delete_property(
     request: Request,
     ontology_id: str,
     iri: str,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> None:
     store = request.app.state.ontology_store
     iri = unquote(iri)

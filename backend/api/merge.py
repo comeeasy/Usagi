@@ -47,7 +47,7 @@ async def preview_merge(
     request: Request,
     ontology_id: str,
     body: MergePreviewRequest,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     """두 온톨로지 kg 그래프를 비교해 충돌 목록과 자동 병합 가능 항목을 반환."""
     store = request.app.state.ontology_store
@@ -62,7 +62,7 @@ async def merge_ontologies(
     request: Request,
     ontology_id: str,
     body: MergeRequest,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     """소스 온톨로지를 타겟 kg 그래프로 병합."""
     store = request.app.state.ontology_store

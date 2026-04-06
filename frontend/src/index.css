@@ -21,3 +21,34 @@ body {
   color: var(--color-text-primary);
   font-family: 'Inter', sans-serif;
 }
+
+/* Import file: determinate upload bar */
+.import-progress {
+  accent-color: var(--color-primary);
+}
+
+/* Import file: server/Fuseki phase (no byte-level progress) */
+.import-progress-indeterminate-track {
+  background-color: var(--color-border);
+}
+
+.import-progress-indeterminate-fill {
+  height: 100%;
+  width: 40%;
+  border-radius: 0.25rem;
+  background: linear-gradient(
+    90deg,
+    var(--color-primary),
+    var(--color-info)
+  );
+  animation: import-indeterminate-slide 1.35s ease-in-out infinite;
+}
+
+@keyframes import-indeterminate-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}

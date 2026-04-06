@@ -9,6 +9,7 @@ api/concepts.py — Concept(owl:Class) CRUD 라우터
   DELETE /ontologies/{id}/concepts/{iri}     Concept 삭제
 """
 
+import asyncio
 from typing import Annotated
 from urllib.parse import unquote
 
@@ -26,6 +27,7 @@ PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
 PREFIX dc:   <http://purl.org/dc/terms/>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 """
 
 
@@ -36,6 +38,28 @@ async def _resolve_kg_graph(store, ontology_id: str, dataset: str | None = None)
 
 def _esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+# 임포트·LOD 호환: owl:Class, rdfs:Class, SKOS Concept
+_CLASS_PATTERN = """
+    { ?iri a owl:Class }
+    UNION
+    { ?iri a rdfs:Class . FILTER NOT EXISTS { ?iri a owl:Ontology } }
+    UNION
+    { ?iri a skos:Concept }
+"""
+
+
+def _concept_keyword_filter(q: str | None) -> str:
+    """검색어가 있을 때 IRI(로컬 이름)·rdfs:label 둘 다 매칭. 라벨 없는 클래스도 검색 가능."""
+    if not q or not str(q).strip():
+        return ""
+    ql = _esc(q.lower())
+    return f"""
+    FILTER(
+      CONTAINS(LCASE(STR(?iri)), "{ql}") ||
+      (bound(?label) && CONTAINS(LCASE(STR(?label)), "{ql}"))
+    )"""
 
 
 def _v(term: dict | None, default: str = "") -> str:
@@ -78,7 +102,7 @@ async def list_concepts(
     super_class: str | None = Query(None, alias="superClass"),
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     store = request.app.state.ontology_store
     kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
@@ -87,26 +111,29 @@ async def list_concepts(
     offset = (page - 1) * page_size
 
     extra = ""
-    if q:
-        extra += f'\n    FILTER(CONTAINS(LCASE(STR(?label)), "{_esc(q.lower())}"))'
+    extra += _concept_keyword_filter(q)
     if super_class:
         extra += f"\n    ?iri rdfs:subClassOf <{super_class}> ."
 
     count_rows = await store.sparql_select(f"""{_P}
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
-    GRAPH <{kg}> {{ ?iri a owl:Class . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
+    GRAPH <{kg}> {{
+        {_CLASS_PATTERN}
+        OPTIONAL {{ ?iri rdfs:label ?label }}
+        {extra}
+    }}
 }}""", dataset=dataset)
     total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
 
     rows = await store.sparql_select(f"""{_P}
 SELECT ?iri ?label ?comment (COUNT(DISTINCT ?ind) AS ?individualCount) WHERE {{
     GRAPH <{kg}> {{
-        ?iri a owl:Class .
+        {_CLASS_PATTERN}
         OPTIONAL {{ ?iri rdfs:label ?label }}
         OPTIONAL {{ ?iri rdfs:comment ?comment }}
         {extra}
     }}
-    OPTIONAL {{ ?ind rdf:type ?iri }}
+    OPTIONAL {{ GRAPH <{kg}> {{ ?ind rdf:type ?iri }} }}
 }} GROUP BY ?iri ?label ?comment
 ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
 
@@ -130,7 +157,7 @@ async def create_concept(
     request: Request,
     ontology_id: str,
     body: ConceptCreate,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> Concept:
     store = request.app.state.ontology_store
     kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
@@ -174,7 +201,7 @@ async def get_concept(
     request: Request,
     ontology_id: str,
     iri: str,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> Concept:
     store = request.app.state.ontology_store
     iri = unquote(iri)
@@ -185,29 +212,20 @@ async def get_concept(
     if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{kg}> {{ <{iri}> a owl:Class }} }}", dataset=dataset):
         raise HTTPException(404, detail={"code": "CONCEPT_NOT_FOUND", "message": f"Not found: {iri}"})
 
-    basic = await store.sparql_select(f"""{_P}
+    basic_q = f"""{_P}
 SELECT ?label ?comment WHERE {{
     GRAPH <{kg}> {{ <{iri}> a owl:Class .
         OPTIONAL {{ <{iri}> rdfs:label ?label }}
         OPTIONAL {{ <{iri}> rdfs:comment ?comment }}
     }}
-}} LIMIT 1""", dataset=dataset)
-    label = _v(basic[0].get("label")) if basic else iri
-    comment = _v(basic[0].get("comment")) or None if basic else None
-
-    sc_rows = await store.sparql_select(f"""{_P}
-SELECT ?sc WHERE {{ GRAPH <{kg}> {{ <{iri}> rdfs:subClassOf ?sc . FILTER(isIRI(?sc)) }} }}""", dataset=dataset)
-    super_classes = [_v(r.get("sc")) for r in sc_rows]
-
-    ec_rows = await store.sparql_select(f"""{_P}
-SELECT ?ec WHERE {{ GRAPH <{kg}> {{ <{iri}> owl:equivalentClass ?ec . FILTER(isIRI(?ec)) }} }}""", dataset=dataset)
-    equivalent_classes = [_v(r.get("ec")) for r in ec_rows]
-
-    dw_rows = await store.sparql_select(f"""{_P}
-SELECT ?dw WHERE {{ GRAPH <{kg}> {{ <{iri}> owl:disjointWith ?dw . FILTER(isIRI(?dw)) }} }}""", dataset=dataset)
-    disjoint_with = [_v(r.get("dw")) for r in dw_rows]
-
-    rest_rows = await store.sparql_select(f"""{_P}
+}} LIMIT 1"""
+    sc_q = f"""{_P}
+SELECT ?sc WHERE {{ GRAPH <{kg}> {{ <{iri}> rdfs:subClassOf ?sc . FILTER(isIRI(?sc)) }} }}"""
+    ec_q = f"""{_P}
+SELECT ?ec WHERE {{ GRAPH <{kg}> {{ <{iri}> owl:equivalentClass ?ec . FILTER(isIRI(?ec)) }} }}"""
+    dw_q = f"""{_P}
+SELECT ?dw WHERE {{ GRAPH <{kg}> {{ <{iri}> owl:disjointWith ?dw . FILTER(isIRI(?dw)) }} }}"""
+    rest_q = f"""{_P}
 SELECT ?bn ?prop ?svf ?avf ?hv ?min ?max ?exact WHERE {{
     GRAPH <{kg}> {{
         <{iri}> rdfs:subClassOf ?bn . ?bn a owl:Restriction ; owl:onProperty ?prop .
@@ -219,7 +237,25 @@ SELECT ?bn ?prop ?svf ?avf ?hv ?min ?max ?exact WHERE {{
         OPTIONAL {{ ?bn owl:qualifiedCardinality ?exact }}
         FILTER(isBlank(?bn))
     }}
-}}""", dataset=dataset)
+}}"""
+    cnt_q = f"""{_P}
+SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE {{ GRAPH <{kg}> {{ ?ind rdf:type <{iri}> }} }}"""
+
+    basic, sc_rows, ec_rows, dw_rows, rest_rows, cnt_rows = await asyncio.gather(
+        store.sparql_select(basic_q, dataset=dataset),
+        store.sparql_select(sc_q,   dataset=dataset),
+        store.sparql_select(ec_q,   dataset=dataset),
+        store.sparql_select(dw_q,   dataset=dataset),
+        store.sparql_select(rest_q, dataset=dataset),
+        store.sparql_select(cnt_q,  dataset=dataset),
+    )
+
+    label = _v(basic[0].get("label")) if basic else iri
+    comment = _v(basic[0].get("comment")) or None if basic else None
+    super_classes = [_v(r.get("sc")) for r in sc_rows]
+    equivalent_classes = [_v(r.get("ec")) for r in ec_rows]
+    disjoint_with = [_v(r.get("dw")) for r in dw_rows]
+
     restrictions: list[PropertyRestriction] = []
     for r in rest_rows:
         prop = _v(r.get("prop"))
@@ -239,8 +275,6 @@ SELECT ?bn ?prop ?svf ?avf ?hv ?min ?max ?exact WHERE {{
             c = int(_v(r["exact"], "1"))
             restrictions.append(PropertyRestriction(property_iri=prop, type="exactCardinality", value=str(c), cardinality=c))
 
-    cnt_rows = await store.sparql_select(f"""{_P}
-SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE {{ ?ind rdf:type <{iri}> . }}""", dataset=dataset)
     individual_count = int(_v(cnt_rows[0].get("cnt"), "0")) if cnt_rows else 0
 
     return Concept(
@@ -259,7 +293,7 @@ async def update_concept(
     ontology_id: str,
     iri: str,
     body: ConceptUpdate,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> Concept:
     store = request.app.state.ontology_store
     iri = unquote(iri)
@@ -313,7 +347,7 @@ async def delete_concept(
     request: Request,
     ontology_id: str,
     iri: str,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> None:
     store = request.app.state.ontology_store
     iri = unquote(iri)

@@ -28,7 +28,7 @@ async def run_sparql(
     request: Request,
     ontology_id: str,
     body: SPARQLRequest,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     """
     SPARQL SELECT / ASK 실행.

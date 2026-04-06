@@ -273,10 +273,191 @@ dataset 선택을 URL 쿼리스트링(`?dataset=xxx`)에도 반영하면
 
 ### 진행 상태
 
-- [ ] Multi-Step 1: OntologyStore 메서드 dataset 파라미터화
-- [ ] Multi-Step 2: 백엔드 API 11개 엔드포인트 dataset Query param 추가
-- [ ] Multi-Step 3: MCP Tools dataset 파라미터 추가
-- [ ] Multi-Step 4: 백엔드 `/api/v1/datasets` 엔드포인트 추가 (선택)
-- [ ] Multi-Step 5: 프론트엔드 DatasetContext 추가
-- [ ] Multi-Step 6: 프론트엔드 API 클라이언트 dataset 파라미터 추가
-- [ ] Multi-Step 7: DatasetSelector 컴포넌트 구현 + Sidebar 통합
+- [x] Multi-Step 1: OntologyStore 메서드 dataset 파라미터화
+- [x] Multi-Step 2: 백엔드 API 11개 엔드포인트 dataset Query param 추가
+- [x] Multi-Step 3: MCP Tools dataset 파라미터 추가
+- [x] Multi-Step 4: 백엔드 `/api/v1/datasets` 엔드포인트 추가 (선택)
+- [x] Multi-Step 5: 프론트엔드 DatasetContext 추가
+- [x] Multi-Step 6: 프론트엔드 API 클라이언트 dataset 파라미터 추가
+- [x] Multi-Step 7: DatasetSelector 컴포넌트 구현 + Sidebar 통합
+
+---
+
+## Entity / Relation 조회 불가 + 레이턴시 수정 계획
+
+### 현황 파악 (코드 기준)
+
+모든 쓰기/읽기 경로의 실제 그래프 사용 현황:
+
+| 경로 | 저장 그래프 | 읽기 가능? |
+|------|-----------|-----------|
+| `import_file/url/standard` | `{ontology_iri}/kg` | ✅ |
+| `api/concepts` CRUD | `{ontology_iri}/kg` | ✅ |
+| `api/individuals` CRUD | `{ontology_iri}/kg` | ✅ |
+| `api/properties` CRUD | `{ontology_iri}/kg` | ✅ |
+| CSV importer | `{ontology_iri}/kg` | ✅ (이미 올바름) |
+| **MCP `add_individual`** | `urn:source:manual/{ontology_id}` | ❌ |
+| **MCP `add_concept`** | `{ontology_id}/tbox` | ❌ |
+| **MCP `update_individual`** | `urn:source:manual/{ontology_id}` | ❌ |
+
+> CSV importer는 `resolve_kg_graph_iri()`를 통해 이미 `{ontology_iri}/kg`에 씁니다.
+> 문제는 **MCP tools만** 다른 그래프에 씁니다.
+
+---
+
+### 전략: 단일 Named Graph `{ontology_iri}/kg`으로 통일
+
+모든 쓰기가 `{ontology_iri}/kg`에 들어가면, 기존 읽기 쿼리(`GRAPH <{kg}>`) 그대로 작동합니다.
+프로비넌스는 그래프 분리 대신 트리플 속성(`prov:wasAttributedTo`, `prov:generatedAtTime`)으로 기록합니다.
+
+> **MCP에서 `ontology_id`는 UUID가 아니라 온톨로지 IRI 전체 문자열입니다.**
+> `kg_graph_iri("https://infiniq.co.kr/jc3iedm/")` = `"https://infiniq.co.kr/jc3iedm/kg"` ✅
+
+---
+
+### 단계별 작업
+
+#### Fix-1: MCP tools — 그래프 통일
+
+**파일**: `backend/app_mcp/tools.py`
+
+`_manual_graph()` 헬퍼 함수 삭제. `kg_graph_iri()` import 후 사용.
+
+```python
+# Before
+def _manual_graph(ontology_id: str) -> str:
+    return f"urn:source:manual/{ontology_id}"
+
+graph_iri = _manual_graph(ontology_id)        # add_individual
+tbox_graph = f"{ontology_id}/tbox"            # add_concept
+g = _manual_graph(ontology_id)                # update_individual
+
+# After
+from services.ontology_graph import kg_graph_iri
+
+graph_iri = kg_graph_iri(ontology_id)         # add_individual
+tbox_graph = kg_graph_iri(ontology_id)        # add_concept
+g = kg_graph_iri(ontology_id)                 # update_individual
+```
+
+주의: `delete_individual`은 `GRAPH ?g { ... }` 패턴으로 전체 그래프 탐색을 하므로 변경 불필요.
+
+- [ ] Fix-1-a: `_manual_graph` 헬퍼 삭제
+- [ ] Fix-1-b: `add_individual` — `graph_iri = kg_graph_iri(ontology_id)`
+- [ ] Fix-1-c: `add_concept` — `tbox_graph = kg_graph_iri(ontology_id)`
+- [ ] Fix-1-d: `update_individual` — `g = kg_graph_iri(ontology_id)`
+
+---
+
+#### Fix-2: Individual 판별 패턴 — GRAPH 절 누락 수정
+
+**파일**: `backend/api/individuals.py`, `backend/api/search.py`
+
+`_individual_pattern(kg)` 내 두 번째 UNION 브랜치의 `?ctype a owl:Class` 체크가 GRAPH 절 없이 실행되어, Fuseki default graph(비어 있음)를 보므로 항상 빈 결과가 됩니다.
+
+```sparql
+-- Before (GRAPH 절 없음 → default graph 조회 → 빈 결과)
+{ ?ctype a owl:Class }
+UNION
+{ ?ctype a rdfs:Class . FILTER NOT EXISTS { ?ctype a owl:Ontology } }
+
+-- After (같은 kg 그래프 안에서 체크)
+{ GRAPH <{kg}> { ?ctype a owl:Class } }
+UNION
+{ GRAPH <{kg}> { ?ctype a rdfs:Class . FILTER NOT EXISTS { ?ctype a owl:Ontology } } }
+```
+
+`get_concept()`의 `individual_count` 쿼리도 같은 문제:
+
+```sparql
+-- Before
+SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE { ?ind rdf:type <{iri}> }
+
+-- After
+SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE {
+    GRAPH <{kg}> { ?ind rdf:type <{iri}> }
+}
+```
+
+- [x] Fix-2-a: `individuals.py` `_individual_pattern()` — ctype 체크에 `GRAPH <{kg}>` 추가
+- [x] Fix-2-b: `search.py` `_ind_pat` 인라인 패턴 — 동일 수정
+- [x] Fix-2-c: `concepts.py` `get_concept()` — `individual_count` 쿼리 GRAPH 절 추가
+
+---
+
+#### Fix-3: search_relations() N+1 쿼리 제거
+
+**파일**: `backend/api/search.py`
+
+현재 property N개에 대해 각각 domain + range를 별도 조회 → **N×2개 추가 왕복**.
+`GROUP_CONCAT`으로 메인 쿼리에서 한 번에 가져옵니다.
+
+```sparql
+-- Before: rows 루프에서 domain_rows, range_rows 각각 await
+
+-- After: 단일 쿼리
+SELECT ?iri ?label ?kind
+       (GROUP_CONCAT(DISTINCT STR(?domain); SEPARATOR="\t") AS ?domains)
+       (GROUP_CONCAT(DISTINCT STR(?range);  SEPARATOR="\t") AS ?ranges)
+WHERE {
+    GRAPH <{kg}> {
+        { ?iri a owl:ObjectProperty . BIND("object" AS ?kind) }
+        UNION
+        { ?iri a owl:DatatypeProperty . BIND("data" AS ?kind) }
+        OPTIONAL { ?iri rdfs:label  ?label  }
+        OPTIONAL { ?iri rdfs:domain ?domain }
+        OPTIONAL { ?iri rdfs:range  ?range  }
+        {q_filter}
+        {domain_filter}
+        {range_filter}
+    }
+} GROUP BY ?iri ?label ?kind
+ORDER BY ?label LIMIT {limit}
+```
+
+파싱: `?domains` 문자열을 `"\t"` 기준으로 `split()` → `list[str]`.
+
+- [x] Fix-3: `search_relations()` — GROUP_CONCAT 단일 쿼리로 교체
+
+---
+
+#### Fix-4: get_concept() 순차 쿼리 → 병렬화
+
+**파일**: `backend/api/concepts.py`
+
+현재 6개 쿼리 순차 실행 → `asyncio.gather`로 동시 실행:
+
+```python
+import asyncio
+
+basic, sc_rows, ec_rows, dw_rows, rest_rows, cnt_rows = await asyncio.gather(
+    store.sparql_select(basic_q, dataset=dataset),
+    store.sparql_select(sc_q,    dataset=dataset),
+    store.sparql_select(ec_q,    dataset=dataset),
+    store.sparql_select(dw_q,    dataset=dataset),
+    store.sparql_select(rest_q,  dataset=dataset),
+    store.sparql_select(cnt_q,   dataset=dataset),
+)
+```
+
+- [x] Fix-4: `get_concept()` — asyncio.gather 병렬화
+
+---
+
+### 변경 파일 요약
+
+| Fix | 파일 | 변경 내용 |
+|-----|------|---------|
+| Fix-1 | `app_mcp/tools.py` | `_manual_graph` 삭제, `kg_graph_iri` 사용 |
+| Fix-2-a | `api/individuals.py` | `_individual_pattern()` GRAPH 절 추가 |
+| Fix-2-b | `api/search.py` | `_ind_pat` GRAPH 절 추가 |
+| Fix-2-c | `api/concepts.py` | `individual_count` 쿼리 GRAPH 절 추가 |
+| Fix-3 | `api/search.py` | `search_relations()` GROUP_CONCAT 단일 쿼리 |
+| Fix-4 | `api/concepts.py` | `get_concept()` asyncio.gather |
+
+### 진행 상태
+
+- [ ] Fix-1: MCP tools 그래프 통일 (`kg_graph_iri`) — 추후 테스트 후 진행
+- [x] Fix-2: Individual 판별 패턴 GRAPH 절 명시 (3곳)
+- [x] Fix-3: search_relations() GROUP_CONCAT 단일 쿼리
+- [x] Fix-4: get_concept() asyncio.gather 병렬화

@@ -22,6 +22,7 @@ _P = """
 PREFIX owl:  <http://www.w3.org/2002/07/owl#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 """
 
 
@@ -56,7 +57,7 @@ async def search_entities(
     q: str = Query("", description="키워드"),
     kind: Literal["concept", "individual", "all"] = Query("all"),
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> list[dict]:
     """
     rdfs:label 기반 키워드 검색.
@@ -67,7 +68,21 @@ async def search_entities(
     if kg is None:
         return []
 
-    q_filter = f'FILTER(CONTAINS(LCASE(STR(?label)), "{_esc(q.lower())}"))' if q else ""
+    ql = _esc(q.lower()) if q else ""
+    q_filter = ""
+    if q and ql:
+        q_filter = f"""FILTER(
+      CONTAINS(LCASE(STR(?iri)), "{ql}") ||
+      (bound(?label) && CONTAINS(LCASE(STR(?label)), "{ql}"))
+    )"""
+
+    _class_pat = """
+        { ?iri a owl:Class }
+        UNION
+        { ?iri a rdfs:Class . FILTER NOT EXISTS { ?iri a owl:Ontology } }
+        UNION
+        { ?iri a skos:Concept }
+    """
 
     results = []
 
@@ -76,7 +91,7 @@ async def search_entities(
         rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label WHERE {{
     GRAPH <{kg}> {{
-        ?iri a owl:Class .
+        {_class_pat}
         OPTIONAL {{ ?iri rdfs:label ?label }}
         {q_filter}
     }}
@@ -88,6 +103,22 @@ SELECT DISTINCT ?iri ?label WHERE {{
                 "kind": "concept",
             })
 
+    _ind_pat = f"""
+        {{
+          ?iri a owl:NamedIndividual
+        }} UNION {{
+          ?iri rdf:type ?ctype .
+          {{
+            GRAPH <{kg}> {{ ?ctype a owl:Class }}
+          }} UNION {{
+            GRAPH <{kg}> {{ ?ctype a rdfs:Class .
+            FILTER NOT EXISTS {{ ?ctype a owl:Ontology }} }}
+          }}
+          FILTER NOT EXISTS {{ GRAPH <{kg}> {{ ?iri a owl:Class }} }}
+          FILTER NOT EXISTS {{ GRAPH <{kg}> {{ ?iri a rdfs:Class }} }}
+        }}
+    """
+
     # Individual 검색 (kg 단일 그래프)
     if kind in ("individual", "all"):
         remaining = limit - len(results)
@@ -95,7 +126,7 @@ SELECT DISTINCT ?iri ?label WHERE {{
             rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label WHERE {{
     GRAPH <{kg}> {{
-        ?iri a owl:NamedIndividual .
+        {_ind_pat}
         OPTIONAL {{ ?iri rdfs:label ?label }}
         {q_filter}
     }}
@@ -135,7 +166,7 @@ async def search_relations(
     domain_iri: str | None = Query(None, alias="domain"),
     range_iri: str | None = Query(None, alias="range"),
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> list[dict]:
     """ObjectProperty + DataProperty 키워드 검색."""
     store = request.app.state.ontology_store
@@ -148,31 +179,35 @@ async def search_relations(
     range_filter = f"?iri rdfs:range <{range_iri}> ." if range_iri else ""
 
     rows = await store.sparql_select(f"""{_P}
-SELECT DISTINCT ?iri ?label ?kind WHERE {{
+SELECT ?iri ?label ?kind
+       (GROUP_CONCAT(DISTINCT STR(?domain); SEPARATOR="\t") AS ?domains)
+       (GROUP_CONCAT(DISTINCT STR(?range);  SEPARATOR="\t") AS ?ranges)
+WHERE {{
     GRAPH <{kg}> {{
         {{ ?iri a owl:ObjectProperty . BIND("object" AS ?kind) }}
         UNION
         {{ ?iri a owl:DatatypeProperty . BIND("data" AS ?kind) }}
-        OPTIONAL {{ ?iri rdfs:label ?label }}
+        OPTIONAL {{ ?iri rdfs:label  ?label  }}
+        OPTIONAL {{ ?iri rdfs:domain ?domain . FILTER(isIRI(?domain)) }}
+        OPTIONAL {{ ?iri rdfs:range  ?range  }}
         {q_filter}
         {domain_filter}
         {range_filter}
     }}
-}} ORDER BY ?label LIMIT {limit}""", dataset=dataset)
+}} GROUP BY ?iri ?label ?kind
+ORDER BY ?label LIMIT {limit}""", dataset=dataset)
 
     results = []
     for r in rows:
         iri = _v(r.get("iri"))
-        domain_rows = await store.sparql_select(
-            f"{_P}\nSELECT ?d WHERE {{ GRAPH <{kg}> {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} }}", dataset=dataset)
-        range_rows = await store.sparql_select(
-            f"{_P}\nSELECT ?r WHERE {{ GRAPH <{kg}> {{ <{iri}> rdfs:range ?r }} }}", dataset=dataset)
+        domains_raw = _v(r.get("domains"))
+        ranges_raw = _v(r.get("ranges"))
         results.append({
             "iri": iri,
             "label": _v(r.get("label")) or iri,
             "kind": _v(r.get("kind")),
-            "domain": [_v(dr.get("d")) for dr in domain_rows],
-            "range": [_v(rr.get("r")) for rr in range_rows],
+            "domain": [d for d in domains_raw.split("\t") if d] if domains_raw else [],
+            "range":  [r_ for r_ in ranges_raw.split("\t") if r_] if ranges_raw else [],
         })
 
     return results
@@ -185,7 +220,7 @@ async def vector_search(
     request: Request,
     ontology_id: str,
     body: VectorSearchRequest,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> list[dict]:
     """
     fastembed 기반 코사인 유사도 검색.

@@ -216,6 +216,7 @@ export default function ImportPage() {
               <div
                 role="status"
                 aria-live="polite"
+                aria-busy="true"
                 className="p-3 rounded-lg border text-sm"
                 style={{
                   borderColor: 'var(--color-border)',
@@ -223,25 +224,39 @@ export default function ImportPage() {
                   color: 'var(--color-text-primary)',
                 }}
               >
-                <div className="flex items-center gap-2 mb-2">
-                  <LoadingSpinner size="sm" />
-                  <span>
-                    {fileImportProgress.phase === 'upload'
-                      ? 'Uploading file to server…'
-                      : 'Server: parsing RDF and writing to Fuseki…'}
-                  </span>
-                </div>
-                {fileImportProgress.phase === 'upload' && fileImportProgress.uploadPct != null && (
-                  <progress
-                    className="w-full h-2 rounded"
-                    value={fileImportProgress.uploadPct}
-                    max={100}
-                  />
-                )}
-                {fileImportProgress.phase === 'upload' && fileImportProgress.uploadPct != null && (
-                  <p className="text-xs mt-1 font-mono" style={{ color: 'var(--color-text-muted)' }}>
-                    {fileImportProgress.uploadPct}%
-                  </p>
+                <p className="mb-2 font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                  {fileImportProgress.phase === 'upload'
+                    ? 'Uploading file to API…'
+                    : 'Writing RDF to Fuseki (graph store)…'}
+                </p>
+                {fileImportProgress.phase === 'upload' && fileImportProgress.uploadPct != null ? (
+                  <>
+                    <progress
+                      className="import-progress w-full h-2.5 rounded"
+                      value={fileImportProgress.uploadPct}
+                      max={100}
+                      aria-valuenow={fileImportProgress.uploadPct}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    />
+                    <p className="text-xs mt-1.5 font-mono tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
+                      {fileImportProgress.uploadPct}%
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div
+                      className="import-progress-indeterminate-track w-full h-2.5 rounded overflow-hidden"
+                      role="progressbar"
+                      aria-valuetext="Writing to Fuseki"
+                      aria-busy="true"
+                    >
+                      <div className="import-progress-indeterminate-fill" />
+                    </div>
+                    <p className="text-xs mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                      Large files can take a while; waiting for Fuseki to finish the request.
+                    </p>
+                  </>
                 )}
               </div>
             )}
@@ -251,7 +266,6 @@ export default function ImportPage() {
               className="flex items-center justify-center gap-2 px-4 py-2 rounded text-sm font-medium hover:opacity-80 disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
             >
-              {importMutation.isPending && <LoadingSpinner size="sm" />}
               {importMutation.isPending ? 'Importing…' : 'Import File'}
             </button>
           </form>

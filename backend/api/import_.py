@@ -57,7 +57,7 @@ async def import_file(
     request: Request,
     ontology_id: str,
     file: UploadFile = File(...),
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     """OWL/TTL/RDF/JSON-LD 파일 업로드 후 파싱해 온톨로지 kg 그래프에 삽입."""
     store = request.app.state.ontology_store
@@ -151,7 +151,7 @@ async def import_url(
     request: Request,
     ontology_id: str,
     body: ImportURLRequest,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     """URL에서 온톨로지를 다운로드하여 kg 그래프에 삽입."""
     store = request.app.state.ontology_store
@@ -175,7 +175,7 @@ async def import_standard(
     request: Request,
     ontology_id: str,
     body: ImportStandardRequest,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     """사전 등록된 표준 온톨로지(schema.org, FOAF 등)를 kg 그래프에 삽입."""
     store = request.app.state.ontology_store

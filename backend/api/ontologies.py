@@ -79,7 +79,7 @@ async def list_ontologies(
     request: Request,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     store = _store(request)
     items_raw, total = await store.list_ontologies(page, page_size, dataset=dataset)
@@ -110,7 +110,7 @@ async def list_ontologies(
 async def create_ontology(
     request: Request,
     body: OntologyCreate,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> Ontology:
     store = _store(request)
 
@@ -162,7 +162,7 @@ async def create_ontology(
 async def get_ontology(
     request: Request,
     ontology_id: str,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> Ontology:
     store = _store(request)
     raw = await _fetch_ontology(store, ontology_id, dataset=dataset)
@@ -192,7 +192,7 @@ async def update_ontology(
     request: Request,
     ontology_id: str,
     body: OntologyUpdate,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> Ontology:
     store = _store(request)
     raw = await _fetch_ontology(store, ontology_id, dataset=dataset)
@@ -236,7 +236,7 @@ async def update_ontology(
 async def delete_ontology(
     request: Request,
     ontology_id: str,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> None:
     store = _store(request)
 

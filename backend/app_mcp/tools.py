@@ -91,7 +91,7 @@ def _parse_list(val: Any) -> list | None:
 
 
 @mcp.tool()
-async def list_ontologies(dataset: str = "ontology") -> list[dict]:
+async def list_ontologies(dataset: str | None = None) -> list[dict]:
     """온톨로지 목록 조회 MCP 도구.
 
     Args:
@@ -108,7 +108,7 @@ async def list_ontologies(dataset: str = "ontology") -> list[dict]:
 
 
 @mcp.tool()
-async def get_ontology_summary(ontology_id: str, dataset: str = "ontology") -> dict:
+async def get_ontology_summary(ontology_id: str, dataset: str | None = None) -> dict:
     """온톨로지 요약 및 통계 조회.
 
     Args:
@@ -133,7 +133,7 @@ async def search_entities(
     kind: str = "all",
     limit: int = 10,
     use_vector: bool = True,
-    dataset: str = "ontology",
+    dataset: str | None = None,
 ) -> list[dict]:
     """Entity 검색 MCP 도구 (키워드 + 벡터 하이브리드).
 
@@ -225,7 +225,7 @@ async def search_relations(
     ontology_id: str,
     query: str = "",
     limit: int = 10,
-    dataset: str = "ontology",
+    dataset: str | None = None,
 ) -> list[dict]:
     """Property(Relation) 검색 MCP 도구.
 
@@ -280,7 +280,7 @@ async def get_subgraph(
     ontology_id: str,
     entity_iris: list[str],
     depth: int = 2,
-    dataset: str = "ontology",
+    dataset: str | None = None,
 ) -> dict:
     """서브그래프 조회 MCP 도구.
 
@@ -301,7 +301,7 @@ async def get_subgraph(
 
 
 @mcp.tool()
-async def sparql_query(ontology_id: str, query: str, dataset: str = "ontology") -> dict:
+async def sparql_query(ontology_id: str, query: str, dataset: str | None = None) -> dict:
     """SPARQL 쿼리 실행 MCP 도구 (SELECT / ASK만 허용).
 
     Args:
@@ -329,7 +329,7 @@ async def sparql_query(ontology_id: str, query: str, dataset: str = "ontology") 
 async def run_reasoner(
     ontology_id: str,
     entity_iris: list[str] | None = None,
-    dataset: str = "ontology",
+    dataset: str | None = None,
 ) -> dict:
     """OWL 2 추론 실행 MCP 도구.
 
@@ -388,7 +388,7 @@ async def add_individual(
     object_properties: list[dict] | None = None,
     same_as: list[str] | None = None,
     different_from: list[str] | None = None,
-    dataset: str = "ontology",
+    dataset: str | None = None,
 ) -> dict:
     """Individual(owl:NamedIndividual) 생성 MCP 도구.
 
@@ -494,7 +494,7 @@ async def update_individual(
     object_properties: list[dict] | None = None,
     same_as: list[str] | None = None,
     different_from: list[str] | None = None,
-    dataset: str = "ontology",
+    dataset: str | None = None,
 ) -> dict:
     """Individual 수정 MCP 도구.
 
@@ -597,7 +597,7 @@ async def add_concept(
     label: str,
     super_classes: list[str] | None = None,
     description: str | None = None,
-    dataset: str = "ontology",
+    dataset: str | None = None,
 ) -> dict:
     """Concept(owl:Class) 생성 MCP 도구.
 
@@ -669,7 +669,7 @@ async def add_concept(
 
 
 @mcp.tool()
-async def delete_individual(ontology_id: str, iri: str, dataset: str = "ontology") -> dict:
+async def delete_individual(ontology_id: str, iri: str, dataset: str | None = None) -> dict:
     """Individual 삭제 MCP 도구.
 
     해당 온톨로지 kg 그래프에서 해당 IRI를 주어(subject)로 갖는 트리플을 삭제합니다.

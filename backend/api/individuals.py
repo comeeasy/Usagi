@@ -46,6 +46,40 @@ def _esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
+def _individual_pattern(kg: str) -> str:
+    """
+    owl:NamedIndividual 또는 (어떤 클래스에 rdf:type — 클래스가 owl:Class·rdfs:Class 모두 허용).
+    LOD는 클래스를 rdfs:Class만 단언하는 경우가 많아 owl:Class만 보면 인스턴스가 전부 빠짐.
+    NOT EXISTS는 kg 그래프를 명시(구현체에 따라 상위 GRAPH가 상속 안 될 수 있음).
+    """
+    return f"""
+    {{
+      ?iri a owl:NamedIndividual
+    }} UNION {{
+      ?iri rdf:type ?ctype .
+      {{
+        GRAPH <{kg}> {{ ?ctype a owl:Class }}
+      }} UNION {{
+        GRAPH <{kg}> {{ ?ctype a rdfs:Class .
+        FILTER NOT EXISTS {{ ?ctype a owl:Ontology }} }}
+      }}
+      FILTER NOT EXISTS {{ GRAPH <{kg}> {{ ?iri a owl:Class }} }}
+      FILTER NOT EXISTS {{ GRAPH <{kg}> {{ ?iri a rdfs:Class }} }}
+    }}
+"""
+
+
+def _individual_keyword_filter(q: str | None) -> str:
+    if not q or not str(q).strip():
+        return ""
+    ql = _esc(q.lower())
+    return f"""
+    FILTER(
+      CONTAINS(LCASE(STR(?iri)), "{ql}") ||
+      (bound(?label) && CONTAINS(LCASE(STR(?label)), "{ql}"))
+    )"""
+
+
 def _v(term: dict | None, default: str = "") -> str:
     if term is None:
         return default
@@ -77,7 +111,7 @@ async def list_individuals(
     q: str | None = Query(None),
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     store = request.app.state.ontology_store
     kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
@@ -90,18 +124,25 @@ async def list_individuals(
     extra = ""
     if filter_type:
         extra += f"\n    ?iri rdf:type <{filter_type}> ."
-    if q:
-        extra += f'\n    FILTER(CONTAINS(LCASE(STR(?label)), "{_esc(q.lower())}"))'
+    extra += _individual_keyword_filter(q)
 
     count_rows = await store.sparql_select(f"""{_P}
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
-    GRAPH <{kg}> {{ ?iri a owl:NamedIndividual . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
+    GRAPH <{kg}> {{
+        {_individual_pattern(kg)}
+        OPTIONAL {{ ?iri rdfs:label ?label }}
+        {extra}
+    }}
 }}""", dataset=dataset)
     total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
 
     rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label WHERE {{
-    GRAPH <{kg}> {{ ?iri a owl:NamedIndividual . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
+    GRAPH <{kg}> {{
+        {_individual_pattern(kg)}
+        OPTIONAL {{ ?iri rdfs:label ?label }}
+        {extra}
+    }}
 }} ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
 
     types_by_iri: dict[str, list[str]] = defaultdict(list)
@@ -138,7 +179,7 @@ async def create_individual(
     request: Request,
     ontology_id: str,
     body: IndividualCreate,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> Individual:
     store = request.app.state.ontology_store
     graph_iri = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
@@ -194,7 +235,7 @@ async def get_provenance(
     request: Request,
     ontology_id: str,
     iri: str,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> list[ProvenanceRecord]:
     store = request.app.state.ontology_store
     iri = unquote(iri)
@@ -239,7 +280,7 @@ async def get_individual(
     request: Request,
     ontology_id: str,
     iri: str,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> Individual:
     store = request.app.state.ontology_store
     iri = unquote(iri)
@@ -305,7 +346,7 @@ async def update_individual(
     ontology_id: str,
     iri: str,
     body: IndividualUpdate,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> Individual:
     store = request.app.state.ontology_store
     iri = unquote(iri)
@@ -370,7 +411,7 @@ async def delete_individual(
     request: Request,
     ontology_id: str,
     iri: str,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> None:
     store = request.app.state.ontology_store
     iri = unquote(iri)

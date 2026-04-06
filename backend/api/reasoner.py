@@ -22,7 +22,7 @@ async def run_reasoner(
     request: Request,
     ontology_id: str,
     body: ReasonerRunRequest,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     """OWL 2 추론 실행 (비동기). 202 Accepted + jobId 즉시 반환."""
     reasoner: "ReasonerService" = request.app.state.reasoner_service  # type: ignore

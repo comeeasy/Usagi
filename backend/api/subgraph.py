@@ -218,7 +218,7 @@ async def get_subgraph(
     request: Request,
     ontology_id: str,
     body: SubgraphRequest,
-    dataset: str = Query("ontology"),
+    dataset: str | None = Query(None),
 ) -> dict:
     """
     SPARQL iterative BFS 로 서브그래프 탐색.
