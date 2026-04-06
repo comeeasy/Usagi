@@ -116,3 +116,167 @@ Neo4j Cypher BFS → Python-side iterative SPARQL BFS
 - [x] Step 8: app_mcp/tools.py 수정
 - [x] Step 9: 삭제 파일 제거 (graph_store, sync_service, sync_worker)
 - [x] 테스트 수정 (conftest, test_mcp_tools, test_service_*)
+
+---
+
+## Multi-Dataset 지원 계획 (Option B: Dataset Pool)
+
+### 배경
+
+현재 Fuseki dataset이 앱 시작 시 단일 값으로 고정된다.
+사용자가 런타임에 여러 dataset을 동시에 사용할 수 있어야 한다.
+
+### 설계 원칙
+
+- **OntologyStore 싱글톤 유지** — 하나의 인스턴스가 내부 httpx 클라이언트(연결 풀)를 보유
+- **dataset은 메서드 파라미터로 전달** — URL을 호출 시점에 동적으로 조립
+- **기본값 "ontology" 유지** — 하위 호환성 보장, 기존 클라이언트 수정 불필요
+- **프론트엔드 dataset 선택 UI** — Sidebar에 DatasetSelector 추가, React Context로 전파
+
+### 확정 아키텍처
+
+```
+Frontend
+  └── DatasetSelector (Sidebar)
+        └── DatasetContext (React Context)
+              └── API 클라이언트 (dataset query param 자동 주입)
+                    └── GET /ontologies/{id}/concepts?dataset=my-ds
+
+Backend (FastAPI)
+  └── 각 엔드포인트: dataset = Query("ontology")
+        └── OntologyStore.sparql_select(query, dataset=dataset)
+              └── POST http://fuseki:3030/{dataset}/sparql  ← 동적 URL
+```
+
+### 데이터 흐름
+
+```
+사용자가 Sidebar에서 "dataset-B" 선택
+  → DatasetContext 업데이트
+    → API 호출: GET /concepts?dataset=dataset-B
+      → FastAPI: dataset="dataset-B" 추출
+        → store.sparql_select(query, dataset="dataset-B")
+          → POST http://fuseki:3030/dataset-B/sparql
+```
+
+---
+
+### 변경 범위
+
+#### 백엔드 (3개 파일, ~200줄)
+
+| 파일 | 변경 내용 |
+|------|---------|
+| `backend/services/ontology_store.py` | 모든 public 메서드에 `dataset: str \| None = None` 파라미터 추가. 내부 URL을 `{fuseki_base}/{dataset or default}/sparql` 형태로 동적 조립. `fuseki_base_url`, `default_dataset` 속성 분리. |
+| `backend/api/*.py` (11개 파일) | 모든 엔드포인트에 `dataset: str = Query("ontology")` 추가. store 호출 시 dataset 전달. |
+| `backend/app_mcp/tools.py` | 11개 MCP 도구에 `dataset: str = "ontology"` 파라미터 추가. store 메서드 호출 시 dataset 전달. |
+
+**OntologyStore 변경 전/후:**
+```python
+# Before
+class OntologyStore:
+    def __init__(self, fuseki_url: str, dataset: str = "ontology"):
+        self._query_url = f"{fuseki_url}/{dataset}/sparql"
+    
+    async def sparql_select(self, query: str) -> list[dict]:
+        resp = await self._client.post(self._query_url, ...)
+
+# After
+class OntologyStore:
+    def __init__(self, fuseki_url: str, dataset: str = "ontology"):
+        self._fuseki_base = fuseki_url
+        self._default_dataset = dataset
+    
+    def _query_url(self, dataset: str) -> str:
+        return f"{self._fuseki_base}/{dataset}/sparql"
+    
+    async def sparql_select(self, query: str, dataset: str | None = None) -> list[dict]:
+        url = self._query_url(dataset or self._default_dataset)
+        resp = await self._client.post(url, ...)
+```
+
+**API 엔드포인트 변경 전/후:**
+```python
+# Before
+@router.get("")
+async def list_concepts(request: Request, ontology_id: str, ...):
+    store = request.app.state.ontology_store
+    rows = await store.sparql_select(query)
+
+# After
+@router.get("")
+async def list_concepts(
+    request: Request,
+    ontology_id: str,
+    dataset: str = Query("ontology"),  # ← 추가
+    ...
+):
+    store = request.app.state.ontology_store
+    rows = await store.sparql_select(query, dataset=dataset)  # ← dataset 전달
+```
+
+---
+
+#### 프론트엔드 (~600줄)
+
+##### 신규 파일 (2개)
+
+| 파일 | 내용 |
+|------|------|
+| `frontend/src/contexts/DatasetContext.tsx` | 현재 선택된 dataset 상태를 앱 전체에 공유하는 React Context + Provider. `activeDataset`, `setActiveDataset` 노출. |
+| `frontend/src/components/layout/DatasetSelector.tsx` | Sidebar에 삽입할 드롭다운 컴포넌트. 백엔드 `/api/v1/datasets` 엔드포인트 또는 환경 설정에서 목록 조회. |
+
+##### 수정 파일
+
+| 파일 | 변경 내용 |
+|------|---------|
+| `frontend/src/api/ontologies.ts` | 모든 API 함수에 `dataset?: string` 파라미터 추가. 쿼리스트링에 자동 포함. |
+| `frontend/src/api/entities.ts` | `listConcepts`, `listIndividuals`, `searchEntities` 등에 `dataset` 추가. |
+| `frontend/src/api/relations.ts` | `listObjectProperties`, `listDataProperties` 등에 `dataset` 추가. |
+| `frontend/src/api/reasoner.ts` | `runReasoner`, `getReasonerResult`에 `dataset` 추가. |
+| `frontend/src/api/sparql.ts` | `executeSparql`에 `dataset` 추가. |
+| `frontend/src/api/sources.ts` | 모든 source 관련 함수에 `dataset` 추가. |
+| `frontend/src/hooks/useOntology.ts` 등 | React Query `queryKey`에 `dataset` 포함. DatasetContext에서 자동으로 주입. |
+| `frontend/src/components/layout/Sidebar.tsx` | DatasetSelector 컴포넌트 삽입. |
+| `frontend/src/App.tsx` 또는 최상위 | DatasetContext.Provider로 감싸기. |
+
+---
+
+#### 추가 고려사항
+
+**dataset 목록 조회 API (선택)**
+프론트엔드에서 사용 가능한 dataset 목록을 표시하려면 백엔드에 엔드포인트 추가 필요:
+```
+GET /api/v1/datasets
+→ Fuseki Admin API (GET http://fuseki:3030/$/datasets) 호출 후 목록 반환
+```
+
+**URL 상태 동기화 (선택)**
+dataset 선택을 URL 쿼리스트링(`?dataset=xxx`)에도 반영하면
+북마크/공유 가능한 링크 생성 및 새로고침 시 선택 유지 가능.
+
+---
+
+### 변경 규모 요약
+
+| 영역 | 파일 수 | 예상 변경 라인 |
+|------|--------|--------------|
+| 백엔드 OntologyStore | 1 | ~60 |
+| 백엔드 API (11개) | 11 | ~150 |
+| 백엔드 MCP Tools | 1 | ~100 |
+| 프론트엔드 API 클라이언트 | 6 | ~120 |
+| 프론트엔드 Context/Hook | 2 | ~120 |
+| 프론트엔드 컴포넌트 (신규+수정) | 3 | ~150 |
+| **합계** | **~24** | **~700** |
+
+---
+
+### 진행 상태
+
+- [ ] Multi-Step 1: OntologyStore 메서드 dataset 파라미터화
+- [ ] Multi-Step 2: 백엔드 API 11개 엔드포인트 dataset Query param 추가
+- [ ] Multi-Step 3: MCP Tools dataset 파라미터 추가
+- [ ] Multi-Step 4: 백엔드 `/api/v1/datasets` 엔드포인트 추가 (선택)
+- [ ] Multi-Step 5: 프론트엔드 DatasetContext 추가
+- [ ] Multi-Step 6: 프론트엔드 API 클라이언트 dataset 파라미터 추가
+- [ ] Multi-Step 7: DatasetSelector 컴포넌트 구현 + Sidebar 통합
