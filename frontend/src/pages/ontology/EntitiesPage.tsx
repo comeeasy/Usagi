@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Plus, List, GitBranch } from 'lucide-react'
 import OntologyTabs from '@/components/layout/OntologyTabs'
 import EntitySearchBar from '@/components/entities/EntitySearchBar'
 import EntityTable from '@/components/entities/EntityTable'
+import ConceptTreeView from '@/components/entities/ConceptTreeView'
 import EntityDetailPanel from '@/components/entities/EntityDetailPanel'
 import ConceptForm from '@/components/entities/ConceptForm'
 import IndividualForm from '@/components/entities/IndividualForm'
@@ -26,6 +27,7 @@ export default function EntitiesPage() {
   const queryClient = useQueryClient()
 
   const [tab, setTab] = useState<EntityTab>('concepts')
+  const [viewMode, setViewMode] = useState<'flat' | 'tree'>('flat')
   const [page, setPage] = useState(1)
   const [selectedIri, setSelectedIri] = useState<string | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
@@ -181,6 +183,7 @@ export default function EntitiesPage() {
 
   const handleTabChange = (t: EntityTab) => {
     setTab(t)
+    setViewMode('flat')
     setPage(1)
     setSelectedIri(null)
     setEditingEntity(null)
@@ -228,14 +231,35 @@ export default function EntitiesPage() {
                 ))}
               </div>
 
-              <button
-                onClick={() => setShowCreateForm(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium hover:opacity-80"
-                style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-              >
-                <Plus size={14} />
-                New {tab === 'concepts' ? 'Concept' : 'Individual'}
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Tree/Flat 뷰 토글 (Concept 탭만) */}
+                {tab === 'concepts' && (
+                  <div className="flex border rounded overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                    {(['flat', 'tree'] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setViewMode(mode)}
+                        title={mode === 'flat' ? 'Flat list' : 'Tree view'}
+                        className="px-2.5 py-1.5 flex items-center transition-colors"
+                        style={{
+                          backgroundColor: viewMode === mode ? 'var(--color-primary)' : 'var(--color-bg-elevated)',
+                          color: viewMode === mode ? '#fff' : 'var(--color-text-secondary)',
+                        }}
+                      >
+                        {mode === 'flat' ? <List size={14} /> : <GitBranch size={14} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={() => setShowCreateForm(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
+                >
+                  <Plus size={14} />
+                  New {tab === 'concepts' ? 'Concept' : 'Individual'}
+                </button>
+              </div>
             </div>
 
             <EntitySearchBar
@@ -289,33 +313,45 @@ export default function EntitiesPage() {
             )}
 
             {/* Table */}
-            {activeQuery.isLoading && (
-              <div className="flex items-center justify-center py-12">
-                <LoadingSpinner size="lg" />
-              </div>
-            )}
-
-            {activeQuery.error && (
-              <div
-                className="p-4 rounded-lg border text-sm"
-                style={{ borderColor: 'var(--color-error)', color: 'var(--color-error)' }}
-              >
-                Error: {activeQuery.error.message}
-              </div>
-            )}
-
-            {!activeQuery.isLoading && !activeQuery.error && (
+            {/* Tree view (Concept 탭 + tree 모드) */}
+            {tab === 'concepts' && viewMode === 'tree' ? (
               <div className="flex-1 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--color-border)' }}>
-                <EntityTable
-                  items={items}
-                  total={activeQuery.data?.total ?? 0}
-                  page={page}
-                  pageSize={PAGE_SIZE}
-                  onPageChange={setPage}
-                  onEntitySelect={handleEntitySelect}
+                <ConceptTreeView
+                  ontologyId={ontologyId!}
+                  dataset={dataset}
                   selectedIri={selectedIri}
+                  onSelect={handleEntitySelect}
                 />
               </div>
+            ) : (
+              <>
+                {activeQuery.isLoading && (
+                  <div className="flex items-center justify-center py-12">
+                    <LoadingSpinner size="lg" />
+                  </div>
+                )}
+                {activeQuery.error && (
+                  <div
+                    className="p-4 rounded-lg border text-sm"
+                    style={{ borderColor: 'var(--color-error)', color: 'var(--color-error)' }}
+                  >
+                    Error: {activeQuery.error.message}
+                  </div>
+                )}
+                {!activeQuery.isLoading && !activeQuery.error && (
+                  <div className="flex-1 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--color-border)' }}>
+                    <EntityTable
+                      items={items}
+                      total={activeQuery.data?.total ?? 0}
+                      page={page}
+                      pageSize={PAGE_SIZE}
+                      onPageChange={setPage}
+                      onEntitySelect={handleEntitySelect}
+                      selectedIri={selectedIri}
+                    />
+                  </div>
+                )}
+              </>
             )}
           </div>
 

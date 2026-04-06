@@ -121,6 +121,7 @@ async def list_concepts(
     ontology_id: str,
     q: str | None = Query(None, alias="search"),
     super_class: str | None = Query(None, alias="superClass"),
+    root: bool = Query(False),            # True: 부모 없는 루트 클래스만
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     dataset: str | None = Query(None),
@@ -135,6 +136,9 @@ async def list_concepts(
     extra += _concept_keyword_filter(q)
     if super_class:
         extra += f"\n    ?iri rdfs:subClassOf <{super_class}> ."
+    if root:
+        # 그래프 내에서 rdfs:subClassOf의 object로 등장하지 않는 클래스 = 루트
+        extra += f"\n    FILTER NOT EXISTS {{ GRAPH <{kg}> {{ [] rdfs:subClassOf ?iri }} }}"
 
     count_rows = await store.sparql_select(f"""{_P}
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
@@ -146,7 +150,8 @@ SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
     total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
 
     rows = await store.sparql_select(f"""{_P}
-SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment) WHERE {{
+SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment)
+       (COUNT(DISTINCT ?child) AS ?subclassCount) WHERE {{
     {{
         SELECT DISTINCT ?iri WHERE {{
             GRAPH <{kg}> {{
@@ -157,6 +162,7 @@ SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment) WHERE {{
     }}
     OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:label ?lbl }} }}
     OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:comment ?cmt }} }}
+    OPTIONAL {{ GRAPH <{kg}> {{ ?child rdfs:subClassOf ?iri }} }}
 }} GROUP BY ?iri
 ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
 
@@ -166,7 +172,61 @@ ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
             ontology_id=ontology_id,
             label=_v(r.get("label")) or _v(r.get("iri")),
             comment=_v(r.get("comment")) or None,
-            individual_count=0,  # 상세 페이지에서만 계산 (목록에서 COUNT는 타임아웃 위험)
+            individual_count=0,
+            subclass_count=int(_v(r.get("subclassCount"), "0")),
+        )
+        for r in rows
+    ]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+# ── 직계 하위 클래스 (트리 lazy load) ────────────────────────────────────────
+
+@router.get("/{iri:path}/subclasses", response_model=PaginatedResponse)
+async def list_subclasses(
+    request: Request,
+    ontology_id: str,
+    iri: str,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    dataset: str | None = Query(None),
+) -> dict:
+    """직계 하위 클래스 목록 (rdfs:subClassOf <iri>). 트리 뷰 toggle 시 호출."""
+    store = request.app.state.ontology_store
+    iri = unquote(iri)
+    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if kg is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
+    offset = (page - 1) * page_size
+
+    count_rows = await store.sparql_select(f"""{_P}
+SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
+    GRAPH <{kg}> {{ ?iri rdfs:subClassOf <{iri}> . FILTER(isIRI(?iri)) }}
+}}""", dataset=dataset)
+    total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
+
+    rows = await store.sparql_select(f"""{_P}
+SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment)
+       (COUNT(DISTINCT ?child) AS ?subclassCount) WHERE {{
+    {{
+        SELECT DISTINCT ?iri WHERE {{
+            GRAPH <{kg}> {{ ?iri rdfs:subClassOf <{iri}> . FILTER(isIRI(?iri)) }}
+        }}
+    }}
+    OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:label ?lbl }} }}
+    OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:comment ?cmt }} }}
+    OPTIONAL {{ GRAPH <{kg}> {{ ?child rdfs:subClassOf ?iri }} }}
+}} GROUP BY ?iri
+ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
+
+    items = [
+        Concept(
+            iri=_v(r.get("iri")),
+            ontology_id=ontology_id,
+            label=_v(r.get("label")) or _v(r.get("iri")),
+            comment=_v(r.get("comment")) or None,
+            individual_count=0,
+            subclass_count=int(_v(r.get("subclassCount"), "0")),
         )
         for r in rows
     ]

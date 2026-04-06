@@ -7,15 +7,29 @@ import type { PaginatedResponse } from '@/types/ontology'
 
 export function listConcepts(
   ontologyId: string,
-  params?: { page?: number; pageSize?: number; search?: string; dataset?: string },
+  params?: { page?: number; pageSize?: number; search?: string; dataset?: string; root?: boolean },
 ): Promise<PaginatedResponse<Concept>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
   if (params?.search) qs.set('search', params.search)
   if (params?.dataset) qs.set('dataset', params.dataset)
+  if (params?.root) qs.set('root', 'true')
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies/${ontologyId}/concepts${query}`)
+}
+
+export function listSubclasses(
+  ontologyId: string,
+  iri: string,
+  params?: { page?: number; pageSize?: number; dataset?: string },
+): Promise<PaginatedResponse<Concept>> {
+  const qs = new URLSearchParams()
+  if (params?.page) qs.set('page', String(params.page))
+  if (params?.pageSize) qs.set('page_size', String(params.pageSize))
+  if (params?.dataset) qs.set('dataset', params.dataset)
+  const query = qs.toString() ? `?${qs.toString()}` : ''
+  return apiGet(`/ontologies/${ontologyId}/concepts/${encodeURIComponent(iri)}/subclasses${query}`)
 }
 
 export function getConcept(ontologyId: string, iri: string, dataset?: string): Promise<Concept> {
