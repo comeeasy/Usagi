@@ -181,6 +181,12 @@ export default function EntitiesPage() {
     setSelectedIri(iri)
   }
 
+  const handleIndividualSelect = (iri: string) => {
+    if (tab !== 'individuals') setTab('individuals')
+    if (editingEntity) setEditingEntity(null)
+    setSelectedIri(iri)
+  }
+
   const handleTabChange = (t: EntityTab) => {
     setTab(t)
     setViewMode('flat')
@@ -232,25 +238,23 @@ export default function EntitiesPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                {/* Tree/Flat 뷰 토글 (Concept 탭만) */}
-                {tab === 'concepts' && (
-                  <div className="flex border rounded overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
-                    {(['flat', 'tree'] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        onClick={() => setViewMode(mode)}
-                        title={mode === 'flat' ? 'Flat list' : 'Tree view'}
-                        className="px-2.5 py-1.5 flex items-center transition-colors"
-                        style={{
-                          backgroundColor: viewMode === mode ? 'var(--color-primary)' : 'var(--color-bg-elevated)',
-                          color: viewMode === mode ? '#fff' : 'var(--color-text-secondary)',
-                        }}
-                      >
-                        {mode === 'flat' ? <List size={14} /> : <GitBranch size={14} />}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {/* Tree/Flat 뷰 토글 */}
+                <div className="flex border rounded overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                  {(['flat', 'tree'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setViewMode(mode)}
+                      title={mode === 'flat' ? 'Flat list' : 'Tree view'}
+                      className="px-2.5 py-1.5 flex items-center transition-colors"
+                      style={{
+                        backgroundColor: viewMode === mode ? 'var(--color-primary)' : 'var(--color-bg-elevated)',
+                        color: viewMode === mode ? '#fff' : 'var(--color-text-secondary)',
+                      }}
+                    >
+                      {mode === 'flat' ? <List size={14} /> : <GitBranch size={14} />}
+                    </button>
+                  ))}
+                </div>
                 <button
                   onClick={() => setShowCreateForm(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium hover:opacity-80"
@@ -312,15 +316,15 @@ export default function EntitiesPage() {
               </div>
             )}
 
-            {/* Table */}
-            {/* Tree view (Concept 탭 + tree 모드) */}
-            {tab === 'concepts' && viewMode === 'tree' ? (
+            {/* Tree view */}
+            {viewMode === 'tree' ? (
               <div className="flex-1 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--color-border)' }}>
                 <ConceptTreeView
                   ontologyId={ontologyId!}
                   dataset={dataset}
                   selectedIri={selectedIri}
-                  onSelect={handleEntitySelect}
+                  onSelect={tab === 'concepts' ? handleEntitySelect : () => {}}
+                  onSelectIndividual={handleIndividualSelect}
                 />
               </div>
             ) : (

@@ -54,13 +54,14 @@ export function deleteConcept(ontologyId: string, iri: string, dataset?: string)
 
 export function listIndividuals(
   ontologyId: string,
-  params?: { page?: number; pageSize?: number; search?: string; dataset?: string },
+  params?: { page?: number; pageSize?: number; search?: string; dataset?: string; typeIri?: string },
 ): Promise<PaginatedResponse<Individual>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
   if (params?.search) qs.set('search', params.search)
   if (params?.dataset) qs.set('dataset', params.dataset)
+  if (params?.typeIri) qs.set('type', params.typeIri)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies/${ontologyId}/individuals${query}`)
 }

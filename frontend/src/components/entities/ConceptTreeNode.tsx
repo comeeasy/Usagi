@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronRight, ChevronDown, Loader2 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { listSubclasses } from '@/api/entities'
+import { listSubclasses, listIndividuals } from '@/api/entities'
 import type { Concept } from '@/types/concept'
 
 interface Props {
@@ -11,6 +11,7 @@ interface Props {
   depth?: number
   selectedIri: string | null
   onSelect: (iri: string) => void
+  onSelectIndividual?: (iri: string) => void
 }
 
 export default function ConceptTreeNode({
@@ -20,9 +21,11 @@ export default function ConceptTreeNode({
   depth = 0,
   selectedIri,
   onSelect,
+  onSelectIndividual,
 }: Props) {
   const [expanded, setExpanded] = useState(false)
   const hasChildren = concept.subclass_count > 0
+  const hasIndividuals = concept.individual_count > 0
 
   const childrenQuery = useQuery({
     queryKey: ['subclasses', ontologyId, concept.iri, dataset],
@@ -31,8 +34,18 @@ export default function ConceptTreeNode({
     staleTime: 60_000,
   })
 
+  const individualsQuery = useQuery({
+    queryKey: ['concept-type-individuals', ontologyId, concept.iri, dataset],
+    queryFn: () => listIndividuals(ontologyId, { pageSize: 100, dataset, typeIri: concept.iri }),
+    enabled: expanded && hasIndividuals,
+    staleTime: 60_000,
+  })
+
   const isSelected = selectedIri === concept.iri
   const indentPx = depth * 20
+  const childIndentPx = (depth + 1) * 20
+
+  const isLoading = (hasChildren && childrenQuery.isFetching) || (hasIndividuals && individualsQuery.isFetching && !individualsQuery.data)
 
   return (
     <div>
@@ -56,11 +69,11 @@ export default function ConceptTreeNode({
           className="flex-shrink-0 w-4 h-4 flex items-center justify-center"
           onClick={(e) => {
             e.stopPropagation()
-            if (hasChildren) setExpanded((v) => !v)
+            if (hasChildren || hasIndividuals) setExpanded((v) => !v)
           }}
         >
-          {hasChildren ? (
-            childrenQuery.isFetching ? (
+          {hasChildren || hasIndividuals ? (
+            isLoading ? (
               <Loader2 size={12} className="animate-spin opacity-60" />
             ) : expanded ? (
               <ChevronDown size={12} />
@@ -83,7 +96,7 @@ export default function ConceptTreeNode({
 
         {/* Badges */}
         <span className="flex-shrink-0 flex gap-1 ml-1">
-          {concept.individual_count > 0 && (
+          {hasIndividuals && (
             <span
               className="text-xs px-1.5 rounded-full"
               style={{
@@ -109,27 +122,77 @@ export default function ConceptTreeNode({
         </span>
       </div>
 
-      {/* Children (lazy loaded) */}
-      {expanded && hasChildren && childrenQuery.data && (
+      {/* Children */}
+      {expanded && (
         <div>
-          {childrenQuery.data.items.map((child) => (
-            <ConceptTreeNode
-              key={child.iri}
-              concept={child}
-              ontologyId={ontologyId}
-              dataset={dataset}
-              depth={depth + 1}
-              selectedIri={selectedIri}
-              onSelect={onSelect}
-            />
-          ))}
-          {childrenQuery.data.total > childrenQuery.data.items.length && (
-            <div
-              className="text-xs px-2 py-1"
-              style={{ paddingLeft: `${8 + (depth + 1) * 20}px`, color: 'var(--color-text-secondary)' }}
-            >
-              +{childrenQuery.data.total - childrenQuery.data.items.length} more
-            </div>
+          {/* Subclasses */}
+          {hasChildren && childrenQuery.data && (
+            <>
+              {childrenQuery.data.items.map((child) => (
+                <ConceptTreeNode
+                  key={child.iri}
+                  concept={child}
+                  ontologyId={ontologyId}
+                  dataset={dataset}
+                  depth={depth + 1}
+                  selectedIri={selectedIri}
+                  onSelect={onSelect}
+                  onSelectIndividual={onSelectIndividual}
+                />
+              ))}
+              {childrenQuery.data.total > childrenQuery.data.items.length && (
+                <div
+                  className="text-xs px-2 py-1"
+                  style={{ paddingLeft: `${8 + childIndentPx}px`, color: 'var(--color-text-secondary)' }}
+                >
+                  +{childrenQuery.data.total - childrenQuery.data.items.length} more subclasses
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Individuals */}
+          {hasIndividuals && individualsQuery.data && (
+            <>
+              {individualsQuery.data.items.map((ind) => {
+                const isIndSelected = selectedIri === ind.iri
+                return (
+                  <div
+                    key={ind.iri}
+                    className="flex items-center gap-1 px-2 py-0.5 cursor-pointer text-sm select-none rounded"
+                    style={{
+                      paddingLeft: `${8 + childIndentPx}px`,
+                      backgroundColor: isIndSelected ? 'var(--color-primary)' : undefined,
+                      color: isIndSelected ? '#fff' : 'var(--color-text-secondary)',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isIndSelected) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--color-bg-elevated)'
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isIndSelected) (e.currentTarget as HTMLElement).style.backgroundColor = ''
+                    }}
+                    onClick={() => onSelectIndividual?.(ind.iri)}
+                    title={ind.iri}
+                  >
+                    <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
+                      <span
+                        className="w-1.5 h-1.5 rounded-full"
+                        style={{ backgroundColor: isIndSelected ? '#fff' : 'var(--color-primary)', opacity: 0.8 }}
+                      />
+                    </span>
+                    <span className="flex-1 truncate italic">{ind.label || ind.iri}</span>
+                  </div>
+                )
+              })}
+              {individualsQuery.data.total > individualsQuery.data.items.length && (
+                <div
+                  className="text-xs px-2 py-1"
+                  style={{ paddingLeft: `${8 + childIndentPx}px`, color: 'var(--color-text-secondary)' }}
+                >
+                  +{individualsQuery.data.total - individualsQuery.data.items.length} more individuals
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

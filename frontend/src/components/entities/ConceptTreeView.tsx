@@ -8,9 +8,10 @@ interface Props {
   dataset?: string
   selectedIri: string | null
   onSelect: (iri: string) => void
+  onSelectIndividual?: (iri: string) => void
 }
 
-export default function ConceptTreeView({ ontologyId, dataset, selectedIri, onSelect }: Props) {
+export default function ConceptTreeView({ ontologyId, dataset, selectedIri, onSelect, onSelectIndividual }: Props) {
   // 루트 클래스만 로드 (rdfs:subClassOf의 object로 등장하지 않는 것)
   const rootQuery = useQuery({
     queryKey: ['concepts-root', ontologyId, dataset],
@@ -56,6 +57,7 @@ export default function ConceptTreeView({ ontologyId, dataset, selectedIri, onSe
           depth={0}
           selectedIri={selectedIri}
           onSelect={onSelect}
+          onSelectIndividual={onSelectIndividual}
         />
       ))}
       {(rootQuery.data?.total ?? 0) > roots.length && (
