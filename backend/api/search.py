@@ -76,12 +76,31 @@ async def search_entities(
       (bound(?label) && CONTAINS(LCASE(STR(?label)), "{ql}"))
     )"""
 
-    _class_pat = """
-        { ?iri a owl:Class }
+    _cls_filter = """
+        FILTER(isIRI(?iri))
+        FILTER(?iri NOT IN (
+            owl:Class, owl:NamedIndividual, owl:Ontology,
+            owl:ObjectProperty, owl:DatatypeProperty, owl:AnnotationProperty,
+            rdfs:Class, rdfs:Datatype, rdf:Property,
+            owl:Thing, rdfs:Resource
+        ))
+    """
+    _class_pat = f"""
+        {{ ?iri a owl:Class }}
         UNION
-        { ?iri a rdfs:Class . FILTER NOT EXISTS { ?iri a owl:Ontology } }
+        {{ ?iri a rdfs:Class . FILTER NOT EXISTS {{ ?iri a owl:Ontology }} }}
         UNION
-        { ?iri a skos:Concept }
+        {{ ?iri a skos:Concept }}
+        UNION
+        {{
+            [] rdf:type ?iri .
+            {_cls_filter}
+        }}
+        UNION
+        {{
+            {{ ?iri rdfs:subClassOf [] }} UNION {{ [] rdfs:subClassOf ?iri }}
+            {_cls_filter}
+        }}
     """
 
     results = []
@@ -108,12 +127,12 @@ SELECT DISTINCT ?iri ?label WHERE {{
           ?iri a owl:NamedIndividual
         }} UNION {{
           ?iri rdf:type ?ctype .
-          {{
-            GRAPH <{kg}> {{ ?ctype a owl:Class }}
-          }} UNION {{
-            GRAPH <{kg}> {{ ?ctype a rdfs:Class .
-            FILTER NOT EXISTS {{ ?ctype a owl:Ontology }} }}
-          }}
+          FILTER(isIRI(?ctype))
+          FILTER(?ctype NOT IN (
+              owl:Class, owl:NamedIndividual, owl:Ontology,
+              owl:ObjectProperty, owl:DatatypeProperty, owl:AnnotationProperty,
+              rdfs:Class, rdfs:Datatype, rdf:Property
+          ))
           FILTER NOT EXISTS {{ GRAPH <{kg}> {{ ?iri a owl:Class }} }}
           FILTER NOT EXISTS {{ GRAPH <{kg}> {{ ?iri a rdfs:Class }} }}
         }}
@@ -124,13 +143,18 @@ SELECT DISTINCT ?iri ?label WHERE {{
         remaining = limit - len(results)
         if remaining > 0:
             rows = await store.sparql_select(f"""{_P}
-SELECT DISTINCT ?iri ?label WHERE {{
-    GRAPH <{kg}> {{
-        {_ind_pat}
-        OPTIONAL {{ ?iri rdfs:label ?label }}
-        {q_filter}
+SELECT ?iri (MIN(?lbl) AS ?label) WHERE {{
+    {{
+        SELECT DISTINCT ?iri WHERE {{
+            GRAPH <{kg}> {{
+                {_ind_pat}
+                {q_filter}
+            }}
+        }}
     }}
-}} ORDER BY ?label LIMIT {remaining}""", dataset=dataset)
+    OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:label ?lbl }} }}
+}} GROUP BY ?iri
+ORDER BY ?label LIMIT {remaining}""", dataset=dataset)
             types_by_iri: dict[str, list[str]] = defaultdict(list)
             if rows:
                 iris_vals = " ".join(f"<{_v(r.get('iri'))}>" for r in rows)

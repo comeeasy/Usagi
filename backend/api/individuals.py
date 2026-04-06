@@ -48,21 +48,21 @@ def _esc(s: str) -> str:
 
 def _individual_pattern(kg: str) -> str:
     """
-    owl:NamedIndividual 또는 (어떤 클래스에 rdf:type — 클래스가 owl:Class·rdfs:Class 모두 허용).
-    LOD는 클래스를 rdfs:Class만 단언하는 경우가 많아 owl:Class만 보면 인스턴스가 전부 빠짐.
-    NOT EXISTS는 kg 그래프를 명시(구현체에 따라 상위 GRAPH가 상속 안 될 수 있음).
+    owl:NamedIndividual 또는 rdf:type의 대상으로 사용된 IRI의 인스턴스.
+    RDFS 의미론상 rdf:type 대상은 클래스이므로, 선언 여부와 무관하게 인스턴스로 취급.
+    ABox-only KG (foaf:Person 등 외부 어휘 참조)에서도 동작.
     """
     return f"""
     {{
       ?iri a owl:NamedIndividual
     }} UNION {{
       ?iri rdf:type ?ctype .
-      {{
-        GRAPH <{kg}> {{ ?ctype a owl:Class }}
-      }} UNION {{
-        GRAPH <{kg}> {{ ?ctype a rdfs:Class .
-        FILTER NOT EXISTS {{ ?ctype a owl:Ontology }} }}
-      }}
+      FILTER(isIRI(?ctype))
+      FILTER(?ctype NOT IN (
+          owl:Class, owl:NamedIndividual, owl:Ontology,
+          owl:ObjectProperty, owl:DatatypeProperty, owl:AnnotationProperty,
+          rdfs:Class, rdfs:Datatype, rdf:Property
+      ))
       FILTER NOT EXISTS {{ GRAPH <{kg}> {{ ?iri a owl:Class }} }}
       FILTER NOT EXISTS {{ GRAPH <{kg}> {{ ?iri a rdfs:Class }} }}
     }}
@@ -130,20 +130,24 @@ async def list_individuals(
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
     GRAPH <{kg}> {{
         {_individual_pattern(kg)}
-        OPTIONAL {{ ?iri rdfs:label ?label }}
         {extra}
     }}
 }}""", dataset=dataset)
     total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
 
     rows = await store.sparql_select(f"""{_P}
-SELECT DISTINCT ?iri ?label WHERE {{
-    GRAPH <{kg}> {{
-        {_individual_pattern(kg)}
-        OPTIONAL {{ ?iri rdfs:label ?label }}
-        {extra}
+SELECT ?iri (MIN(?lbl) AS ?label) WHERE {{
+    {{
+        SELECT DISTINCT ?iri WHERE {{
+            GRAPH <{kg}> {{
+                {_individual_pattern(kg)}
+                {extra}
+            }}
+        }}
     }}
-}} ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
+    OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:label ?lbl }} }}
+}} GROUP BY ?iri
+ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
 
     types_by_iri: dict[str, list[str]] = defaultdict(list)
     if rows:
@@ -288,53 +292,76 @@ async def get_individual(
     if g is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{g}> {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset):
+    # 존재 확인: outgoing 트리플이 하나라도 있으면 유효 (owl:NamedIndividual 선언 불필요)
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{g}> {{ <{iri}> ?p ?o }} }}", dataset=dataset):
         raise HTTPException(404, detail={"code": "INDIVIDUAL_NOT_FOUND", "message": f"Not found: {iri}"})
 
-    basic = await store.sparql_select(f"""{_P}
-SELECT ?label WHERE {{ GRAPH <{g}> {{ <{iri}> a owl:NamedIndividual . OPTIONAL {{ <{iri}> rdfs:label ?label }} }} }} LIMIT 1""", dataset=dataset)
-    label = _v(basic[0].get("label")) or None if basic else None
-
-    type_rows = await store.sparql_select(f"""{_P}
-SELECT DISTINCT ?type WHERE {{
-    GRAPH <{g}> {{ <{iri}> rdf:type ?type . FILTER(?type != owl:NamedIndividual) FILTER(isIRI(?type)) }}
+    # 모든 outgoing 트리플 한 번에 가져오기 — predicate 분류는 Python에서
+    rows = await store.sparql_select(f"""{_P}
+SELECT ?p ?o WHERE {{
+    GRAPH <{g}> {{
+        <{iri}> ?p ?o .
+        FILTER(!isBlank(?o))
+    }}
 }}""", dataset=dataset)
-    types = [_v(r.get("type")) for r in type_rows]
 
-    dp_rows = await store.sparql_select(f"""{_P}
-SELECT ?g ?p ?o WHERE {{
-    GRAPH <{g}> {{ <{iri}> ?p ?o . FILTER(isLiteral(?o))
-        FILTER(?p NOT IN (rdfs:label, prov:generatedAtTime, prov:wasAttributedTo)) }}
-}}""", dataset=dataset)
-    data_property_values = [
-        DataPropertyValue(
-            property_iri=_v(r.get("p")),
-            value=_v(r.get("o")),
-            datatype=_xsd_short(r["o"].get("datatype", _XSD_BASE + "string")) if r.get("o") else "xsd:string",
-            graph_iri=_v(r.get("g")),
-        )
-        for r in dp_rows
-    ]
+    _LABEL_PREDS = {
+        "http://www.w3.org/2000/01/rdf-schema#label",
+        "http://www.w3.org/2004/02/skos/core#prefLabel",
+        "http://www.w3.org/2004/02/skos/core#altLabel",
+    }
+    _META_PREDS = {
+        "http://www.w3.org/ns/prov#generatedAtTime",
+        "http://www.w3.org/ns/prov#wasAttributedTo",
+    }
+    _RDF_TYPE      = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+    _OWL_SAME      = "http://www.w3.org/2002/07/owl#sameAs"
+    _OWL_DIFF      = "http://www.w3.org/2002/07/owl#differentFrom"
+    _OWL_NAMED_IND = "http://www.w3.org/2002/07/owl#NamedIndividual"
 
-    op_rows = await store.sparql_select(f"""{_P}
-SELECT ?g ?p ?o WHERE {{
-    GRAPH <{g}> {{ <{iri}> ?p ?o . FILTER(isIRI(?o))
-        FILTER(?p NOT IN (rdf:type, owl:sameAs, owl:differentFrom)) }}
-}}""", dataset=dataset)
-    object_property_values = [
-        ObjectPropertyValue(property_iri=_v(r.get("p")), target_iri=_v(r.get("o")), graph_iri=_v(r.get("g")))
-        for r in op_rows
-    ]
+    label: str | None = None
+    types: list[str] = []
+    data_property_values: list[DataPropertyValue] = []
+    object_property_values: list[ObjectPropertyValue] = []
+    same_as: list[str] = []
+    different_from: list[str] = []
 
-    same_rows = await store.sparql_select(f"{_P}\nSELECT ?s WHERE {{ GRAPH <{g}> {{ <{iri}> owl:sameAs ?s . FILTER(isIRI(?s)) }} }}", dataset=dataset)
-    diff_rows = await store.sparql_select(f"{_P}\nSELECT ?d WHERE {{ GRAPH <{g}> {{ <{iri}> owl:differentFrom ?d . FILTER(isIRI(?d)) }} }}", dataset=dataset)
+    for row in rows:
+        p = _v(row.get("p"))
+        o = row.get("o", {})
+        o_val = _v(o)
+        o_type = o.get("type", "")
+
+        if p in _LABEL_PREDS:
+            if label is None:
+                label = o_val
+        elif p in _META_PREDS:
+            pass  # provenance 전용 엔드포인트에서 처리
+        elif p == _RDF_TYPE and o_type == "uri":
+            if o_val != _OWL_NAMED_IND:
+                types.append(o_val)
+        elif p == _OWL_SAME and o_type == "uri":
+            same_as.append(o_val)
+        elif p == _OWL_DIFF and o_type == "uri":
+            different_from.append(o_val)
+        elif o_type == "literal":
+            data_property_values.append(DataPropertyValue(
+                property_iri=p,
+                value=o_val,
+                datatype=_xsd_short(o.get("datatype", _XSD_BASE + "string")),
+                graph_iri=g,
+            ))
+        elif o_type == "uri":
+            object_property_values.append(ObjectPropertyValue(
+                property_iri=p, target_iri=o_val, graph_iri=g,
+            ))
 
     return Individual(
         iri=iri, ontology_id=ontology_id, label=label, types=types,
         data_property_values=data_property_values,
         object_property_values=object_property_values,
-        same_as=[_v(r.get("s")) for r in same_rows],
-        different_from=[_v(r.get("d")) for r in diff_rows],
+        same_as=same_as,
+        different_from=different_from,
     )
 
 
@@ -354,7 +381,7 @@ async def update_individual(
     if g is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{g}> {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{g}> {{ <{iri}> ?p ?o }} }}", dataset=dataset):
         raise HTTPException(404, detail={"code": "INDIVIDUAL_NOT_FOUND", "message": f"Not found: {iri}"})
 
     if body.label is not None:
@@ -419,7 +446,7 @@ async def delete_individual(
     if g is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{g}> {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{g}> {{ <{iri}> ?p ?o }} }}", dataset=dataset):
         raise HTTPException(404, detail={"code": "INDIVIDUAL_NOT_FOUND", "message": f"Not found: {iri}"})
 
     await store.sparql_update(f"""{_P}

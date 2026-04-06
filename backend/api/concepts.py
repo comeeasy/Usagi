@@ -15,7 +15,7 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from models.concept import Concept, ConceptCreate, ConceptUpdate, PropertyRestriction
+from models.concept import Concept, ConceptCreate, ConceptUpdate, PropertyRestriction, PropertyValue
 from models.ontology import PaginatedResponse
 from services.ontology_graph import resolve_kg_graph_iri
 
@@ -40,13 +40,34 @@ def _esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
-# 임포트·LOD 호환: owl:Class, rdfs:Class, SKOS Concept
-_CLASS_PATTERN = """
-    { ?iri a owl:Class }
+# 임포트·LOD 호환: owl:Class, rdfs:Class, SKOS Concept, 암묵적 클래스(rdf:type 대상), subClassOf 참여 클래스
+# RDFS 의미론상 rdf:type 대상 또는 rdfs:subClassOf 참여 IRI는 모두 클래스임 (ABox-only KG 포함)
+_CLASS_FILTER = """
+    FILTER(isIRI(?iri))
+    FILTER(?iri NOT IN (
+        owl:Class, owl:NamedIndividual, owl:Ontology,
+        owl:ObjectProperty, owl:DatatypeProperty, owl:AnnotationProperty,
+        rdfs:Class, rdfs:Datatype, rdf:Property,
+        owl:Thing, rdfs:Resource
+    ))
+"""
+
+_CLASS_PATTERN = f"""
+    {{ ?iri a owl:Class }}
     UNION
-    { ?iri a rdfs:Class . FILTER NOT EXISTS { ?iri a owl:Ontology } }
+    {{ ?iri a rdfs:Class . FILTER NOT EXISTS {{ ?iri a owl:Ontology }} }}
     UNION
-    { ?iri a skos:Concept }
+    {{ ?iri a skos:Concept }}
+    UNION
+    {{
+        [] rdf:type ?iri .
+        {_CLASS_FILTER}
+    }}
+    UNION
+    {{
+        {{ ?iri rdfs:subClassOf [] }} UNION {{ [] rdfs:subClassOf ?iri }}
+        {_CLASS_FILTER}
+    }}
 """
 
 
@@ -119,22 +140,24 @@ async def list_concepts(
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
     GRAPH <{kg}> {{
         {_CLASS_PATTERN}
-        OPTIONAL {{ ?iri rdfs:label ?label }}
         {extra}
     }}
 }}""", dataset=dataset)
     total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
 
     rows = await store.sparql_select(f"""{_P}
-SELECT ?iri ?label ?comment (COUNT(DISTINCT ?ind) AS ?individualCount) WHERE {{
-    GRAPH <{kg}> {{
-        {_CLASS_PATTERN}
-        OPTIONAL {{ ?iri rdfs:label ?label }}
-        OPTIONAL {{ ?iri rdfs:comment ?comment }}
-        {extra}
+SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment) WHERE {{
+    {{
+        SELECT DISTINCT ?iri WHERE {{
+            GRAPH <{kg}> {{
+                {_CLASS_PATTERN}
+                {extra}
+            }}
+        }}
     }}
-    OPTIONAL {{ GRAPH <{kg}> {{ ?ind rdf:type ?iri }} }}
-}} GROUP BY ?iri ?label ?comment
+    OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:label ?lbl }} }}
+    OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:comment ?cmt }} }}
+}} GROUP BY ?iri
 ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
 
     items = [
@@ -143,7 +166,7 @@ ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
             ontology_id=ontology_id,
             label=_v(r.get("label")) or _v(r.get("iri")),
             comment=_v(r.get("comment")) or None,
-            individual_count=int(_v(r.get("individualCount"), "0")),
+            individual_count=0,  # 상세 페이지에서만 계산 (목록에서 COUNT는 타임아웃 위험)
         )
         for r in rows
     ]
@@ -209,22 +232,26 @@ async def get_concept(
     if kg is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{kg}> {{ <{iri}> a owl:Class }} }}", dataset=dataset):
+    # 존재 확인: outgoing 트리플, rdf:type 대상, subClassOf 참여 중 하나라도 있으면 유효
+    _exists = await store.sparql_ask(f"""{_P}
+ASK {{ GRAPH <{kg}> {{
+    {{ <{iri}> ?p ?o }}
+    UNION {{ [] rdf:type <{iri}> }}
+    UNION {{ <{iri}> rdfs:subClassOf [] }}
+    UNION {{ [] rdfs:subClassOf <{iri}> }}
+}} }}""", dataset=dataset)
+    if not _exists:
         raise HTTPException(404, detail={"code": "CONCEPT_NOT_FOUND", "message": f"Not found: {iri}"})
 
-    basic_q = f"""{_P}
-SELECT ?label ?comment WHERE {{
-    GRAPH <{kg}> {{ <{iri}> a owl:Class .
-        OPTIONAL {{ <{iri}> rdfs:label ?label }}
-        OPTIONAL {{ <{iri}> rdfs:comment ?comment }}
+    # 이 IRI의 모든 outgoing 트리플 (blank node 제외) — 어떤 어휘든 자동 처리
+    triples_q = f"""{_P}
+SELECT ?p ?o WHERE {{
+    GRAPH <{kg}> {{
+        <{iri}> ?p ?o .
+        FILTER(!isBlank(?o))
     }}
-}} LIMIT 1"""
-    sc_q = f"""{_P}
-SELECT ?sc WHERE {{ GRAPH <{kg}> {{ <{iri}> rdfs:subClassOf ?sc . FILTER(isIRI(?sc)) }} }}"""
-    ec_q = f"""{_P}
-SELECT ?ec WHERE {{ GRAPH <{kg}> {{ <{iri}> owl:equivalentClass ?ec . FILTER(isIRI(?ec)) }} }}"""
-    dw_q = f"""{_P}
-SELECT ?dw WHERE {{ GRAPH <{kg}> {{ <{iri}> owl:disjointWith ?dw . FILTER(isIRI(?dw)) }} }}"""
+}}"""
+    # blank node owl:Restriction 전용 쿼리
     rest_q = f"""{_P}
 SELECT ?bn ?prop ?svf ?avf ?hv ?min ?max ?exact WHERE {{
     GRAPH <{kg}> {{
@@ -241,20 +268,62 @@ SELECT ?bn ?prop ?svf ?avf ?hv ?min ?max ?exact WHERE {{
     cnt_q = f"""{_P}
 SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE {{ GRAPH <{kg}> {{ ?ind rdf:type <{iri}> }} }}"""
 
-    basic, sc_rows, ec_rows, dw_rows, rest_rows, cnt_rows = await asyncio.gather(
-        store.sparql_select(basic_q, dataset=dataset),
-        store.sparql_select(sc_q,   dataset=dataset),
-        store.sparql_select(ec_q,   dataset=dataset),
-        store.sparql_select(dw_q,   dataset=dataset),
-        store.sparql_select(rest_q, dataset=dataset),
-        store.sparql_select(cnt_q,  dataset=dataset),
+    triples_rows, rest_rows, cnt_rows = await asyncio.gather(
+        store.sparql_select(triples_q, dataset=dataset),
+        store.sparql_select(rest_q,    dataset=dataset),
+        store.sparql_select(cnt_q,     dataset=dataset),
     )
 
-    label = _v(basic[0].get("label")) if basic else iri
-    comment = _v(basic[0].get("comment")) or None if basic else None
-    super_classes = [_v(r.get("sc")) for r in sc_rows]
-    equivalent_classes = [_v(r.get("ec")) for r in ec_rows]
-    disjoint_with = [_v(r.get("dw")) for r in dw_rows]
+    # predicate URI 기반 분류 — 어휘 추가 시 여기만 수정
+    _LABEL_PREDS    = {
+        "http://www.w3.org/2000/01/rdf-schema#label",
+        "http://www.w3.org/2004/02/skos/core#prefLabel",
+        "http://www.w3.org/2004/02/skos/core#altLabel",
+    }
+    _COMMENT_PREDS  = {
+        "http://www.w3.org/2000/01/rdf-schema#comment",
+        "http://www.w3.org/2004/02/skos/core#definition",
+    }
+    _SUBCLASSOF  = "http://www.w3.org/2000/01/rdf-schema#subClassOf"
+    _EQUIVALENT  = "http://www.w3.org/2002/07/owl#equivalentClass"
+    _DISJOINT    = "http://www.w3.org/2002/07/owl#disjointWith"
+
+    label: str = iri
+    comment: str | None = None
+    super_classes: list[str] = []
+    equivalent_classes: list[str] = []
+    disjoint_with: list[str] = []
+    properties: list[PropertyValue] = []
+
+    _KNOWN_PREDS = _LABEL_PREDS | _COMMENT_PREDS | {_SUBCLASSOF, _EQUIVALENT, _DISJOINT}
+
+    for row in triples_rows:
+        p = _v(row.get("p"))
+        o = row.get("o", {})
+        o_val = _v(o)
+        o_type = o.get("type", "") if isinstance(o, dict) else ""
+        o_is_iri = o_type == "uri"
+
+        if p in _LABEL_PREDS:
+            if label == iri:
+                label = o_val
+        elif p in _COMMENT_PREDS:
+            if comment is None:
+                comment = o_val
+        elif p == _SUBCLASSOF and o_is_iri:
+            super_classes.append(o_val)
+        elif p == _EQUIVALENT and o_is_iri:
+            equivalent_classes.append(o_val)
+        elif p == _DISJOINT and o_is_iri:
+            disjoint_with.append(o_val)
+        elif p not in _KNOWN_PREDS:
+            properties.append(PropertyValue(
+                predicate=p,
+                value=o_val,
+                value_type="uri" if o_is_iri else "literal",
+                datatype=o.get("datatype") if isinstance(o, dict) else None,
+                language=o.get("xml:lang") if isinstance(o, dict) else None,
+            ))
 
     restrictions: list[PropertyRestriction] = []
     for r in rest_rows:
@@ -281,7 +350,7 @@ SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE {{ GRAPH <{kg}> {{ ?ind rdf:type <{i
         iri=iri, ontology_id=ontology_id, label=label or iri, comment=comment,
         super_classes=super_classes, equivalent_classes=equivalent_classes,
         disjoint_with=disjoint_with, restrictions=restrictions,
-        individual_count=individual_count,
+        individual_count=individual_count, properties=properties,
     )
 
 
