@@ -18,10 +18,14 @@ from typing import Any
 
 import numpy as np
 
+from services.ontology_graph import kg_graph_iri
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 _DEFAULT_TTL = 300  # seconds
+# 온톨로지 규모가 크면 임베딩·행렬이 메모리를 과다 사용하므로 상한
+_MAX_ITEMS_PER_KIND = 8000
 
 
 _SPARQL_PREFIX = """
@@ -187,23 +191,24 @@ class VectorIndexManager:
         return idx
 
     async def _build(self, idx: VectorIndex, ontology_iri: str, store: Any) -> None:
-        tbox_iri = f"{ontology_iri}/tbox"
+        kg_iri = kg_graph_iri(ontology_iri)
 
-        # Concepts: tbox 그래프에서 조회
+        # Concepts: kg 그래프에서 조회
         concept_rows = await store.sparql_select(f"""{_SPARQL_PREFIX}
 SELECT ?iri ?label WHERE {{
-    GRAPH <{tbox_iri}> {{
+    GRAPH <{kg_iri}> {{
         ?iri a owl:Class .
         OPTIONAL {{ ?iri rdfs:label ?label }}
     }}
-}}""")
+}} LIMIT {_MAX_ITEMS_PER_KIND}""")
 
-        # Individuals: 전체 그래프에서 조회 (manual 그래프에 저장됨)
         individual_rows = await store.sparql_select(f"""{_SPARQL_PREFIX}
 SELECT ?iri ?label WHERE {{
-    ?iri a owl:NamedIndividual .
-    OPTIONAL {{ ?iri rdfs:label ?label }}
-}}""")
+    GRAPH <{kg_iri}> {{
+        ?iri a owl:NamedIndividual .
+        OPTIONAL {{ ?iri rdfs:label ?label }}
+    }}
+}} LIMIT {_MAX_ITEMS_PER_KIND}""")
 
         items: list[dict] = []
         seen: set[str] = set()

@@ -28,7 +28,7 @@ def _admin_url(path: str = "") -> str:
 @router.get("")
 async def list_datasets(request: Request) -> list[dict]:
     """Fuseki Admin API에서 dataset 목록을 가져온다."""
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10, auth=settings.fuseki_basic_auth()) as client:
         try:
             resp = await client.get(_admin_url("datasets"), headers={"Accept": "application/json"})
             resp.raise_for_status()
@@ -57,7 +57,7 @@ class DatasetCreate(BaseModel):
 @router.post("", status_code=201)
 async def create_dataset(body: DatasetCreate) -> dict:
     """Fuseki Admin API로 새 dataset을 생성한다."""
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10, auth=settings.fuseki_basic_auth()) as client:
         try:
             resp = await client.post(
                 _admin_url("datasets"),
@@ -82,7 +82,7 @@ async def create_dataset(body: DatasetCreate) -> dict:
 @router.delete("/{name}", status_code=204)
 async def delete_dataset(name: str) -> None:
     """Fuseki Admin API로 dataset을 삭제한다."""
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10, auth=settings.fuseki_basic_auth()) as client:
         try:
             resp = await client.delete(_admin_url(f"datasets/{name}"))
             resp.raise_for_status()

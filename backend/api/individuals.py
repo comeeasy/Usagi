@@ -14,8 +14,11 @@ from datetime import datetime, timezone
 from typing import Annotated
 from urllib.parse import unquote
 
+from collections import defaultdict
+
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from api.concepts import _resolve_kg_graph
 from models.individual import (
     DataPropertyValue,
     Individual,
@@ -37,10 +40,6 @@ PREFIX prov: <http://www.w3.org/ns/prov#>
 """
 
 _XSD_BASE = "http://www.w3.org/2001/XMLSchema#"
-
-
-def _manual_graph(ontology_id: str) -> str:
-    return f"urn:source:manual/{ontology_id}"
 
 
 def _esc(s: str) -> str:
@@ -81,6 +80,10 @@ async def list_individuals(
     dataset: str = Query("ontology"),
 ) -> dict:
     store = request.app.state.ontology_store
+    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if kg is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
+
     offset = (page - 1) * page_size
     filter_type = type_iri or concept_iri
 
@@ -92,29 +95,38 @@ async def list_individuals(
 
     count_rows = await store.sparql_select(f"""{_P}
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
-    GRAPH ?g {{ ?iri a owl:NamedIndividual . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
+    GRAPH <{kg}> {{ ?iri a owl:NamedIndividual . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
 }}""", dataset=dataset)
     total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
 
     rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label WHERE {{
-    GRAPH ?g {{ ?iri a owl:NamedIndividual . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
+    GRAPH <{kg}> {{ ?iri a owl:NamedIndividual . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
 }} ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
 
-    items = []
-    for row in rows:
-        ind_iri = _v(row.get("iri"))
+    types_by_iri: dict[str, list[str]] = defaultdict(list)
+    if rows:
+        iris_vals = " ".join(f"<{_v(r.get('iri'))}>" for r in rows)
         type_rows = await store.sparql_select(f"""{_P}
-SELECT DISTINCT ?type WHERE {{
-    GRAPH ?g {{ <{ind_iri}> rdf:type ?type .
-    FILTER(?type != owl:NamedIndividual) FILTER(isIRI(?type)) }}
+SELECT ?iri ?type WHERE {{
+    VALUES ?iri {{ {iris_vals} }}
+    GRAPH <{kg}> {{
+        ?iri rdf:type ?type .
+        FILTER(?type != owl:NamedIndividual) FILTER(isIRI(?type))
+    }}
 }}""", dataset=dataset)
-        items.append(Individual(
-            iri=ind_iri,
+        for tr in type_rows:
+            types_by_iri[_v(tr.get("iri"))].append(_v(tr.get("type")))
+
+    items = [
+        Individual(
+            iri=_v(row.get("iri")),
             ontology_id=ontology_id,
             label=_v(row.get("label")) or None,
-            types=[_v(r.get("type")) for r in type_rows],
-        ))
+            types=types_by_iri.get(_v(row.get("iri")), []),
+        )
+        for row in rows
+    ]
 
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
@@ -129,9 +141,13 @@ async def create_individual(
     dataset: str = Query("ontology"),
 ) -> Individual:
     store = request.app.state.ontology_store
-    graph_iri = _manual_graph(ontology_id)
+    graph_iri = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if graph_iri is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if await store.sparql_ask(f"{_P} ASK {{ <{body.iri}> a owl:NamedIndividual }}", dataset=dataset):
+    if await store.sparql_ask(
+        f"{_P} ASK {{ GRAPH <{graph_iri}> {{ <{body.iri}> a owl:NamedIndividual }} }}", dataset=dataset
+    ):
         raise HTTPException(409, detail={"code": "INDIVIDUAL_IRI_DUPLICATE", "message": f"IRI exists: {body.iri}"})
 
     now = datetime.now(timezone.utc).isoformat()
@@ -202,7 +218,10 @@ SELECT ?ingestedAt ?attr (COUNT(*) AS ?cnt) WHERE {{
         ingested_at = _v(pr.get("ingestedAt")) or datetime.now(timezone.utc).isoformat()
         source_id = _v(pr.get("attr")) or "unknown"
         triple_count = int(_v(pr.get("cnt"), "0"))
-        source_type = "manual" if "manual" in g else ("api-stream" if "kafka" in g else ("api-rest" if "api" in g else "unknown"))
+        src = str(source_id).lower()
+        source_type = (
+            "manual" if src == "manual" else ("api-stream" if "kafka" in src else ("api-rest" if "api" in src else "unknown"))
+        )
 
         records.append(ProvenanceRecord(
             graph_iri=g, source_id=source_id, source_type=source_type,
@@ -224,23 +243,26 @@ async def get_individual(
 ) -> Individual:
     store = request.app.state.ontology_store
     iri = unquote(iri)
+    g = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if g is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{g}> {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset):
         raise HTTPException(404, detail={"code": "INDIVIDUAL_NOT_FOUND", "message": f"Not found: {iri}"})
 
     basic = await store.sparql_select(f"""{_P}
-SELECT ?label WHERE {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual . OPTIONAL {{ <{iri}> rdfs:label ?label }} }} }} LIMIT 1""", dataset=dataset)
+SELECT ?label WHERE {{ GRAPH <{g}> {{ <{iri}> a owl:NamedIndividual . OPTIONAL {{ <{iri}> rdfs:label ?label }} }} }} LIMIT 1""", dataset=dataset)
     label = _v(basic[0].get("label")) or None if basic else None
 
     type_rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?type WHERE {{
-    GRAPH ?g {{ <{iri}> rdf:type ?type . FILTER(?type != owl:NamedIndividual) FILTER(isIRI(?type)) }}
+    GRAPH <{g}> {{ <{iri}> rdf:type ?type . FILTER(?type != owl:NamedIndividual) FILTER(isIRI(?type)) }}
 }}""", dataset=dataset)
     types = [_v(r.get("type")) for r in type_rows]
 
     dp_rows = await store.sparql_select(f"""{_P}
 SELECT ?g ?p ?o WHERE {{
-    GRAPH ?g {{ <{iri}> ?p ?o . FILTER(isLiteral(?o))
+    GRAPH <{g}> {{ <{iri}> ?p ?o . FILTER(isLiteral(?o))
         FILTER(?p NOT IN (rdfs:label, prov:generatedAtTime, prov:wasAttributedTo)) }}
 }}""", dataset=dataset)
     data_property_values = [
@@ -255,7 +277,7 @@ SELECT ?g ?p ?o WHERE {{
 
     op_rows = await store.sparql_select(f"""{_P}
 SELECT ?g ?p ?o WHERE {{
-    GRAPH ?g {{ <{iri}> ?p ?o . FILTER(isIRI(?o))
+    GRAPH <{g}> {{ <{iri}> ?p ?o . FILTER(isIRI(?o))
         FILTER(?p NOT IN (rdf:type, owl:sameAs, owl:differentFrom)) }}
 }}""", dataset=dataset)
     object_property_values = [
@@ -263,8 +285,8 @@ SELECT ?g ?p ?o WHERE {{
         for r in op_rows
     ]
 
-    same_rows = await store.sparql_select(f"{_P}\nSELECT ?s WHERE {{ GRAPH ?g {{ <{iri}> owl:sameAs ?s . FILTER(isIRI(?s)) }} }}", dataset=dataset)
-    diff_rows = await store.sparql_select(f"{_P}\nSELECT ?d WHERE {{ GRAPH ?g {{ <{iri}> owl:differentFrom ?d . FILTER(isIRI(?d)) }} }}", dataset=dataset)
+    same_rows = await store.sparql_select(f"{_P}\nSELECT ?s WHERE {{ GRAPH <{g}> {{ <{iri}> owl:sameAs ?s . FILTER(isIRI(?s)) }} }}", dataset=dataset)
+    diff_rows = await store.sparql_select(f"{_P}\nSELECT ?d WHERE {{ GRAPH <{g}> {{ <{iri}> owl:differentFrom ?d . FILTER(isIRI(?d)) }} }}", dataset=dataset)
 
     return Individual(
         iri=iri, ontology_id=ontology_id, label=label, types=types,
@@ -287,9 +309,11 @@ async def update_individual(
 ) -> Individual:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    g = _manual_graph(ontology_id)
+    g = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if g is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{g}> {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset):
         raise HTTPException(404, detail={"code": "INDIVIDUAL_NOT_FOUND", "message": f"Not found: {iri}"})
 
     if body.label is not None:
@@ -350,11 +374,13 @@ async def delete_individual(
 ) -> None:
     store = request.app.state.ontology_store
     iri = unquote(iri)
+    g = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if g is None:
+        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{g}> {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset):
         raise HTTPException(404, detail={"code": "INDIVIDUAL_NOT_FOUND", "message": f"Not found: {iri}"})
 
     await store.sparql_update(f"""{_P}
-DELETE {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}
-WHERE  {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}""", dataset=dataset)
-    await store.sparql_update(f"{_P}\nDELETE WHERE {{ <{iri}> ?p ?o }}", dataset=dataset)
+DELETE {{ GRAPH <{g}> {{ <{iri}> ?p ?o }} }}
+WHERE  {{ GRAPH <{g}> {{ <{iri}> ?p ?o }} }}""", dataset=dataset)

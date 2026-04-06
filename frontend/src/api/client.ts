@@ -14,17 +14,39 @@ export class ApiError extends Error {
   }
 }
 
+/** FastAPI는 detail을 문자열, 객체 { message }, 배열 등으로 줄 수 있음 */
+function formatFastApiDetail(detail: unknown): string | undefined {
+  if (detail == null) return undefined
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const parts = detail.map((d) => {
+      if (d && typeof d === 'object' && 'msg' in d) return String((d as { msg: string }).msg)
+      return JSON.stringify(d)
+    })
+    return parts.join('; ')
+  }
+  if (typeof detail === 'object' && detail !== null && 'message' in detail) {
+    return String((detail as { message: string }).message)
+  }
+  try {
+    return JSON.stringify(detail)
+  } catch {
+    return String(detail)
+  }
+}
+
 async function parseError(response: Response): Promise<never> {
-  let body: { error?: string; detail?: string } = {}
+  let body: { error?: string; detail?: unknown } = {}
   try {
     body = await response.json()
   } catch {
     // ignore parse error
   }
+  const detailStr = formatFastApiDetail(body.detail)
   throw new ApiError(
     response.status,
     body.error ?? response.statusText,
-    body.detail,
+    detailStr,
   )
 }
 

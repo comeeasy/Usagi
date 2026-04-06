@@ -11,7 +11,7 @@ from services.ontology_store import OntologyStore
 from services.reasoner_service import ReasonerService
 
 BASE = "https://test-reasoner.example.org"
-TBOX = f"{BASE}/tbox"
+KG = f"{BASE}/kg"
 
 _P = """
 PREFIX owl:  <http://www.w3.org/2002/07/owl#>
@@ -36,7 +36,7 @@ async def test_cardinality_no_violation(store_svc):
     store, svc = store_svc
     await store.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Project>  a owl:Class .
         <{BASE}#hasMember> a owl:ObjectProperty .
 
@@ -50,7 +50,7 @@ INSERT DATA {{
             <{BASE}#hasMember> <{BASE}#bob> .
     }}
 }}""")
-    violations = await svc._detect_cardinality_violations(TBOX)
+    violations = await svc._detect_cardinality_violations(KG)
     assert violations == []
 
 
@@ -60,7 +60,7 @@ async def test_max_cardinality_violation(store_svc):
     store, svc = store_svc
     await store.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Department> a owl:Class .
         <{BASE}#manages> a owl:ObjectProperty .
 
@@ -74,7 +74,7 @@ INSERT DATA {{
             <{BASE}#manages> <{BASE}#emp2> .
     }}
 }}""")
-    violations = await svc._detect_cardinality_violations(TBOX)
+    violations = await svc._detect_cardinality_violations(KG)
     assert len(violations) == 1
     v = violations[0]
     assert v.type == "CardinalityViolation"
@@ -88,7 +88,7 @@ async def test_exact_cardinality_violation_too_many(store_svc):
     store, svc = store_svc
     await store.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Task> a owl:Class .
         <{BASE}#assignedTo> a owl:ObjectProperty .
 
@@ -102,7 +102,7 @@ INSERT DATA {{
             <{BASE}#assignedTo> <{BASE}#bob> .
     }}
 }}""")
-    violations = await svc._detect_cardinality_violations(TBOX)
+    violations = await svc._detect_cardinality_violations(KG)
     assert len(violations) == 1
     assert violations[0].type == "CardinalityViolation"
     assert "exactCardinality=1" in violations[0].description
@@ -114,7 +114,7 @@ async def test_exact_cardinality_no_violation(store_svc):
     store, svc = store_svc
     await store.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Task> a owl:Class .
         <{BASE}#assignedTo> a owl:ObjectProperty .
 
@@ -127,7 +127,7 @@ INSERT DATA {{
             <{BASE}#assignedTo> <{BASE}#alice> .
     }}
 }}""")
-    violations = await svc._detect_cardinality_violations(TBOX)
+    violations = await svc._detect_cardinality_violations(KG)
     assert violations == []
 
 
@@ -137,7 +137,7 @@ async def test_cardinality_multiple_individuals(store_svc):
     store, svc = store_svc
     await store.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Slot> a owl:Class .
         <{BASE}#hasItem> a owl:ObjectProperty .
 
@@ -154,7 +154,7 @@ INSERT DATA {{
             <{BASE}#hasItem> <{BASE}#item3> .
     }}
 }}""")
-    violations = await svc._detect_cardinality_violations(TBOX)
+    violations = await svc._detect_cardinality_violations(KG)
     iris = [v.subject_iri for v in violations]
     assert f"{BASE}#slotB" in iris
     assert f"{BASE}#slotA" not in iris
@@ -168,7 +168,7 @@ async def test_domain_range_no_violation(store_svc):
     store, svc = store_svc
     await store.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Person>     a owl:Class .
         <{BASE}#Animal>     a owl:Class .
         <{BASE}#hasPet>     a owl:ObjectProperty ;
@@ -180,7 +180,7 @@ INSERT DATA {{
         <{BASE}#alice> <{BASE}#hasPet> <{BASE}#fluffy> .
     }}
 }}""")
-    violations = await svc._detect_domain_range_violations(TBOX)
+    violations = await svc._detect_domain_range_violations(KG)
     assert violations == []
 
 
@@ -190,7 +190,7 @@ async def test_domain_violation(store_svc):
     store, svc = store_svc
     await store.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Person> a owl:Class .
         <{BASE}#Animal> a owl:Class .
         <{BASE}#drives>  a owl:ObjectProperty ;
@@ -201,7 +201,7 @@ INSERT DATA {{
         <{BASE}#cat> <{BASE}#drives> <{BASE}#car> .
     }}
 }}""")
-    violations = await svc._detect_domain_range_violations(TBOX)
+    violations = await svc._detect_domain_range_violations(KG)
     assert len(violations) >= 1
     v = violations[0]
     assert v.type == "DomainRangeViolation"
@@ -215,7 +215,7 @@ async def test_range_violation(store_svc):
     store, svc = store_svc
     await store.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Person> a owl:Class .
         <{BASE}#Animal> a owl:Class .
         <{BASE}#hasPet> a owl:ObjectProperty ;
@@ -226,7 +226,7 @@ INSERT DATA {{
         <{BASE}#alice> <{BASE}#hasPet> <{BASE}#bob> .
     }}
 }}""")
-    violations = await svc._detect_domain_range_violations(TBOX)
+    violations = await svc._detect_domain_range_violations(KG)
     assert len(violations) >= 1
     v = violations[0]
     assert v.type == "DomainRangeViolation"
@@ -239,7 +239,7 @@ async def test_domain_violation_subclass_ok(store_svc):
     store, svc = store_svc
     await store.sparql_update(f"""{_P}
 INSERT DATA {{
-    GRAPH <{TBOX}> {{
+    GRAPH <{KG}> {{
         <{BASE}#Person>   a owl:Class .
         <{BASE}#Employee> a owl:Class ;
             rdfs:subClassOf <{BASE}#Person> .
@@ -250,5 +250,5 @@ INSERT DATA {{
         <{BASE}#emp1> <{BASE}#works> <{BASE}#companyX> .
     }}
 }}""")
-    violations = await svc._detect_domain_range_violations(TBOX)
+    violations = await svc._detect_domain_range_violations(KG)
     assert violations == []

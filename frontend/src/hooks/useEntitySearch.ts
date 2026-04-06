@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { searchEntities, vectorSearch } from '@/api/entities'
+import { useDataset } from '@/contexts/DatasetContext'
 
 export function useEntitySearch(
   ontologyId: string | undefined,
@@ -8,6 +9,7 @@ export function useEntitySearch(
   kind: string = 'all',
   useVector = false,
 ) {
+  const { dataset } = useDataset()
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery)
 
   useEffect(() => {
@@ -16,14 +18,14 @@ export function useEntitySearch(
   }, [initialQuery])
 
   return useQuery({
-    queryKey: ['entities', ontologyId, debouncedQuery, kind, useVector],
+    queryKey: ['entities', ontologyId, debouncedQuery, kind, useVector, dataset],
     queryFn: async () => {
-      if (!useVector) return searchEntities(ontologyId!, debouncedQuery, kind)
+      if (!useVector) return searchEntities(ontologyId!, debouncedQuery, kind, 20, dataset)
 
       // Vector ON: keyword + vector 병렬 호출 후 병합 (IRI 중복 제거, keyword 결과 우선)
       const [keywordResults, vectorResults] = await Promise.all([
-        searchEntities(ontologyId!, debouncedQuery, kind),
-        vectorSearch(ontologyId!, debouncedQuery),
+        searchEntities(ontologyId!, debouncedQuery, kind, 20, dataset),
+        vectorSearch(ontologyId!, debouncedQuery, 10, dataset),
       ])
       const seen = new Set(keywordResults.map((r) => r.iri))
       const extra = vectorResults.filter((r) => !seen.has(r.iri))
@@ -39,6 +41,7 @@ export function useSearchRelations(
   domainIri?: string,
   rangeIri?: string,
 ) {
+  const { dataset } = useDataset()
   const [debouncedQuery, setDebouncedQuery] = useState(query)
 
   useEffect(() => {
@@ -47,10 +50,10 @@ export function useSearchRelations(
   }, [query])
 
   return useQuery({
-    queryKey: ['relations-search', ontologyId, debouncedQuery, domainIri, rangeIri],
+    queryKey: ['relations-search', ontologyId, debouncedQuery, domainIri, rangeIri, dataset],
     queryFn: async () => {
       const { searchRelations } = await import('@/api/relations')
-      return searchRelations(ontologyId!, debouncedQuery, domainIri, rangeIri)
+      return searchRelations(ontologyId!, debouncedQuery, domainIri, rangeIri, 20, dataset)
     },
     enabled: !!ontologyId && debouncedQuery.length > 0,
   })

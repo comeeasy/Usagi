@@ -3,8 +3,8 @@ services/ingestion/csv_importer.py — CSV 파일 → Fuseki 일괄 import
 
 흐름:
   1. csv.DictReader 로 파일 파싱
-  2. iri_generator + rdflib Triple 생성 → OntologyStore.insert_triples() 로 Named Graph 삽입
-     (기존 Named Graph는 DROP 후 원자적 교체)
+  2. iri_generator + rdflib Graph → GSP POST(Turtle) 한 번으로 kg 그래프에 삽입
+  3. 동일 소스 재import 시 prov:wasAttributedTo 가 해당 source.id 인 트리플만 먼저 삭제
 """
 from __future__ import annotations
 
@@ -14,10 +14,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from rdflib import URIRef, Literal, BNode
+from rdflib import Graph, URIRef, Literal, BNode
 from rdflib.namespace import XSD
 
 from services.ingestion.iri_generator import generate
+from services.ontology_graph import resolve_kg_graph_iri
 from services.ontology_store import OntologyStore, Triple
 
 logger = logging.getLogger(__name__)
@@ -25,13 +26,6 @@ logger = logging.getLogger(__name__)
 _RDF_TYPE = URIRef("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
 _PROV_GENERATED_AT = URIRef("http://www.w3.org/ns/prov#generatedAtTime")
 _PROV_ATTRIBUTED_TO = URIRef("http://www.w3.org/ns/prov#wasAttributedTo")
-
-_BATCH_SIZE = 500
-
-
-def _build_named_graph_iri(source_id: str, timestamp: str) -> str:
-    return f"urn:source:{source_id}/{timestamp}"
-
 
 def _read_csv(file_path: Path, cfg: Any) -> list[dict]:
     """CSV 파일을 list[dict]로 읽는다. 모든 값은 str."""
@@ -87,8 +81,11 @@ class CSVImporter:
         dataset: str | None = None,
     ) -> dict:
         """CSV를 Fuseki에 import하고 결과를 반환."""
+        kg_iri = await resolve_kg_graph_iri(self._store, ontology_id, dataset=dataset)
+        if kg_iri is None:
+            raise ValueError(f"Ontology not found: {ontology_id}")
+
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        named_graph = _build_named_graph_iri(source.id, timestamp)
 
         cfg = source.config
         records = _read_csv(file_path, cfg)
@@ -96,7 +93,7 @@ class CSVImporter:
             return {
                 "rows_read": 0,
                 "triples_inserted": 0,
-                "named_graph": named_graph,
+                "named_graph": kg_iri,
             }
 
         logger.info(
@@ -104,29 +101,48 @@ class CSVImporter:
             source.id, len(records), ontology_id,
         )
 
-        triples_inserted = await self._import_to_fuseki(records, source, named_graph, timestamp, dataset=dataset)
+        triples_inserted = await self._import_to_fuseki(
+            records, source, kg_iri, timestamp, dataset=dataset,
+        )
 
         logger.info(
             "CSV import done: triples=%d, graph=%s",
-            triples_inserted, named_graph,
+            triples_inserted, kg_iri,
         )
         return {
             "rows_read": len(records),
             "triples_inserted": triples_inserted,
-            "named_graph": named_graph,
+            "named_graph": kg_iri,
         }
+
+    async def _delete_triples_for_source(self, kg_iri: str, source_id: str, dataset: str | None) -> None:
+        """이전 CSV import에서 해당 소스가 남긴 트리플 제거 (prov:wasAttributedTo 일치)."""
+        esc = source_id.replace("\\", "\\\\").replace('"', '\\"')
+        await self._store.sparql_update(
+            f"""
+            PREFIX prov: <http://www.w3.org/ns/prov#>
+            DELETE {{ GRAPH <{kg_iri}> {{ ?s ?p ?o }} }}
+            WHERE {{
+              GRAPH <{kg_iri}> {{
+                ?s prov:wasAttributedTo ?attr .
+                FILTER(STR(?attr) = "{esc}")
+                ?s ?p ?o .
+              }}
+            }}
+            """,
+            dataset=dataset,
+        )
 
     async def _import_to_fuseki(
         self,
         records: list[dict],
         source: Any,
-        named_graph: str,
+        kg_iri: str,
         timestamp: str,
         dataset: str | None = None,
     ) -> int:
-        """CSV 레코드를 Triple로 변환하여 Fuseki Named Graph에 삽입."""
-        # 기존 Named Graph DROP (재적재 원자적 교체)
-        await self._store.delete_graph(named_graph, dataset=dataset)
+        """CSV 레코드를 Triple로 변환하여 kg 그래프에 삽입."""
+        await self._delete_triples_for_source(kg_iri, source.id, dataset=dataset)
 
         rdf_type_node = _RDF_TYPE
         concept_node = URIRef(source.concept_iri)
@@ -160,11 +176,11 @@ class CSVImporter:
             triples.append(Triple(subject, _PROV_GENERATED_AT, ts_literal))
             triples.append(Triple(subject, _PROV_ATTRIBUTED_TO, src_literal))
 
-        # 배치 삽입
-        total = 0
-        for i in range(0, len(triples), _BATCH_SIZE):
-            batch = triples[i:i + _BATCH_SIZE]
-            await self._store.insert_triples(named_graph, batch, dataset=dataset)
-            total += len(batch)
-
-        return total
+        if not triples:
+            return 0
+        g = Graph()
+        for t in triples:
+            g.add((t.subject, t.predicate, t.object_))
+        turtle = g.serialize(format="turtle")
+        await self._store.post_graph_turtle(kg_iri, turtle, dataset=dataset)
+        return len(triples)

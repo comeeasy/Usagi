@@ -15,6 +15,8 @@ Neo4j Cypher BFS 대신 SPARQL iterative BFS 로 구현한다.
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
+from services.ontology_graph import kg_graph_iri
+
 router = APIRouter(prefix="/ontologies/{ontology_id}", tags=["subgraph"])
 
 _NODE_LIMIT = 500
@@ -53,8 +55,14 @@ def _values_clause(iris: set[str]) -> str:
     return " ".join(f"<{iri}>" for iri in iris)
 
 
-async def _bfs_expand(store, frontier: set[str], visited: set[str], dataset: str | None = None) -> set[str]:
-    """frontier 에서 직/역방향 이웃 IRI 를 SPARQL 로 조회하여 반환."""
+async def _bfs_expand(
+    store,
+    frontier: set[str],
+    visited: set[str],
+    kg_iri: str,
+    dataset: str | None = None,
+) -> set[str]:
+    """frontier 에서 직/역방향 이웃 IRI 를 SPARQL 로 조회하여 반환 (kg 그래프 내부만)."""
     remaining = _NODE_LIMIT - len(visited)
     if remaining <= 0 or not frontier:
         return set()
@@ -62,7 +70,7 @@ async def _bfs_expand(store, frontier: set[str], visited: set[str], dataset: str
     values = _values_clause(frontier)
     rows = await store.sparql_select(f"""
         SELECT DISTINCT ?n WHERE {{
-            GRAPH ?g {{
+            GRAPH <{kg_iri}> {{
                 {{
                     ?s ?p ?n .
                     VALUES ?s {{ {values} }}
@@ -90,6 +98,11 @@ async def _get_subgraph_sparql(
 ) -> dict:
     depth = max(1, min(depth, 5))
 
+    base_ont_iri = ont_iri or await _resolve_ont_iri(store, ontology_id, dataset=dataset)
+    if not base_ont_iri:
+        return {"nodes": [], "edges": []}
+    kg_iri = kg_graph_iri(base_ont_iri)
+
     # ── 노드 수집 ──────────────────────────────────────────────────────────
     if entity_iris:
         visited: set[str] = set(entity_iris)
@@ -98,21 +111,16 @@ async def _get_subgraph_sparql(
         for _ in range(depth):
             if not frontier or len(visited) >= _NODE_LIMIT:
                 break
-            new_iris = await _bfs_expand(store, frontier, visited, dataset=dataset)
+            new_iris = await _bfs_expand(store, frontier, visited, kg_iri, dataset=dataset)
             visited |= new_iris
             frontier = new_iris
     else:
-        # seed 없음: 해당 온톨로지의 모든 개체를 시작점으로 사용
-        base = ont_iri or ""
+        # seed 없음: kg 그래프 안의 리소스를 시작점으로 사용
         rows = await store.sparql_select(f"""
             {_PREFIXES}
             SELECT DISTINCT ?n WHERE {{
-                GRAPH ?g {{
+                GRAPH <{kg_iri}> {{
                     ?n a ?t .
-                    FILTER(
-                        STRSTARTS(STR(?g), "{base}") ||
-                        STRSTARTS(STR(?g), "urn:source:")
-                    )
                 }}
             }} LIMIT {_NODE_LIMIT}
         """, dataset=dataset)
@@ -127,7 +135,7 @@ async def _get_subgraph_sparql(
         detail_rows = await store.sparql_select(f"""
             {_PREFIXES}
             SELECT ?n ?label ?type WHERE {{
-                GRAPH ?g {{
+                GRAPH <{kg_iri}> {{
                     ?n a ?type .
                     OPTIONAL {{ ?n rdfs:label ?label }}
                     VALUES ?n {{ {values} }}
@@ -170,7 +178,7 @@ async def _get_subgraph_sparql(
         rows = await store.sparql_select(f"""
             {_PREFIXES}
             SELECT DISTINCT ?s ?p ?o ?pLabel WHERE {{
-                GRAPH ?g {{
+                GRAPH <{kg_iri}> {{
                     ?s ?p ?o .
                     VALUES ?s {{ {s_values} }}
                     FILTER(isIRI(?o))

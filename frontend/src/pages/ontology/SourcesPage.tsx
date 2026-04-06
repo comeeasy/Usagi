@@ -9,10 +9,12 @@ import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import ErrorBoundary from '@/components/shared/ErrorBoundary'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { listSources, createSource, deleteSource, triggerSync, uploadCsvFile } from '@/api/sources'
+import { useDataset } from '@/contexts/DatasetContext'
 import type { BackingSourceCreate, PropertyMapping, UploadResult } from '@/types/source'
 
 export default function SourcesPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
+  const { dataset } = useDataset()
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -46,7 +48,7 @@ export default function SourcesPage() {
   })
 
   const syncMutation = useMutation({
-    mutationFn: (sourceId: string) => triggerSync(ontologyId!, sourceId),
+    mutationFn: (sourceId: string) => triggerSync(ontologyId!, sourceId, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sources', ontologyId] })
     },
@@ -80,7 +82,7 @@ export default function SourcesPage() {
     setUploadResult(null)
     setUploadError(null)
     try {
-      const result = await uploadCsvFile(ontologyId, uploadingSourceId, file)
+      const result = await uploadCsvFile(ontologyId, uploadingSourceId, file, dataset)
       setUploadResult(result)
       queryClient.invalidateQueries({ queryKey: ['sources', ontologyId] })
     } catch (err) {

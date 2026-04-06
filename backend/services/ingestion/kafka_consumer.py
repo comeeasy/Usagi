@@ -13,7 +13,8 @@ except ImportError:
     _KafkaConsumer = None  # type: ignore
     _KAFKA_AVAILABLE = False
 
-from services.ingestion.rdf_transformer import RDFTransformer, build_named_graph_iri
+from services.ingestion.rdf_transformer import RDFTransformer
+from services.ontology_graph import resolve_kg_graph_iri
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,14 @@ class KafkaConsumer:
 
             triples = self._transformer.transform(event, source)
             if triples:
-                graph_iri = build_named_graph_iri(source_id, timestamp)
+                ont_uuid = event.ontology_id or ""
+                graph_iri = await resolve_kg_graph_iri(self._store, ont_uuid, dataset=None)
+                if not graph_iri:
+                    logger.warning(
+                        "Ontology not found for ontology_id=%s; skipping %d triples",
+                        ont_uuid, len(triples),
+                    )
+                    return
                 await self._store.insert_triples(graph_iri, triples)
                 logger.debug(
                     "Inserted %d triples for source=%s into graph=%s",

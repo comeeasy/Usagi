@@ -22,6 +22,7 @@ from models.ontology import (
     OntologyUpdate,
     PaginatedResponse,
 )
+from services.ontology_graph import kg_graph_iri
 
 router = APIRouter(prefix="/ontologies", tags=["ontologies"])
 
@@ -87,8 +88,8 @@ async def list_ontologies(
     for raw in items_raw:
         iri = raw["iri"]
         ont_id = raw.get("id", "")  # UUID (dc:identifier)
-        tbox_iri = f"{iri}/tbox"
-        stats_dict = await store.get_ontology_stats(tbox_iri, dataset=dataset)
+        kg_iri = kg_graph_iri(iri)
+        stats_dict = await store.get_ontology_stats(kg_iri, dataset=dataset)
         items.append(Ontology(
             id=ont_id,
             iri=iri,
@@ -123,7 +124,7 @@ async def create_ontology(
 
     ont_id = str(uuid.uuid4())
     now = _now_iso()
-    tbox_iri = f"{body.iri}/tbox"
+    kg_iri = kg_graph_iri(body.iri)
 
     desc_triple = f'<{body.iri}> dc:description "{body.description}" .' if body.description else ""
     ver_triple = f'<{body.iri}> owl:versionInfo "{body.version}" .' if body.version else ""
@@ -131,7 +132,7 @@ async def create_ontology(
     await store.sparql_update(f"""
         {_PREFIXES}
         INSERT DATA {{
-            GRAPH <{tbox_iri}> {{
+            GRAPH <{kg_iri}> {{
                 <{body.iri}> a owl:Ontology ;
                     rdfs:label "{body.label}" ;
                     dc:identifier "{ont_id}" ;
@@ -169,8 +170,8 @@ async def get_ontology(
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     iri = raw["iri"]["value"]
-    tbox_iri = f"{iri}/tbox"
-    stats_dict = await store.get_ontology_stats(tbox_iri, dataset=dataset)
+    kg_iri = kg_graph_iri(iri)
+    stats_dict = await store.get_ontology_stats(kg_iri, dataset=dataset)
 
     return Ontology(
         id=ontology_id,
@@ -199,7 +200,7 @@ async def update_ontology(
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
     iri = raw["iri"]["value"]
-    tbox_iri = f"{iri}/tbox"
+    kg_iri = kg_graph_iri(iri)
     now = _now_iso()
 
     # 변경 필드만 UPDATE
@@ -214,16 +215,16 @@ async def update_ontology(
     for predicate, value, _ in updates:
         await store.sparql_update(f"""
             {_PREFIXES}
-            DELETE {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} ?old }} }}
-            INSERT {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} "{value}" }} }}
-            WHERE  {{ OPTIONAL {{ GRAPH <{tbox_iri}> {{ <{iri}> {predicate} ?old }} }} }}
+            DELETE {{ GRAPH <{kg_iri}> {{ <{iri}> {predicate} ?old }} }}
+            INSERT {{ GRAPH <{kg_iri}> {{ <{iri}> {predicate} "{value}" }} }}
+            WHERE  {{ OPTIONAL {{ GRAPH <{kg_iri}> {{ <{iri}> {predicate} ?old }} }} }}
         """, dataset=dataset)
 
     await store.sparql_update(f"""
         {_PREFIXES}
-        DELETE {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified ?old }} }}
-        INSERT {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified "{now}"^^xsd:dateTime }} }}
-        WHERE  {{ OPTIONAL {{ GRAPH <{tbox_iri}> {{ <{iri}> dc:modified ?old }} }} }}
+        DELETE {{ GRAPH <{kg_iri}> {{ <{iri}> dc:modified ?old }} }}
+        INSERT {{ GRAPH <{kg_iri}> {{ <{iri}> dc:modified "{now}"^^xsd:dateTime }} }}
+        WHERE  {{ OPTIONAL {{ GRAPH <{kg_iri}> {{ <{iri}> dc:modified ?old }} }} }}
     """, dataset=dataset)
 
     return await get_ontology(request, ontology_id, dataset=dataset)

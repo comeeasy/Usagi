@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from models.concept import Concept, ConceptCreate, ConceptUpdate, PropertyRestriction
 from models.ontology import PaginatedResponse
+from services.ontology_graph import resolve_kg_graph_iri
 
 router = APIRouter(prefix="/ontologies/{ontology_id}/concepts", tags=["concepts"])
 
@@ -28,18 +29,9 @@ PREFIX dc:   <http://purl.org/dc/terms/>
 """
 
 
-async def _resolve_tbox(store, ontology_id: str, dataset: str | None = None) -> str | None:
-    """UUID(dc:identifier)로 온톨로지 IRI 조회 후 tbox IRI 반환. 없으면 None."""
-    rows = await store.sparql_select(f"""
-        PREFIX owl: <http://www.w3.org/2002/07/owl#>
-        PREFIX dc:  <http://purl.org/dc/terms/>
-        SELECT ?iri WHERE {{
-            GRAPH ?g {{ ?iri a owl:Ontology ; dc:identifier "{ontology_id}" }}
-        }} LIMIT 1
-    """, dataset=dataset)
-    if not rows:
-        return None
-    return f"{rows[0]['iri']['value']}/tbox"
+async def _resolve_kg_graph(store, ontology_id: str, dataset: str | None = None) -> str | None:
+    """UUID(dc:identifier)로 kg Named Graph IRI 반환. 없으면 None."""
+    return await resolve_kg_graph_iri(store, ontology_id, dataset=dataset)
 
 
 def _esc(s: str) -> str:
@@ -89,8 +81,8 @@ async def list_concepts(
     dataset: str = Query("ontology"),
 ) -> dict:
     store = request.app.state.ontology_store
-    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
-    if tbox is None:
+    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if kg is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     offset = (page - 1) * page_size
 
@@ -102,13 +94,13 @@ async def list_concepts(
 
     count_rows = await store.sparql_select(f"""{_P}
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
-    GRAPH <{tbox}> {{ ?iri a owl:Class . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
+    GRAPH <{kg}> {{ ?iri a owl:Class . OPTIONAL {{ ?iri rdfs:label ?label }} {extra} }}
 }}""", dataset=dataset)
     total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
 
     rows = await store.sparql_select(f"""{_P}
 SELECT ?iri ?label ?comment (COUNT(DISTINCT ?ind) AS ?individualCount) WHERE {{
-    GRAPH <{tbox}> {{
+    GRAPH <{kg}> {{
         ?iri a owl:Class .
         OPTIONAL {{ ?iri rdfs:label ?label }}
         OPTIONAL {{ ?iri rdfs:comment ?comment }}
@@ -141,11 +133,11 @@ async def create_concept(
     dataset: str = Query("ontology"),
 ) -> Concept:
     store = request.app.state.ontology_store
-    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
-    if tbox is None:
+    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if kg is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if await store.sparql_ask(f"{_P} ASK {{ GRAPH <{tbox}> {{ <{body.iri}> a owl:Class }} }}", dataset=dataset):
+    if await store.sparql_ask(f"{_P} ASK {{ GRAPH <{kg}> {{ <{body.iri}> a owl:Class }} }}", dataset=dataset):
         raise HTTPException(409, detail={"code": "CONCEPT_IRI_DUPLICATE", "message": f"IRI exists: {body.iri}"})
 
     triples = [
@@ -163,7 +155,7 @@ async def create_concept(
         triples.append(_restriction_triples(body.iri, body.restrictions))
 
     await store.sparql_update(f"""{_P}
-INSERT DATA {{ GRAPH <{tbox}> {{
+INSERT DATA {{ GRAPH <{kg}> {{
 {chr(10).join(triples)}
 }} }}""", dataset=dataset)
 
@@ -186,16 +178,16 @@ async def get_concept(
 ) -> Concept:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
-    if tbox is None:
+    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if kg is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:Class }} }}", dataset=dataset):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{kg}> {{ <{iri}> a owl:Class }} }}", dataset=dataset):
         raise HTTPException(404, detail={"code": "CONCEPT_NOT_FOUND", "message": f"Not found: {iri}"})
 
     basic = await store.sparql_select(f"""{_P}
 SELECT ?label ?comment WHERE {{
-    GRAPH <{tbox}> {{ <{iri}> a owl:Class .
+    GRAPH <{kg}> {{ <{iri}> a owl:Class .
         OPTIONAL {{ <{iri}> rdfs:label ?label }}
         OPTIONAL {{ <{iri}> rdfs:comment ?comment }}
     }}
@@ -204,20 +196,20 @@ SELECT ?label ?comment WHERE {{
     comment = _v(basic[0].get("comment")) or None if basic else None
 
     sc_rows = await store.sparql_select(f"""{_P}
-SELECT ?sc WHERE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subClassOf ?sc . FILTER(isIRI(?sc)) }} }}""", dataset=dataset)
+SELECT ?sc WHERE {{ GRAPH <{kg}> {{ <{iri}> rdfs:subClassOf ?sc . FILTER(isIRI(?sc)) }} }}""", dataset=dataset)
     super_classes = [_v(r.get("sc")) for r in sc_rows]
 
     ec_rows = await store.sparql_select(f"""{_P}
-SELECT ?ec WHERE {{ GRAPH <{tbox}> {{ <{iri}> owl:equivalentClass ?ec . FILTER(isIRI(?ec)) }} }}""", dataset=dataset)
+SELECT ?ec WHERE {{ GRAPH <{kg}> {{ <{iri}> owl:equivalentClass ?ec . FILTER(isIRI(?ec)) }} }}""", dataset=dataset)
     equivalent_classes = [_v(r.get("ec")) for r in ec_rows]
 
     dw_rows = await store.sparql_select(f"""{_P}
-SELECT ?dw WHERE {{ GRAPH <{tbox}> {{ <{iri}> owl:disjointWith ?dw . FILTER(isIRI(?dw)) }} }}""", dataset=dataset)
+SELECT ?dw WHERE {{ GRAPH <{kg}> {{ <{iri}> owl:disjointWith ?dw . FILTER(isIRI(?dw)) }} }}""", dataset=dataset)
     disjoint_with = [_v(r.get("dw")) for r in dw_rows]
 
     rest_rows = await store.sparql_select(f"""{_P}
 SELECT ?bn ?prop ?svf ?avf ?hv ?min ?max ?exact WHERE {{
-    GRAPH <{tbox}> {{
+    GRAPH <{kg}> {{
         <{iri}> rdfs:subClassOf ?bn . ?bn a owl:Restriction ; owl:onProperty ?prop .
         OPTIONAL {{ ?bn owl:someValuesFrom ?svf }}
         OPTIONAL {{ ?bn owl:allValuesFrom ?avf }}
@@ -271,24 +263,24 @@ async def update_concept(
 ) -> Concept:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
-    if tbox is None:
+    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if kg is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:Class }} }}", dataset=dataset):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{kg}> {{ <{iri}> a owl:Class }} }}", dataset=dataset):
         raise HTTPException(404, detail={"code": "CONCEPT_NOT_FOUND", "message": f"Not found: {iri}"})
 
     if body.label is not None:
         await store.sparql_update(f"""{_P}
-DELETE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:label ?o }} }}
-INSERT {{ GRAPH <{tbox}> {{ <{iri}> rdfs:label "{_esc(body.label)}" }} }}
-WHERE  {{ OPTIONAL {{ GRAPH <{tbox}> {{ <{iri}> rdfs:label ?o }} }} }}""", dataset=dataset)
+DELETE {{ GRAPH <{kg}> {{ <{iri}> rdfs:label ?o }} }}
+INSERT {{ GRAPH <{kg}> {{ <{iri}> rdfs:label "{_esc(body.label)}" }} }}
+WHERE  {{ OPTIONAL {{ GRAPH <{kg}> {{ <{iri}> rdfs:label ?o }} }} }}""", dataset=dataset)
 
     if body.comment is not None:
         await store.sparql_update(f"""{_P}
-DELETE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:comment ?o }} }}
-INSERT {{ GRAPH <{tbox}> {{ <{iri}> rdfs:comment "{_esc(body.comment)}" }} }}
-WHERE  {{ OPTIONAL {{ GRAPH <{tbox}> {{ <{iri}> rdfs:comment ?o }} }} }}""", dataset=dataset)
+DELETE {{ GRAPH <{kg}> {{ <{iri}> rdfs:comment ?o }} }}
+INSERT {{ GRAPH <{kg}> {{ <{iri}> rdfs:comment "{_esc(body.comment)}" }} }}
+WHERE  {{ OPTIONAL {{ GRAPH <{kg}> {{ <{iri}> rdfs:comment ?o }} }} }}""", dataset=dataset)
 
     for pred, vals in [
         ("rdfs:subClassOf", body.super_classes),
@@ -297,19 +289,19 @@ WHERE  {{ OPTIONAL {{ GRAPH <{tbox}> {{ <{iri}> rdfs:comment ?o }} }} }}""", dat
     ]:
         if vals is not None:
             await store.sparql_update(f"""{_P}
-DELETE {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o }} }}
-WHERE  {{ GRAPH <{tbox}> {{ <{iri}> {pred} ?o . FILTER(isIRI(?o)) }} }}""", dataset=dataset)
+DELETE {{ GRAPH <{kg}> {{ <{iri}> {pred} ?o }} }}
+WHERE  {{ GRAPH <{kg}> {{ <{iri}> {pred} ?o . FILTER(isIRI(?o)) }} }}""", dataset=dataset)
             if vals:
                 triples = "\n".join([f"    <{iri}> {pred} <{v}> ." for v in vals])
-                await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{triples}\n}} }}", dataset=dataset)
+                await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{kg}> {{\n{triples}\n}} }}", dataset=dataset)
 
     if body.restrictions is not None:
         await store.sparql_update(f"""{_P}
-DELETE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn ?p ?o }} }}
-WHERE  {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn a owl:Restriction ; ?p ?o . FILTER(isBlank(?bn)) }} }}""", dataset=dataset)
+DELETE {{ GRAPH <{kg}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn ?p ?o }} }}
+WHERE  {{ GRAPH <{kg}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn a owl:Restriction ; ?p ?o . FILTER(isBlank(?bn)) }} }}""", dataset=dataset)
         if body.restrictions:
             block = _restriction_triples(iri, body.restrictions, "upd")
-            await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{block}\n}} }}", dataset=dataset)
+            await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{kg}> {{\n{block}\n}} }}", dataset=dataset)
 
     return await get_concept(request, ontology_id, iri, dataset=dataset)
 
@@ -325,22 +317,22 @@ async def delete_concept(
 ) -> None:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    tbox = await _resolve_tbox(store, ontology_id, dataset=dataset)
-    if tbox is None:
+    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
+    if kg is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
-    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{tbox}> {{ <{iri}> a owl:Class }} }}", dataset=dataset):
+    if not await store.sparql_ask(f"{_P} ASK {{ GRAPH <{kg}> {{ <{iri}> a owl:Class }} }}", dataset=dataset):
         raise HTTPException(404, detail={"code": "CONCEPT_NOT_FOUND", "message": f"Not found: {iri}"})
 
     # blank node restrictions 먼저 삭제
     await store.sparql_update(f"""{_P}
-DELETE {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn ?p ?o }} }}
-WHERE  {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn a owl:Restriction ; ?p ?o . FILTER(isBlank(?bn)) }} }}""", dataset=dataset)
+DELETE {{ GRAPH <{kg}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn ?p ?o }} }}
+WHERE  {{ GRAPH <{kg}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn a owl:Restriction ; ?p ?o . FILTER(isBlank(?bn)) }} }}""", dataset=dataset)
     # subject 트리플 삭제
     await store.sparql_update(f"""{_P}
-DELETE {{ GRAPH <{tbox}> {{ <{iri}> ?p ?o }} }}
-WHERE  {{ GRAPH <{tbox}> {{ <{iri}> ?p ?o }} }}""", dataset=dataset)
+DELETE {{ GRAPH <{kg}> {{ <{iri}> ?p ?o }} }}
+WHERE  {{ GRAPH <{kg}> {{ <{iri}> ?p ?o }} }}""", dataset=dataset)
     # object 트리플 삭제 (subClassOf 대상 등)
     await store.sparql_update(f"""{_P}
-DELETE {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}
-WHERE  {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}""", dataset=dataset)
+DELETE {{ GRAPH <{kg}> {{ ?s ?p <{iri}> }} }}
+WHERE  {{ GRAPH <{kg}> {{ ?s ?p <{iri}> }} }}""", dataset=dataset)

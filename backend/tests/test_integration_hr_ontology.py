@@ -283,7 +283,7 @@ async def test_step7_sparql_select_all_individuals(client, created_ontology):
 async def test_step7_sparql_update_blocked(client, created_ontology):
     ont_id = created_ontology["id"]
     resp = await client.post(f"/ontologies/{ont_id}/sparql", json={
-        "query": f"INSERT DATA {{ GRAPH <{BASE}/tbox> {{ <{BASE}#X> a <{BASE}#Y> }} }}",
+        "query": f"INSERT DATA {{ GRAPH <{BASE}/kg> {{ <{BASE}#X> a <{BASE}#Y> }} }}",
     })
     # sparql.py: UPDATE 구문 → 400 (403이 아님)
     assert resp.status_code == 400

@@ -49,7 +49,7 @@ async def preview_merge(
     body: MergePreviewRequest,
     dataset: str = Query("ontology"),
 ) -> dict:
-    """두 온톨로지 TBox를 비교해 충돌 목록과 자동 병합 가능 항목을 반환."""
+    """두 온톨로지 kg 그래프를 비교해 충돌 목록과 자동 병합 가능 항목을 반환."""
     store = request.app.state.ontology_store
     svc = request.app.state.merge_service
     target_iri = await _resolve_iri(store, ontology_id, dataset=dataset)
@@ -64,7 +64,7 @@ async def merge_ontologies(
     body: MergeRequest,
     dataset: str = Query("ontology"),
 ) -> dict:
-    """두 온톨로지 TBox를 병합."""
+    """소스 온톨로지를 타겟 kg 그래프로 병합."""
     store = request.app.state.ontology_store
     svc = request.app.state.merge_service
     target_iri = await _resolve_iri(store, ontology_id, dataset=dataset)

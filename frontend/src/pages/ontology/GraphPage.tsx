@@ -13,6 +13,7 @@ import NodeDetailPanel from '@/components/graph/NodeDetailPanel'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import { useSubgraph } from '@/hooks/useSubgraph'
 import { useEntitySearch } from '@/hooks/useEntitySearch'
+import { useDataset } from '@/contexts/DatasetContext'
 import type { CyElement } from '@/components/graph/GraphCanvas'
 import type { Concept } from '@/types/concept'
 import type { Individual } from '@/types/individual'
@@ -21,6 +22,7 @@ type SearchResult = Concept | Individual
 
 export default function GraphPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
+  const { dataset } = useDataset()
   const navigate = useNavigate()
   const cyRef = useRef<cytoscape.Core | null>(null)
 
@@ -40,12 +42,12 @@ export default function GraphPage() {
   const subgraphMutation = useSubgraph(ontologyId)
 
   const syncMutation = useMutation({
-    mutationFn: () => syncOntology(ontologyId!),
+    mutationFn: () => syncOntology(ontologyId!, dataset),
     onSuccess: () => { if (hasLoaded) loadGraph(rootEntities.map((e) => e.iri), depth) },
   })
 
   const deleteConceptMutation = useMutation({
-    mutationFn: (iri: string) => deleteConcept(ontologyId!, iri),
+    mutationFn: (iri: string) => deleteConcept(ontologyId!, iri, dataset),
     onSuccess: (_, iri) => {
       setElements((prev) => prev.filter((el) => el.data.id !== iri && el.data.source !== iri && el.data.target !== iri))
       setRootEntities((prev) => prev.filter((e) => e.iri !== iri))
@@ -54,7 +56,7 @@ export default function GraphPage() {
   })
 
   const deleteIndividualMutation = useMutation({
-    mutationFn: (iri: string) => deleteIndividual(ontologyId!, iri),
+    mutationFn: (iri: string) => deleteIndividual(ontologyId!, iri, dataset),
     onSuccess: (_, iri) => {
       setElements((prev) => prev.filter((el) => el.data.id !== iri && el.data.source !== iri && el.data.target !== iri))
       setRootEntities((prev) => prev.filter((e) => e.iri !== iri))

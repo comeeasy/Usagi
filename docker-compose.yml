@@ -18,6 +18,8 @@ services:
     environment:
       - FUSEKI_URL=http://fuseki:3030
       - FUSEKI_DATASET=ontology
+      - FUSEKI_USER=admin
+      - FUSEKI_PASSWORD=admin
       - KAFKA_BROKERS=kafka:9092
       - SPARQL_TIMEOUT_SECONDS=30
     ports:
@@ -50,10 +52,10 @@ services:
       - TDB=2
       - FUSEKI_DATASET_1=ontology
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3030/ontology/"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
+      test: ["CMD", "curl", "-fsS", "http://localhost:3030/$$/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
       start_period: 40s
     networks:
       - ontology-net

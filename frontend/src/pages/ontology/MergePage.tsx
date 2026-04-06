@@ -11,6 +11,7 @@ import {
   type ConflictItem,
   type ConflictResolution,
 } from '@/api/ontologies'
+import { useDataset } from '@/contexts/DatasetContext'
 
 type Choice = ConflictResolution['choice']
 
@@ -29,6 +30,7 @@ const CONFLICT_TYPE_LABELS: Record<ConflictItem['conflict_type'], string> = {
 
 export default function MergePage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
+  const { dataset } = useDataset()
   const [sourceOntologyId, setSourceOntologyId] = useState('')
   const [step, setStep] = useState<'select' | 'preview' | 'done'>('select')
   const [conflicts, setConflicts] = useState<ConflictItem[]>([])
@@ -41,7 +43,7 @@ export default function MergePage() {
   const sourceOntology = ontologiesData?.items.find((o) => o.id === sourceOntologyId)
 
   const previewMutation = useMutation({
-    mutationFn: () => previewMerge(ontologyId!, sourceOntologyId),
+    mutationFn: () => previewMerge(ontologyId!, sourceOntologyId, dataset),
     onSuccess: (data) => {
       setConflicts(data.conflicts)
       setAutoMergeableCount(data.auto_mergeable_count)
@@ -62,7 +64,7 @@ export default function MergePage() {
         conflict_type: c.conflict_type,
         choice: resolutions[`${c.iri}::${c.conflict_type}`] ?? 'keep-target',
       }))
-      return mergeOntologies(ontologyId!, sourceOntologyId, resolutionList)
+      return mergeOntologies(ontologyId!, sourceOntologyId, resolutionList, dataset)
     },
     onSuccess: () => setStep('done'),
   })

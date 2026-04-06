@@ -12,6 +12,7 @@ import ErrorBoundary from '@/components/shared/ErrorBoundary'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { listConcepts, listIndividuals, createConcept, createIndividual, getConcept, getIndividual, updateConcept, updateIndividual, deleteConcept, deleteIndividual } from '@/api/entities'
 import { getOntology } from '@/api/ontologies'
+import { useDataset } from '@/contexts/DatasetContext'
 import type { Concept, ConceptUpdate } from '@/types/concept'
 import type { Individual, IndividualUpdate } from '@/types/individual'
 
@@ -20,6 +21,7 @@ type EntityKind = Concept | Individual
 
 export default function EntitiesPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
+  const { dataset } = useDataset()
   const location = useLocation()
   const queryClient = useQueryClient()
 
@@ -40,45 +42,58 @@ export default function EntitiesPage() {
     const targetTab: EntityTab = entityType === 'individual' ? 'individuals' : 'concepts'
     setTab(targetTab)
     const fetchFn = targetTab === 'concepts'
-      ? () => getConcept(ontologyId, editIri)
-      : () => getIndividual(ontologyId, editIri)
+      ? () => getConcept(ontologyId, editIri, dataset)
+      : () => getIndividual(ontologyId, editIri, dataset)
     fetchFn().then((entity) => {
       setEditingEntity(entity as EntityKind)
       setSelectedIri(editIri)
     }).catch(() => {/* 조용히 무시 */})
     // state 소비 후 history 교체 (뒤로가기 시 재진입 방지)
     window.history.replaceState({}, '')
+    // dataset captured at mount; changing dataset later does not re-apply graph navigation state
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const ontologyQuery = useQuery({
-    queryKey: ['ontology', ontologyId],
-    queryFn: () => getOntology(ontologyId!),
+    queryKey: ['ontology', ontologyId, dataset],
+    queryFn: () => getOntology(ontologyId!, dataset),
     enabled: !!ontologyId,
   })
   const iriPrefix = ontologyQuery.data?.base_iri ? `${ontologyQuery.data.base_iri}#` : ''
 
   const conceptsQuery = useQuery({
-    queryKey: ['concepts', ontologyId, page, searchQuery],
-    queryFn: () => listConcepts(ontologyId!, { page, pageSize: PAGE_SIZE, ...(searchQuery ? { search: searchQuery } : {}) }),
+    queryKey: ['concepts', ontologyId, dataset, page, searchQuery],
+    queryFn: () =>
+      listConcepts(ontologyId!, {
+        page,
+        pageSize: PAGE_SIZE,
+        dataset,
+        ...(searchQuery ? { search: searchQuery } : {}),
+      }),
     enabled: !!ontologyId && tab === 'concepts',
   })
 
   const individualsQuery = useQuery({
-    queryKey: ['individuals', ontologyId, page, searchQuery],
-    queryFn: () => listIndividuals(ontologyId!, { page, pageSize: PAGE_SIZE, ...(searchQuery ? { search: searchQuery } : {}) }),
+    queryKey: ['individuals', ontologyId, dataset, page, searchQuery],
+    queryFn: () =>
+      listIndividuals(ontologyId!, {
+        page,
+        pageSize: PAGE_SIZE,
+        dataset,
+        ...(searchQuery ? { search: searchQuery } : {}),
+      }),
     enabled: !!ontologyId && tab === 'individuals',
   })
 
   const selectedEntityQuery = useQuery<Concept | Individual>({
-    queryKey: ['entity', ontologyId, selectedIri, tab],
+    queryKey: ['entity', ontologyId, dataset, selectedIri, tab],
     queryFn: (): Promise<Concept | Individual> => tab === 'concepts'
-      ? getConcept(ontologyId!, selectedIri!)
-      : getIndividual(ontologyId!, selectedIri!),
+      ? getConcept(ontologyId!, selectedIri!, dataset)
+      : getIndividual(ontologyId!, selectedIri!, dataset),
     enabled: !!ontologyId && !!selectedIri,
   })
 
   const createConceptMutation = useMutation({
-    mutationFn: (data: Parameters<typeof createConcept>[1]) => createConcept(ontologyId!, data),
+    mutationFn: (data: Parameters<typeof createConcept>[1]) => createConcept(ontologyId!, data, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['concepts', ontologyId] })
       setShowCreateForm(false)
@@ -86,7 +101,7 @@ export default function EntitiesPage() {
   })
 
   const createIndividualMutation = useMutation({
-    mutationFn: (data: Parameters<typeof createIndividual>[1]) => createIndividual(ontologyId!, data),
+    mutationFn: (data: Parameters<typeof createIndividual>[1]) => createIndividual(ontologyId!, data, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
       setShowCreateForm(false)
@@ -106,9 +121,9 @@ export default function EntitiesPage() {
   }
 
   const updateConceptMutation = useMutation({
-    mutationFn: ({ iri, data }: { iri: string; data: ConceptUpdate }) => updateConcept(ontologyId!, iri, data),
+    mutationFn: ({ iri, data }: { iri: string; data: ConceptUpdate }) => updateConcept(ontologyId!, iri, data, dataset),
     onSuccess: (updated) => {
-      queryClient.setQueryData(['entity', ontologyId, updated.iri, 'concepts'], updated)
+      queryClient.setQueryData(['entity', ontologyId, dataset, updated.iri, 'concepts'], updated)
       queryClient.invalidateQueries({ queryKey: ['concepts', ontologyId] })
       setEditingEntity(null)
       showSaveSuccess()
@@ -117,7 +132,7 @@ export default function EntitiesPage() {
   })
 
   const deleteConceptMutation = useMutation({
-    mutationFn: (iri: string) => deleteConcept(ontologyId!, iri),
+    mutationFn: (iri: string) => deleteConcept(ontologyId!, iri, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['concepts', ontologyId] })
       setSelectedIri(null)
@@ -126,7 +141,7 @@ export default function EntitiesPage() {
   })
 
   const deleteIndividualMutation = useMutation({
-    mutationFn: (iri: string) => deleteIndividual(ontologyId!, iri),
+    mutationFn: (iri: string) => deleteIndividual(ontologyId!, iri, dataset),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
       setSelectedIri(null)
@@ -135,9 +150,9 @@ export default function EntitiesPage() {
   })
 
   const updateIndividualMutation = useMutation({
-    mutationFn: ({ iri, data }: { iri: string; data: IndividualUpdate }) => updateIndividual(ontologyId!, iri, data),
+    mutationFn: ({ iri, data }: { iri: string; data: IndividualUpdate }) => updateIndividual(ontologyId!, iri, data, dataset),
     onSuccess: (updated) => {
-      queryClient.setQueryData(['entity', ontologyId, (updated as Individual).iri, 'individuals'], updated)
+      queryClient.setQueryData(['entity', ontologyId, dataset, (updated as Individual).iri, 'individuals'], updated)
       queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
       setEditingEntity(null)
       showSaveSuccess()

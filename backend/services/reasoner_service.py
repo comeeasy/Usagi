@@ -76,9 +76,9 @@ class ReasonerService:
                 if not rows:
                     raise ValueError(f"Ontology not found: {ontology_id}")
                 ont_iri = rows[0]['iri']['value']
-            tbox_iri = f"{ont_iri}/tbox"
+            kg_iri = f"{ont_iri}/kg"
 
-            rdfxml_bytes = await self._store.export_rdfxml(tbox_iri, dataset=dataset)
+            rdfxml_bytes = await self._store.export_rdfxml(kg_iri, dataset=dataset)
 
             with tempfile.NamedTemporaryFile(suffix=".owl", delete=False) as f:
                 f.write(rdfxml_bytes)
@@ -112,9 +112,9 @@ class ReasonerService:
                     )
 
             # SPARQL 기반 추가 위반 검출 (owlready2 불필요)
-            cardinality_violations = await self._detect_cardinality_violations(tbox_iri, dataset=dataset)
-            domain_range_violations = await self._detect_domain_range_violations(tbox_iri, dataset=dataset)
-            disjoint_violations = await self._detect_disjoint_violations(tbox_iri, dataset=dataset)
+            cardinality_violations = await self._detect_cardinality_violations(kg_iri, dataset=dataset)
+            domain_range_violations = await self._detect_domain_range_violations(kg_iri, dataset=dataset)
+            disjoint_violations = await self._detect_disjoint_violations(kg_iri, dataset=dataset)
             extra = cardinality_violations + domain_range_violations + disjoint_violations
 
             if extra:
@@ -244,7 +244,7 @@ PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
 """
 
     async def _detect_cardinality_violations(
-        self, tbox_iri: str, dataset: str | None = None
+        self, kg_iri: str, dataset: str | None = None
     ) -> list[ReasonerViolation]:
         """owl:maxCardinality / owl:exactCardinality 위반 검출 (SPARQL)."""
         violations: list[ReasonerViolation] = []
@@ -252,7 +252,7 @@ PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
         # 1) TBox에서 카디널리티 제약 수집
         restriction_rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
 SELECT DISTINCT ?cls ?prop ?n ?rtype WHERE {{
-    GRAPH <{tbox_iri}> {{
+    GRAPH <{kg_iri}> {{
         ?cls rdfs:subClassOf ?restr .
         ?restr a owl:Restriction ; owl:onProperty ?prop .
         {{
@@ -317,7 +317,7 @@ GROUP BY ?ind""", dataset=dataset)
         return violations
 
     async def _detect_domain_range_violations(
-        self, tbox_iri: str, dataset: str | None = None
+        self, kg_iri: str, dataset: str | None = None
     ) -> list[ReasonerViolation]:
         """rdfs:domain / rdfs:range 위반 검출 (SPARQL)."""
         violations: list[ReasonerViolation] = []
@@ -325,7 +325,7 @@ GROUP BY ?ind""", dataset=dataset)
         # Domain 위반: 프로퍼티 주어가 선언된 domain 클래스에 속하지 않음
         domain_rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
 SELECT DISTINCT ?ind ?prop ?domain WHERE {{
-    GRAPH <{tbox_iri}> {{ ?prop rdfs:domain ?domain . }}
+    GRAPH <{kg_iri}> {{ ?prop rdfs:domain ?domain . }}
     GRAPH ?g {{ ?ind ?prop ?val . FILTER(isIRI(?ind)) }}
     FILTER NOT EXISTS {{ GRAPH ?ga {{ ?ind a ?domain }} }}
     FILTER NOT EXISTS {{ GRAPH ?gt1 {{ ?ind a ?t }} GRAPH ?gt2 {{ ?t rdfs:subClassOf* ?domain }} }}
@@ -346,7 +346,7 @@ SELECT DISTINCT ?ind ?prop ?domain WHERE {{
         # Range 위반: 객체 프로퍼티의 목적어가 선언된 range 클래스에 속하지 않음
         range_rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
 SELECT DISTINCT ?ind ?prop ?range ?val WHERE {{
-    GRAPH <{tbox_iri}> {{ ?prop rdfs:range ?range . }}
+    GRAPH <{kg_iri}> {{ ?prop rdfs:range ?range . }}
     GRAPH ?g {{ ?ind ?prop ?val . FILTER(isIRI(?val)) }}
     FILTER NOT EXISTS {{ GRAPH ?ga {{ ?val a ?range }} }}
     FILTER NOT EXISTS {{ GRAPH ?gt1 {{ ?val a ?t }} GRAPH ?gt2 {{ ?t rdfs:subClassOf* ?range }} }}
@@ -367,14 +367,14 @@ SELECT DISTINCT ?ind ?prop ?range ?val WHERE {{
         return violations
 
     async def _detect_disjoint_violations(
-        self, tbox_iri: str, dataset: str | None = None
+        self, kg_iri: str, dataset: str | None = None
     ) -> list[ReasonerViolation]:
         """owl:disjointWith 위반 검출 (SPARQL) — 개체가 서로 disjoint 클래스에 동시에 속하는 경우."""
         violations: list[ReasonerViolation] = []
 
         # 먼저 TBox에 disjointWith 트리플이 있는지 확인
         dw_check = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
-SELECT ?c1 ?c2 WHERE {{ GRAPH <{tbox_iri}> {{ ?c1 owl:disjointWith ?c2 . }} }}""", dataset=dataset)
+SELECT ?c1 ?c2 WHERE {{ GRAPH <{kg_iri}> {{ ?c1 owl:disjointWith ?c2 . }} }}""", dataset=dataset)
         logger.info("_detect_disjoint_violations: TBox disjointWith triples=%s", dw_check)
 
         # 개체 타입 확인
@@ -386,9 +386,9 @@ SELECT ?ind ?type WHERE {{ GRAPH ?g {{ ?ind a ?type . FILTER(isIRI(?ind)) FILTER
         rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
 SELECT DISTINCT ?ind ?c1 ?c2 WHERE {{
     {{
-        GRAPH <{tbox_iri}> {{ ?c1 owl:disjointWith ?c2 . }}
+        GRAPH <{kg_iri}> {{ ?c1 owl:disjointWith ?c2 . }}
     }} UNION {{
-        GRAPH <{tbox_iri}> {{ ?c2 owl:disjointWith ?c1 . }}
+        GRAPH <{kg_iri}> {{ ?c2 owl:disjointWith ?c1 . }}
     }}
     GRAPH ?g1 {{ ?ind a ?c1 . FILTER(isIRI(?ind)) }}
     GRAPH ?g2 {{ ?ind a ?c2 . }}
@@ -396,7 +396,7 @@ SELECT DISTINCT ?ind ?c1 ?c2 WHERE {{
     FILTER(STR(?c1) < STR(?c2))
 }}""", dataset=dataset)
 
-        logger.info("_detect_disjoint_violations: tbox=%s rows=%d result=%s", tbox_iri, len(rows), rows)
+        logger.info("_detect_disjoint_violations: tbox=%s rows=%d result=%s", kg_iri, len(rows), rows)
 
         seen: set[tuple] = set()
         for r in rows:

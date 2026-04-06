@@ -22,8 +22,7 @@ MCP 도구 목록 (쓰기):
   4. add_individual()로 Individual 생성
 
 Named Graph 규칙:
-  - 수동 생성 Individual: urn:source:manual/{ontology_id}
-  - TBox (스키마):        {ontology_id}/tbox
+  - 온톨로지 본문(스키마+인스턴스): {ontology_id}/kg
 """
 from __future__ import annotations
 
@@ -32,6 +31,8 @@ import logging
 from typing import Any
 
 from fastmcp import FastMCP
+
+from services.ontology_graph import kg_graph_iri
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +60,6 @@ PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
 PREFIX prov: <http://www.w3.org/ns/prov#>
 """
-
-
-def _manual_graph(ontology_id: str) -> str:
-    """수동 입력 Individual이 저장되는 Named Graph IRI."""
-    return f"urn:source:manual/{ontology_id}"
 
 
 def _esc(s: str) -> str:
@@ -125,8 +121,8 @@ async def get_ontology_summary(ontology_id: str, dataset: str = "ontology") -> d
     store = _services.get("store")
     if store is None:
         return {"error": "store not available"}
-    tbox_iri = f"{ontology_id}/tbox"
-    stats = await store.get_ontology_stats(tbox_iri, dataset=dataset)
+    kg_iri = kg_graph_iri(ontology_id)
+    stats = await store.get_ontology_stats(kg_iri, dataset=dataset)
     return {"ontology_id": ontology_id, "stats": stats}
 
 
@@ -157,7 +153,7 @@ async def search_entities(
         return []
 
     # ── 키워드 검색 ───────────────────────────────────────────────────────
-    tbox_iri = f"{ontology_id}/tbox"
+    kg_iri = kg_graph_iri(ontology_id)
     keyword_results: list[dict] = []
 
     if kind in ("concept", "all"):
@@ -165,7 +161,7 @@ async def search_entities(
             PREFIX owl: <http://www.w3.org/2002/07/owl#>
             PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
             SELECT ?iri ?label WHERE {{
-                GRAPH <{tbox_iri}> {{
+                GRAPH <{kg_iri}> {{
                     ?iri a owl:Class .
                     OPTIONAL {{ ?iri rdfs:label ?label }}
                 }}
@@ -188,7 +184,7 @@ async def search_entities(
                 PREFIX owl: <http://www.w3.org/2002/07/owl#>
                 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
                 SELECT ?iri ?label WHERE {{
-                    GRAPH <{tbox_iri}> {{
+                    GRAPH <{kg_iri}> {{
                         ?iri a owl:NamedIndividual .
                         OPTIONAL {{ ?iri rdfs:label ?label }}
                     }}
@@ -245,7 +241,7 @@ async def search_relations(
     if store is None:
         return []
 
-    tbox_iri = f"{ontology_id}/tbox"
+    kg_iri = kg_graph_iri(ontology_id)
     filter_clause = ""
     if query:
         filter_clause = (
@@ -257,7 +253,7 @@ async def search_relations(
         PREFIX owl: <http://www.w3.org/2002/07/owl#>
         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         SELECT ?iri ?label ?kind WHERE {{
-            GRAPH <{tbox_iri}> {{
+            GRAPH <{kg_iri}> {{
                 {{ ?iri a owl:ObjectProperty . BIND("object" AS ?kind) }}
                 UNION
                 {{ ?iri a owl:DatatypeProperty . BIND("data" AS ?kind) }}
@@ -301,7 +297,7 @@ async def get_subgraph(
         return {"nodes": [], "edges": [], "error": "store not available"}
     from api.subgraph import _get_subgraph_sparql
     depth = max(1, min(depth, 5))
-    return await _get_subgraph_sparql(store, ontology_id, entity_iris, depth, ont_iri=None, dataset=dataset)
+    return await _get_subgraph_sparql(store, ontology_id, entity_iris, depth, ont_iri=ontology_id, dataset=dataset)
 
 
 @mcp.tool()
@@ -397,7 +393,7 @@ async def add_individual(
     """Individual(owl:NamedIndividual) 생성 MCP 도구.
 
     PDF 등 외부 문서에서 추출한 개체를 온톨로지에 등록할 때 사용합니다.
-    생성된 Individual은 urn:source:manual/{ontology_id} Named Graph에 저장됩니다.
+    생성된 Individual은 {{ontology_id}}/kg Named Graph에 저장됩니다.
 
     Args:
         ontology_id: 대상 온톨로지 IRI (예: "https://infiniq.co.kr/jc3iedm/")
@@ -442,14 +438,15 @@ async def add_individual(
     same_as = _parse_list(same_as)
     different_from = _parse_list(different_from)
 
-    # IRI 중복 확인
+    graph_iri = kg_graph_iri(ontology_id)
+
+    # IRI 중복 확인 (동일 kg 그래프)
     exists = await store.sparql_ask(
-        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset
+        f"{_SPARQL_PREFIXES} ASK {{ GRAPH <{graph_iri}> {{ <{iri}> a owl:NamedIndividual }} }}",
+        dataset=dataset,
     )
     if exists:
         return {"error": f"IRI already exists: {iri}"}
-
-    graph_iri = _manual_graph(ontology_id)
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
 
@@ -504,8 +501,7 @@ async def update_individual(
     지정한 필드만 갱신합니다. None으로 전달한 필드는 변경하지 않습니다.
     리스트 필드(types, data_properties 등)에 빈 리스트([])를 전달하면 해당 필드를 모두 삭제합니다.
 
-    수정 대상은 urn:source:manual/{ontology_id} Named Graph의 트리플입니다.
-    Import로 불러온 Individual의 경우 수동 그래프에 변경 트리플이 추가됩니다.
+    수정 대상은 {{ontology_id}}/kg Named Graph의 트리플입니다.
 
     Args:
         ontology_id: 대상 온톨로지 IRI
@@ -533,13 +529,13 @@ async def update_individual(
     same_as = _parse_list(same_as)
     different_from = _parse_list(different_from)
 
+    g = kg_graph_iri(ontology_id)
+
     exists = await store.sparql_ask(
-        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset
+        f"{_SPARQL_PREFIXES} ASK {{ GRAPH <{g}> {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset
     )
     if not exists:
         return {"error": f"Individual not found: {iri}"}
-
-    g = _manual_graph(ontology_id)
 
     if label is not None:
         await store.sparql_update(f"""{_SPARQL_PREFIXES}
@@ -605,7 +601,7 @@ async def add_concept(
 ) -> dict:
     """Concept(owl:Class) 생성 MCP 도구.
 
-    온톨로지의 TBox에 새 클래스를 추가합니다.
+    온톨로지 kg 그래프에 새 클래스를 추가합니다.
     기존 클래스를 확장하거나, 문서에서 추출한 새 도메인 개념을 등록할 때 사용합니다.
 
     Args:
@@ -636,15 +632,17 @@ async def add_concept(
 
     super_classes = _parse_list(super_classes)
 
+    kg_graph = kg_graph_iri(ontology_id)
+
     # IRI 중복 확인
     exists = await store.sparql_ask(
-        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:Class }} }}", dataset=dataset
+        f"{_SPARQL_PREFIXES} ASK {{ GRAPH <{kg_graph}> {{ <{iri}> a owl:Class }} }}",
+        dataset=dataset,
     )
     if exists:
         return {"error": f"IRI already exists: {iri}"}
 
-    # TBox 그래프에 추가
-    tbox_graph = f"{ontology_id}/tbox"
+    # kg 그래프에 추가
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
 
@@ -660,21 +658,21 @@ async def add_concept(
     triples.append(f'    <{iri}> prov:wasAttributedTo "manual" .')
 
     await store.sparql_update(
-        f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{tbox_graph}> {{\n"
+        f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{kg_graph}> {{\n"
         + "\n".join(triples)
         + "\n} }",
         dataset=dataset,
     )
 
-    logger.info("add_concept: created %s in %s", iri, tbox_graph)
-    return {"status": "created", "iri": iri, "graph_iri": tbox_graph}
+    logger.info("add_concept: created %s in %s", iri, kg_graph)
+    return {"status": "created", "iri": iri, "graph_iri": kg_graph}
 
 
 @mcp.tool()
 async def delete_individual(ontology_id: str, iri: str, dataset: str = "ontology") -> dict:
     """Individual 삭제 MCP 도구.
 
-    모든 Named Graph에서 해당 IRI를 주어(subject)로 갖는 트리플을 전부 삭제합니다.
+    해당 온톨로지 kg 그래프에서 해당 IRI를 주어(subject)로 갖는 트리플을 삭제합니다.
     삭제 후 복구가 불가능하므로 신중하게 사용하세요.
 
     Args:
@@ -689,18 +687,17 @@ async def delete_individual(ontology_id: str, iri: str, dataset: str = "ontology
     if store is None:
         return {"error": "store not available"}
 
+    g = kg_graph_iri(ontology_id)
+
     exists = await store.sparql_ask(
-        f"{_SPARQL_PREFIXES} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset
+        f"{_SPARQL_PREFIXES} ASK {{ GRAPH <{g}> {{ <{iri}> a owl:NamedIndividual }} }}", dataset=dataset
     )
     if not exists:
         return {"error": f"Individual not found: {iri}"}
 
-    # 모든 Named Graph에서 해당 Individual의 트리플 삭제
     await store.sparql_update(f"""{_SPARQL_PREFIXES}
-DELETE {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}
-WHERE  {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}""", dataset=dataset)
-    # Default graph 트리플도 삭제
-    await store.sparql_update(f"{_SPARQL_PREFIXES}\nDELETE WHERE {{ <{iri}> ?p ?o }}", dataset=dataset)
+DELETE {{ GRAPH <{g}> {{ <{iri}> ?p ?o }} }}
+WHERE  {{ GRAPH <{g}> {{ <{iri}> ?p ?o }} }}""", dataset=dataset)
 
     logger.info("delete_individual: deleted %s", iri)
     return {"status": "deleted", "iri": iri}

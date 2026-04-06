@@ -1,6 +1,14 @@
 // Ontology CRUD API client
 
-import { apiFetch, apiGet, apiPost, apiPut, apiDelete } from './client'
+import { API_BASE_URL, ApiError, apiFetch, apiGet, apiPost, apiPut, apiDelete } from './client'
+
+function detailFromFastApiBody(body: unknown): string | undefined {
+  if (body == null || typeof body !== 'object') return undefined
+  const d = (body as { detail?: unknown }).detail
+  if (typeof d === 'string') return d
+  if (d && typeof d === 'object' && 'message' in d) return String((d as { message: string }).message)
+  return undefined
+}
 import type { Ontology, OntologyCreate, OntologyUpdate, PaginatedResponse } from '@/types/ontology'
 
 // Backend returns {label, iri} but frontend types use {name, base_iri}
@@ -98,38 +106,116 @@ export function getSubgraph(
   }))
 }
 
+export type ImportResult = {
+  message: string
+  triples_imported: number
+  graph_iri?: string
+  format?: string
+  /** 파일 import 시 서버가 측정한 단계별 ms (read / parse / store / total) */
+  timing_ms?: Record<string, number>
+}
+
+/** TTL 등 파일 업로드 진행 (브라우저 → API 게이트웨이 구간) */
+export type ImportFileProgress =
+  | { phase: 'upload'; loaded: number; total: number }
+  | { phase: 'server' }
+
+/**
+ * 파일 import — XMLHttpRequest로 업로드 진행률을 알 수 있음. 완료 후 서버 처리 구간은 phase=server.
+ */
 export function importOntologyFile(
   ontologyId: string,
   file: File,
   dataset?: string,
-): Promise<{ message: string; triples_imported?: number }> {
-  const form = new FormData()
-  form.append('file', file)
+  onProgress?: (p: ImportFileProgress) => void,
+): Promise<ImportResult> {
   const qs = dataset ? `?dataset=${dataset}` : ''
-  return apiFetch<{ imported: number }>(`/ontologies/${ontologyId}/import/file${qs}`, {
-    method: 'POST',
-    body: form,
-  }).then((res) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
+  const url = `${API_BASE_URL}/ontologies/${ontologyId}/import/file${qs}`
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const form = new FormData()
+    form.append('file', file)
+
+    xhr.upload.addEventListener('progress', (ev) => {
+      if (ev.lengthComputable) {
+        onProgress?.({ phase: 'upload', loaded: ev.loaded, total: ev.total })
+      }
+    })
+    xhr.upload.addEventListener('load', () => {
+      onProgress?.({ phase: 'server' })
+    })
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const res = JSON.parse(xhr.responseText || '{}') as {
+            imported: number
+            graph_iri: string
+            format: string
+            timing_ms?: Record<string, number>
+          }
+          resolve({
+            message: `Imported ${res.imported.toLocaleString()} triples`,
+            triples_imported: res.imported,
+            graph_iri: res.graph_iri,
+            format: res.format,
+            timing_ms: res.timing_ms,
+          })
+        } catch {
+          reject(new Error('Invalid JSON from import response'))
+        }
+        return
+      }
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(xhr.responseText || '{}')
+      } catch {
+        parsed = {}
+      }
+      const detail = detailFromFastApiBody(parsed)
+      reject(new ApiError(xhr.status, xhr.statusText, detail))
+    })
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Network error during import'))
+    })
+
+    xhr.open('POST', url)
+    xhr.send(form)
+  })
 }
 
 export function importOntologyUrl(
   ontologyId: string,
   url: string,
   dataset?: string,
-): Promise<{ message: string; triples_imported?: number }> {
+): Promise<ImportResult> {
   const qs = dataset ? `?dataset=${dataset}` : ''
-  return apiPost(`/ontologies/${ontologyId}/import/url${qs}`, { url })
-    .then((res: { imported: number }) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
+  return apiPost(`/ontologies/${ontologyId}/import/url${qs}`, { url }).then(
+    (res: { imported: number; graph_iri: string; format: string }) => ({
+      message: `Imported ${res.imported.toLocaleString()} triples`,
+      triples_imported: res.imported,
+      graph_iri: res.graph_iri,
+      format: res.format,
+    }),
+  )
 }
 
 export function importOntologyStandard(
   ontologyId: string,
   name: string,
   dataset?: string,
-): Promise<{ message: string; triples_imported?: number }> {
+): Promise<ImportResult> {
   const qs = dataset ? `?dataset=${dataset}` : ''
-  return apiPost(`/ontologies/${ontologyId}/import/standard${qs}`, { name })
-    .then((res: { imported: number }) => ({ message: `Imported ${res.imported} triples`, triples_imported: res.imported }))
+  return apiPost(`/ontologies/${ontologyId}/import/standard${qs}`, { name }).then(
+    (res: { imported: number; graph_iri: string; format: string }) => ({
+      message: `Imported ${res.imported.toLocaleString()} triples`,
+      triples_imported: res.imported,
+      graph_iri: res.graph_iri,
+      format: res.format,
+    }),
+  )
 }
 
 /** @deprecated Use importOntologyFile / importOntologyUrl / importOntologyStandard */

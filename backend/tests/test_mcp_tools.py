@@ -25,7 +25,7 @@ from services.reasoner_service import ReasonerService
 
 
 ONT_IRI = "https://test.example.org/onto"
-TBOX = f"{ONT_IRI}/tbox"
+KG = f"{ONT_IRI}/kg"
 
 _P = """
 PREFIX owl:  <http://www.w3.org/2002/07/owl#>
@@ -108,7 +108,7 @@ async def test_mcp_list_ontologies_returns_items(store):
     await store.sparql_update(f"""{_P}
         PREFIX dc: <http://purl.org/dc/terms/>
         INSERT DATA {{
-            GRAPH <{TBOX}> {{
+            GRAPH <{KG}> {{
                 <{ONT_IRI}> a owl:Ontology ; rdfs:label "Test Onto" ; dc:identifier "abc-123" .
             }}
         }}
@@ -129,7 +129,7 @@ async def test_mcp_list_ontologies_no_store():
 # ── get_ontology_summary ───────────────────────────────────────────────────────
 
 async def test_mcp_get_ontology_summary_empty(store):
-    """빈 tbox → stats 0."""
+    """빈 kg → stats 0."""
     result = await get_ontology_summary(ONT_IRI)
     assert "ontology_id" in result
     assert "stats" in result
@@ -140,7 +140,7 @@ async def test_mcp_get_ontology_summary_empty(store):
 
 
 async def test_mcp_get_ontology_summary_with_data(populated_store):
-    """tbox에 데이터 있을 때 stats 정확성."""
+    """kg에 데이터 있을 때 stats 정확성."""
     init_services(populated_store, MagicMock())
     result = await get_ontology_summary(ONT_IRI)
     stats = result["stats"]
@@ -266,7 +266,7 @@ async def test_mcp_sparql_query_select(populated_store):
     result = await sparql_query(
         ONT_IRI,
         f"PREFIX owl: <http://www.w3.org/2002/07/owl#> "
-        f"SELECT ?c WHERE {{ GRAPH <{TBOX}> {{ ?c a owl:Class }} }}",
+        f"SELECT ?c WHERE {{ GRAPH <{KG}> {{ ?c a owl:Class }} }}",
     )
     assert "results" in result
     assert isinstance(result["results"], list)
@@ -278,7 +278,7 @@ async def test_mcp_sparql_query_update_blocked(store):
     init_services(store, MagicMock(), MagicMock())
     result = await sparql_query(
         ONT_IRI,
-        f"INSERT DATA {{ GRAPH <{TBOX}> {{ <x:a> <x:b> <x:c> }} }}",
+        f"INSERT DATA {{ GRAPH <{KG}> {{ <x:a> <x:b> <x:c> }} }}",
     )
     assert "error" in result
     assert "INSERT" in result["error"] or "not allowed" in result["error"].lower()

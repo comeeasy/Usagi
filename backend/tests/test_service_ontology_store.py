@@ -18,7 +18,7 @@ pytestmark = pytest.mark.integration
 FUSEKI_URL = "http://localhost:3030"
 DATASET = "ontology"
 
-GRAPH = "https://example.org/test/tbox"
+GRAPH = "https://example.org/test/kg"
 ONT = "https://example.org/test"
 RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
 RDFS_LABEL = "http://www.w3.org/2000/01/rdf-schema#label"
@@ -109,11 +109,11 @@ async def test_delete_graph_idempotent(store):
 
 async def test_get_ontology_stats(store):
     """concepts/individuals/properties 카운트 정확성."""
-    tbox = f"{ONT}/tbox"
+    kg = f"{ONT}/kg"
     await store.sparql_update(f"""
         PREFIX owl: <http://www.w3.org/2002/07/owl#>
         INSERT DATA {{
-            GRAPH <{tbox}> {{
+            GRAPH <{kg}> {{
                 <{ONT}#Cls1> a owl:Class .
                 <{ONT}#Cls2> a owl:Class .
                 <{ONT}#ind1> a owl:NamedIndividual .
@@ -122,12 +122,12 @@ async def test_get_ontology_stats(store):
             }}
         }}
     """)
-    stats = await store.get_ontology_stats(tbox)
+    stats = await store.get_ontology_stats(kg)
     assert stats["concepts"] == 2
     assert stats["individuals"] == 1
     assert stats["object_properties"] == 1
     assert stats["data_properties"] == 1
-    await store.delete_graph(tbox)
+    await store.delete_graph(kg)
 
 
 async def test_sparql_ask_true(store):
