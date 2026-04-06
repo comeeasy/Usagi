@@ -48,10 +48,6 @@ def _store(request: Request):
     return request.app.state.ontology_store
 
 
-def _graph_store(request: Request):
-    return request.app.state.graph_store
-
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -224,7 +220,6 @@ async def update_ontology(request: Request, ontology_id: str, body: OntologyUpda
 @router.delete("/{ontology_id}", status_code=204)
 async def delete_ontology(request: Request, ontology_id: str) -> None:
     store = _store(request)
-    graph_store = _graph_store(request)
 
     raw = await _fetch_ontology(store, ontology_id)
     if not raw:
@@ -232,7 +227,7 @@ async def delete_ontology(request: Request, ontology_id: str) -> None:
 
     iri = raw["iri"]["value"]
 
-    # 해당 온톨로지 관련 모든 Named Graph 조회
+    # 해당 온톨로지 관련 모든 Named Graph 조회 후 삭제
     graph_rows = await store.sparql_select(f"""
         SELECT DISTINCT ?g WHERE {{
             GRAPH ?g {{ ?s ?p ?o }}
@@ -242,24 +237,3 @@ async def delete_ontology(request: Request, ontology_id: str) -> None:
 
     for row in graph_rows:
         await store.delete_graph(_v(row.get("g")))
-
-    await graph_store.delete_ontology_data(ontology_id)
-
-
-
-# ── Neo4j 수동 동기화 ──────────────────────────────────────────────────────
-
-@router.post("/{ontology_id}/sync")
-async def sync_ontology(request: Request, ontology_id: str) -> dict:
-    """Oxigraph → Neo4j 전체 동기화 (TBox + ABox)."""
-    from services.sync_service import SyncService
-    store = _store(request)
-    graph_store = _graph_store(request)
-
-    raw = await _fetch_ontology(store, ontology_id)
-    if not raw:
-        raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Not found: {ontology_id}"})
-
-    svc = SyncService(store, graph_store)
-    result = await svc.full_sync(ontology_id)
-    return result

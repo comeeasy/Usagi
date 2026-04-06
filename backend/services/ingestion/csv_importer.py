@@ -1,36 +1,32 @@
 """
-services/ingestion/csv_importer.py — CSV 파일 → Oxigraph + Neo4j 일괄 import
+services/ingestion/csv_importer.py — CSV 파일 → Fuseki 일괄 import
 
 흐름:
   1. csv.DictReader 로 파일 파싱
-  2. [Phase 1] iri_generator + RDF 트리플 생성 → Oxigraph Named Graph bulk insert
+  2. iri_generator + rdflib Triple 생성 → OntologyStore.insert_triples() 로 Named Graph 삽입
      (기존 Named Graph는 DROP 후 원자적 교체)
-  3. [Phase 2] 파싱된 행을 UNWIND $rows Cypher로 Neo4j 배치 upsert
-     (500행 단위 chunking)
 """
 from __future__ import annotations
 
-import asyncio
 import csv
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from pyoxigraph import Literal as RDFLiteral, NamedNode, Quad
+from rdflib import URIRef, Literal, BNode
+from rdflib.namespace import XSD
 
 from services.ingestion.iri_generator import generate
-from services.ontology_store import OntologyStore
+from services.ontology_store import OntologyStore, Triple
 
 logger = logging.getLogger(__name__)
 
-# RDF 상수
-_RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
-_PROV_GENERATED_AT = "http://www.w3.org/ns/prov#generatedAtTime"
-_PROV_ATTRIBUTED_TO = "http://www.w3.org/ns/prov#wasAttributedTo"
-_XSD_STRING = "http://www.w3.org/2001/XMLSchema#string"
+_RDF_TYPE = URIRef("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
+_PROV_GENERATED_AT = URIRef("http://www.w3.org/ns/prov#generatedAtTime")
+_PROV_ATTRIBUTED_TO = URIRef("http://www.w3.org/ns/prov#wasAttributedTo")
 
-_NEO4J_BATCH = 500  # Neo4j UNWIND 배치 크기
+_BATCH_SIZE = 500
 
 
 def _build_named_graph_iri(source_id: str, timestamp: str) -> str:
@@ -58,11 +54,10 @@ def _read_csv(file_path: Path, cfg: Any) -> list[dict]:
 
 
 class CSVImporter:
-    """CSV 파일을 Oxigraph + Neo4j에 import하는 서비스."""
+    """CSV 파일을 Fuseki에 import하는 서비스."""
 
-    def __init__(self, store: OntologyStore, graph_store: Any) -> None:
+    def __init__(self, store: OntologyStore) -> None:
         self._store = store
-        self._graph_store = graph_store
 
     async def preview(self, file_path: Path, cfg: Any) -> dict:
         """파일 파싱 없이 헤더와 행 수만 반환 (빠른 미리보기)."""
@@ -90,7 +85,7 @@ class CSVImporter:
         source: Any,  # BackingSource (source_type == 'csv-file')
         ontology_id: str,
     ) -> dict:
-        """CSV를 Oxigraph + Neo4j에 모두 import하고 결과를 반환."""
+        """CSV를 Fuseki에 import하고 결과를 반환."""
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         named_graph = _build_named_graph_iri(source.id, timestamp)
 
@@ -100,7 +95,6 @@ class CSVImporter:
             return {
                 "rows_read": 0,
                 "triples_inserted": 0,
-                "neo4j_nodes_upserted": 0,
                 "named_graph": named_graph,
             }
 
@@ -109,42 +103,35 @@ class CSVImporter:
             source.id, len(records), ontology_id,
         )
 
-        triples = await self._phase_oxigraph(records, source, named_graph, timestamp)
-        nodes = await self._phase_neo4j(records, source, ontology_id)
+        triples_inserted = await self._import_to_fuseki(records, source, named_graph, timestamp)
 
         logger.info(
-            "CSV import done: triples=%d, neo4j_nodes=%d, graph=%s",
-            triples, nodes, named_graph,
+            "CSV import done: triples=%d, graph=%s",
+            triples_inserted, named_graph,
         )
         return {
             "rows_read": len(records),
-            "triples_inserted": triples,
-            "neo4j_nodes_upserted": nodes,
+            "triples_inserted": triples_inserted,
             "named_graph": named_graph,
         }
 
-    # ── Phase 1: Oxigraph ─────────────────────────────────────────────────
-
-    async def _phase_oxigraph(
+    async def _import_to_fuseki(
         self,
         records: list[dict],
         source: Any,
         named_graph: str,
         timestamp: str,
     ) -> int:
+        """CSV 레코드를 Triple로 변환하여 Fuseki Named Graph에 삽입."""
         # 기존 Named Graph DROP (재적재 원자적 교체)
         await self._store.delete_graph(named_graph)
 
-        graph_node = NamedNode(named_graph)
-        rdf_type_node = NamedNode(_RDF_TYPE)
-        prov_at_node = NamedNode(_PROV_GENERATED_AT)
-        prov_attr_node = NamedNode(_PROV_ATTRIBUTED_TO)
-        xsd_str_node = NamedNode(_XSD_STRING)
-        concept_node = NamedNode(source.concept_iri)
-        ts_literal = RDFLiteral(timestamp, datatype=xsd_str_node)
-        src_literal = RDFLiteral(source.id, datatype=xsd_str_node)
+        rdf_type_node = _RDF_TYPE
+        concept_node = URIRef(source.concept_iri)
+        ts_literal = Literal(timestamp, datatype=XSD.string)
+        src_literal = Literal(source.id, datatype=XSD.string)
 
-        quads: list[Quad] = []
+        triples: list[Triple] = []
         for record in records:
             try:
                 iri = generate(source.iri_template, record)
@@ -152,8 +139,8 @@ class CSVImporter:
                 logger.warning("IRI generation failed: %s — skipping row", exc)
                 continue
 
-            subject = NamedNode(iri)
-            quads.append(Quad(subject, rdf_type_node, concept_node, graph_node))
+            subject = URIRef(iri)
+            triples.append(Triple(subject, rdf_type_node, concept_node))
 
             for mapping in source.property_mappings:
                 raw = record.get(mapping.source_field)
@@ -161,68 +148,21 @@ class CSVImporter:
                     continue
                 value_str = str(raw)
                 if value_str.startswith("http") or value_str.startswith("urn"):
-                    obj: NamedNode | RDFLiteral = NamedNode(value_str)
+                    obj: URIRef | Literal = URIRef(value_str)
                 elif mapping.datatype:
-                    obj = RDFLiteral(value_str, datatype=NamedNode(mapping.datatype))
+                    obj = Literal(value_str, datatype=URIRef(mapping.datatype))
                 else:
-                    obj = RDFLiteral(value_str, datatype=xsd_str_node)
-                quads.append(Quad(subject, NamedNode(mapping.property_iri), obj, graph_node))
+                    obj = Literal(value_str, datatype=XSD.string)
+                triples.append(Triple(subject, URIRef(mapping.property_iri), obj))
 
-            quads.append(Quad(subject, prov_at_node, ts_literal, graph_node))
-            quads.append(Quad(subject, prov_attr_node, src_literal, graph_node))
+            triples.append(Triple(subject, _PROV_GENERATED_AT, ts_literal))
+            triples.append(Triple(subject, _PROV_ATTRIBUTED_TO, src_literal))
 
-        # Bulk insert (executor로 블로킹 해제)
-        ox_store = self._store._store
-        async with self._store._write_lock:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, ox_store.extend, quads)
-
-        return len(quads)
-
-    # ── Phase 2: Neo4j ────────────────────────────────────────────────────
-
-    async def _phase_neo4j(
-        self,
-        records: list[dict],
-        source: Any,
-        ontology_id: str,
-    ) -> int:
-        cfg = source.config
-        pk_field = cfg.primary_key_field if hasattr(cfg, "primary_key_field") else ""
-
-        rows: list[dict] = []
-        for record in records:
-            try:
-                iri = generate(source.iri_template, record)
-            except (KeyError, ValueError):
-                continue
-            # label: PK 필드 값 → 없으면 IRI 마지막 세그먼트
-            raw_label = record.get(pk_field, "") if pk_field else ""
-            label = str(raw_label) if raw_label else iri.split("/")[-1].split("#")[-1]
-            rows.append({"iri": iri, "label": label})
-
-        if not rows:
-            return 0
-
+        # 배치 삽입
         total = 0
-        for i in range(0, len(rows), _NEO4J_BATCH):
-            batch = rows[i : i + _NEO4J_BATCH]
-            async with self._graph_store._session() as session:
-                result = await session.run(
-                    """
-                    UNWIND $rows AS row
-                    MERGE (n:Individual {iri: row.iri})
-                    SET n.label = row.label, n.ontologyId = $ontologyId
-                    WITH n
-                    MERGE (c:Concept {iri: $conceptIri})
-                    MERGE (n)-[:TYPE]->(c)
-                    RETURN count(n) AS cnt
-                    """,
-                    rows=batch,
-                    ontologyId=ontology_id,
-                    conceptIri=source.concept_iri,
-                )
-                record = await result.single()
-                total += record["cnt"] if record else 0
+        for i in range(0, len(triples), _BATCH_SIZE):
+            batch = triples[i:i + _BATCH_SIZE]
+            await self._store.insert_triples(named_graph, batch)
+            total += len(batch)
 
         return total

@@ -123,7 +123,6 @@ SELECT DISTINCT ?type WHERE {{
 @router.post("", response_model=Individual, status_code=201)
 async def create_individual(request: Request, ontology_id: str, body: IndividualCreate) -> Individual:
     store = request.app.state.ontology_store
-    graph_store = request.app.state.graph_store
     graph_iri = _manual_graph(ontology_id)
 
     if await store.sparql_ask(f"{_P} ASK {{ <{body.iri}> a owl:NamedIndividual }}"):
@@ -150,11 +149,6 @@ async def create_individual(request: Request, ontology_id: str, body: Individual
 INSERT DATA {{ GRAPH <{graph_iri}> {{
 {chr(10).join(triples)}
 }} }}""")
-
-    data_props = {dpv.property_iri: dpv.value for dpv in body.data_property_values}
-    await graph_store.upsert_individual(ontology_id, body.iri, body.label, body.types, data_props)
-    for opv in body.object_property_values:
-        await graph_store.upsert_object_property_value(body.iri, opv.property_iri, opv.target_iri)
 
     return Individual(
         iri=body.iri, ontology_id=ontology_id, label=body.label, types=body.types,
@@ -270,7 +264,6 @@ SELECT ?g ?p ?o WHERE {{
 @router.put("/{iri:path}", response_model=Individual)
 async def update_individual(request: Request, ontology_id: str, iri: str, body: IndividualUpdate) -> Individual:
     store = request.app.state.ontology_store
-    graph_store = request.app.state.graph_store
     iri = unquote(iri)
     g = _manual_graph(ontology_id)
 
@@ -321,14 +314,7 @@ WHERE  {{ GRAPH <{g}> {{ <{iri}> {pred} ?o }} }}""")
                 triples = "\n".join([f"    <{iri}> {pred} <{v}> ." for v in vals])
                 await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{g}> {{\n{triples}\n}} }}")
 
-    updated = await get_individual(request, ontology_id, iri)
-    data_props = {d.property_iri: d.value for d in updated.data_property_values}
-    await graph_store.upsert_individual(ontology_id, iri, updated.label or "", updated.types, data_props)
-    await graph_store.sync_object_property_values(
-        iri,
-        [{"property_iri": o.property_iri, "target_iri": o.target_iri} for o in updated.object_property_values],
-    )
-    return updated
+    return await get_individual(request, ontology_id, iri)
 
 
 # ── 삭제 ──────────────────────────────────────────────────────────────────
@@ -336,7 +322,6 @@ WHERE  {{ GRAPH <{g}> {{ <{iri}> {pred} ?o }} }}""")
 @router.delete("/{iri:path}", status_code=204)
 async def delete_individual(request: Request, ontology_id: str, iri: str) -> None:
     store = request.app.state.ontology_store
-    graph_store = request.app.state.graph_store
     iri = unquote(iri)
 
     if not await store.sparql_ask(f"{_P} ASK {{ GRAPH ?g {{ <{iri}> a owl:NamedIndividual }} }}"):
@@ -346,4 +331,3 @@ async def delete_individual(request: Request, ontology_id: str, iri: str) -> Non
 DELETE {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}
 WHERE  {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}""")
     await store.sparql_update(f"{_P}\nDELETE WHERE {{ <{iri}> ?p ?o }}")
-    await graph_store.delete_node(iri)

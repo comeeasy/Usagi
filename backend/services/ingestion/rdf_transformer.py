@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from pyoxigraph import NamedNode, Literal as RDFLiteral
+from rdflib import URIRef, Literal
+from rdflib.namespace import XSD
 
 from services.ontology_store import Triple
 from services.ingestion.iri_generator import generate
@@ -11,7 +12,6 @@ from services.ingestion.iri_generator import generate
 RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
 PROV_GENERATED_AT_TIME = "http://www.w3.org/ns/prov#generatedAtTime"
 PROV_WAS_ATTRIBUTED_TO = "http://www.w3.org/ns/prov#wasAttributedTo"
-XSD_STRING = "http://www.w3.org/2001/XMLSchema#string"
 
 
 def build_named_graph_iri(source_id: str, timestamp: str) -> str:
@@ -40,13 +40,13 @@ class RDFTransformer:
             except (KeyError, ValueError):
                 continue
 
-            subject = NamedNode(iri)
+            subject = URIRef(iri)
 
             # rdf:type triple
             triples.append(Triple(
                 subject=subject,
-                predicate=NamedNode(RDF_TYPE),
-                object_=NamedNode(source.concept_iri),
+                predicate=URIRef(RDF_TYPE),
+                object_=URIRef(source.concept_iri),
             ))
 
             # Property mappings
@@ -59,28 +59,28 @@ class RDFTransformer:
 
                 # Determine if this is an object property (IRI value) or data property
                 if value_str.startswith("http") or value_str.startswith("urn"):
-                    obj: NamedNode | RDFLiteral = NamedNode(value_str)
+                    obj: URIRef | Literal = URIRef(value_str)
                 elif mapping.datatype:
-                    obj = RDFLiteral(value_str, datatype=NamedNode(mapping.datatype))
+                    obj = Literal(value_str, datatype=URIRef(mapping.datatype))
                 else:
-                    obj = RDFLiteral(value_str, datatype=NamedNode(XSD_STRING))
+                    obj = Literal(value_str, datatype=XSD.string)
 
                 triples.append(Triple(
                     subject=subject,
-                    predicate=NamedNode(mapping.property_iri),
+                    predicate=URIRef(mapping.property_iri),
                     object_=obj,
                 ))
 
             # Provenance triples
             triples.append(Triple(
                 subject=subject,
-                predicate=NamedNode(PROV_GENERATED_AT_TIME),
-                object_=RDFLiteral(event.timestamp, datatype=NamedNode(XSD_STRING)),
+                predicate=URIRef(PROV_GENERATED_AT_TIME),
+                object_=Literal(event.timestamp, datatype=XSD.string),
             ))
             triples.append(Triple(
                 subject=subject,
-                predicate=NamedNode(PROV_WAS_ATTRIBUTED_TO),
-                object_=RDFLiteral(event.source_id, datatype=NamedNode(XSD_STRING)),
+                predicate=URIRef(PROV_WAS_ATTRIBUTED_TO),
+                object_=Literal(event.source_id, datatype=XSD.string),
             ))
 
         return triples

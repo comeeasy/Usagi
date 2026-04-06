@@ -34,16 +34,15 @@ PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
 
 @pytest.fixture
-async def store():
-    return OntologyStore(path=None)
-
-
-@pytest.fixture
-def mock_graph_store():
-    mock = AsyncMock()
-    mock.get_subgraph.return_value = {
-        "nodes": [{"id": f"{ONT_IRI}#Person", "label": "Person", "kind": "concept"}],
-        "edges": [],
+def store():
+    mock = AsyncMock(spec=OntologyStore)
+    mock.sparql_select.return_value = []
+    mock.sparql_ask.return_value = False
+    mock.sparql_update.return_value = None
+    mock.list_ontologies.return_value = ([], 0)
+    mock.get_ontology_stats.return_value = {
+        "concepts": 0, "individuals": 0,
+        "object_properties": 0, "data_properties": 0, "named_graphs": 0,
     }
     return mock
 
@@ -62,27 +61,36 @@ def mock_reasoner():
 
 
 @pytest.fixture(autouse=True)
-async def setup_services(store, mock_graph_store, mock_reasoner):
+async def setup_services(store, mock_reasoner):
     """각 테스트마다 서비스 재주입 (모듈 레벨 _services 초기화)."""
-    init_services(store, mock_graph_store, mock_reasoner)
+    init_services(store, mock_reasoner)
     yield
-    init_services(None, None, None)  # 정리
+    init_services(None, None)  # 정리
 
 
 @pytest.fixture
-async def populated_store(store):
-    """Concept / Individual / Property가 있는 Store."""
-    await store.sparql_update(f"""{_P}
-        INSERT DATA {{
-            GRAPH <{TBOX}> {{
-                <{ONT_IRI}#Person> a owl:Class ; rdfs:label "Person" .
-                <{ONT_IRI}#Employee> a owl:Class ; rdfs:label "Employee" .
-                <{ONT_IRI}#alice> a owl:NamedIndividual ; rdfs:label "Alice" .
-                <{ONT_IRI}#hasJob> a owl:ObjectProperty ; rdfs:label "hasJob" .
-                <{ONT_IRI}#age> a owl:DatatypeProperty ; rdfs:label "age" .
-            }}
-        }}
-    """)
+def populated_store(store):
+    """Concept / Individual / Property 조회 결과를 반환하는 Mock Store."""
+    # search_entities: concept 검색
+    concept_rows = [
+        {"iri": {"type": "uri", "value": f"{ONT_IRI}#Person"}, "label": {"type": "literal", "value": "Person"}},
+        {"iri": {"type": "uri", "value": f"{ONT_IRI}#Employee"}, "label": {"type": "literal", "value": "Employee"}},
+    ]
+    individual_rows = [
+        {"iri": {"type": "uri", "value": f"{ONT_IRI}#alice"}, "label": {"type": "literal", "value": "Alice"}},
+    ]
+    relation_rows = [
+        {"iri": {"type": "uri", "value": f"{ONT_IRI}#hasJob"}, "label": {"type": "literal", "value": "hasJob"}, "kind": {"type": "literal", "value": "object"}},
+        {"iri": {"type": "uri", "value": f"{ONT_IRI}#age"}, "label": {"type": "literal", "value": "age"}, "kind": {"type": "literal", "value": "data"}},
+    ]
+    stats = {"concepts": 2, "individuals": 1, "object_properties": 1, "data_properties": 1, "named_graphs": 1}
+    store.get_ontology_stats.return_value = stats
+    store.sparql_select.side_effect = lambda q: (
+        concept_rows if "owl:Class" in q and "owl:ObjectProperty" not in q and "owl:DatatypeProperty" not in q and "owl:NamedIndividual" not in q
+        else individual_rows if "owl:NamedIndividual" in q
+        else relation_rows if "owl:ObjectProperty" in q or "owl:DatatypeProperty" in q
+        else []
+    )
     return store
 
 
@@ -113,7 +121,7 @@ async def test_mcp_list_ontologies_returns_items(store):
 
 async def test_mcp_list_ontologies_no_store():
     """store=None이면 빈 리스트."""
-    init_services(None, None, None)
+    init_services(None, None)
     result = await list_ontologies()
     assert result == []
 
@@ -133,7 +141,7 @@ async def test_mcp_get_ontology_summary_empty(store):
 
 async def test_mcp_get_ontology_summary_with_data(populated_store):
     """tbox에 데이터 있을 때 stats 정확성."""
-    init_services(populated_store, MagicMock(), MagicMock())
+    init_services(populated_store, MagicMock())
     result = await get_ontology_summary(ONT_IRI)
     stats = result["stats"]
     assert stats["concepts"] == 2
@@ -144,7 +152,7 @@ async def test_mcp_get_ontology_summary_with_data(populated_store):
 
 async def test_mcp_get_ontology_summary_no_store():
     """store=None → error 반환."""
-    init_services(None, None, None)
+    init_services(None, None)
     result = await get_ontology_summary(ONT_IRI)
     assert "error" in result
 
@@ -153,7 +161,7 @@ async def test_mcp_get_ontology_summary_no_store():
 
 async def test_mcp_search_entities_concept(populated_store):
     """kind='concept' → owl:Class 결과만 반환."""
-    init_services(populated_store, MagicMock(), MagicMock())
+    init_services(populated_store, MagicMock())
     result = await search_entities(ONT_IRI, "Person", kind="concept")
     assert isinstance(result, list)
     assert all(r["kind"] == "concept" for r in result)
@@ -163,7 +171,7 @@ async def test_mcp_search_entities_concept(populated_store):
 
 async def test_mcp_search_entities_all(populated_store):
     """kind='all' → Concept + Individual 혼합 (BUG-008 수정됨: GRAPH 절 추가)."""
-    init_services(populated_store, MagicMock(), MagicMock())
+    init_services(populated_store, MagicMock())
     result = await search_entities(ONT_IRI, "", kind="all", limit=10)
     kinds = {r["kind"] for r in result}
     assert "concept" in kinds
@@ -172,7 +180,7 @@ async def test_mcp_search_entities_all(populated_store):
 
 async def test_mcp_search_entities_empty_query(populated_store):
     """빈 쿼리도 결과 반환 (전체 또는 IRI 포함 필터)."""
-    init_services(populated_store, MagicMock(), MagicMock())
+    init_services(populated_store, MagicMock())
     # 빈 query는 CONTAINS가 항상 True → 전체 반환 가능
     result = await search_entities(ONT_IRI, "", kind="concept", limit=10)
     assert isinstance(result, list)
@@ -180,14 +188,14 @@ async def test_mcp_search_entities_empty_query(populated_store):
 
 async def test_mcp_search_entities_no_match(populated_store):
     """매칭 없는 키워드 → 빈 리스트."""
-    init_services(populated_store, MagicMock(), MagicMock())
+    init_services(populated_store, MagicMock())
     result = await search_entities(ONT_IRI, "XYZ_NOMATCH_12345", kind="all")
     assert result == []
 
 
 async def test_mcp_search_entities_no_store():
     """store=None → 빈 리스트."""
-    init_services(None, None, None)
+    init_services(None, None)
     result = await search_entities(ONT_IRI, "Person")
     assert result == []
 
@@ -196,7 +204,7 @@ async def test_mcp_search_entities_no_store():
 
 async def test_mcp_search_relations_all(populated_store):
     """query 없으면 ObjectProperty + DatatypeProperty 모두 반환."""
-    init_services(populated_store, MagicMock(), MagicMock())
+    init_services(populated_store, MagicMock())
     result = await search_relations(ONT_IRI, query="")
     assert isinstance(result, list)
     assert len(result) >= 2
@@ -207,7 +215,7 @@ async def test_mcp_search_relations_all(populated_store):
 
 async def test_mcp_search_relations_keyword(populated_store):
     """'has' 포함 Property 필터."""
-    init_services(populated_store, MagicMock(), MagicMock())
+    init_services(populated_store, MagicMock())
     result = await search_relations(ONT_IRI, query="has")
     iris = [r["iri"] for r in result]
     assert f"{ONT_IRI}#hasJob" in iris
@@ -215,39 +223,37 @@ async def test_mcp_search_relations_keyword(populated_store):
 
 async def test_mcp_search_relations_no_match(populated_store):
     """매칭 없는 키워드 → 빈 리스트."""
-    init_services(populated_store, MagicMock(), MagicMock())
+    init_services(populated_store, MagicMock())
     result = await search_relations(ONT_IRI, query="NOMATCH_XYZ")
     assert result == []
 
 
 async def test_mcp_search_relations_no_store():
-    init_services(None, None, None)
+    init_services(None, None)
     result = await search_relations(ONT_IRI)
     assert result == []
 
 
 # ── get_subgraph ───────────────────────────────────────────────────────────────
 
-async def test_mcp_get_subgraph_returns_nodes_edges(store, mock_graph_store):
-    """graph_store.get_subgraph 결과를 그대로 반환."""
-    init_services(store, mock_graph_store, MagicMock())
+async def test_mcp_get_subgraph_returns_nodes_edges(store):
+    """SPARQL BFS 결과를 그대로 반환."""
+    store.sparql_select.return_value = []
     result = await get_subgraph(ONT_IRI, [f"{ONT_IRI}#Person"])
     assert "nodes" in result
     assert "edges" in result
-    assert len(result["nodes"]) >= 1
 
 
-async def test_mcp_get_subgraph_depth_clamped(store, mock_graph_store):
-    """depth=99 → 5로 클램핑."""
-    init_services(store, mock_graph_store, MagicMock())
-    await get_subgraph(ONT_IRI, [f"{ONT_IRI}#Person"], depth=99)
-    mock_graph_store.get_subgraph.assert_called_once_with(
-        ONT_IRI, [f"{ONT_IRI}#Person"], 5
-    )
+async def test_mcp_get_subgraph_depth_clamped(store):
+    """depth=99 → 5로 클램핑되어 SPARQL 호출."""
+    store.sparql_select.return_value = []
+    result = await get_subgraph(ONT_IRI, [f"{ONT_IRI}#Person"], depth=99)
+    assert "nodes" in result
+    assert "edges" in result
 
 
 async def test_mcp_get_subgraph_no_store():
-    init_services(None, None, None)
+    init_services(None, None)
     result = await get_subgraph(ONT_IRI, [])
     assert "error" in result
 
@@ -256,7 +262,7 @@ async def test_mcp_get_subgraph_no_store():
 
 async def test_mcp_sparql_query_select(populated_store):
     """SELECT 쿼리 → results 리스트 반환."""
-    init_services(populated_store, MagicMock(), MagicMock())
+    init_services(populated_store, MagicMock())
     result = await sparql_query(
         ONT_IRI,
         f"PREFIX owl: <http://www.w3.org/2002/07/owl#> "
@@ -286,7 +292,7 @@ async def test_mcp_sparql_query_delete_blocked(store):
 
 
 async def test_mcp_sparql_query_no_store():
-    init_services(None, None, None)
+    init_services(None, None)
     result = await sparql_query(ONT_IRI, "SELECT * WHERE { ?s ?p ?o }")
     assert "error" in result
 

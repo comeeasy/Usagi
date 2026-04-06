@@ -41,10 +41,9 @@ mcp = FastMCP("Ontology Platform")
 _services: dict[str, Any] = {}
 
 
-def init_services(store: Any, graph_store: Any, reasoner: Any, vector_index_manager: Any = None) -> None:
+def init_services(store: Any, reasoner: Any, vector_index_manager: Any = None) -> None:
     """앱 lifespan에서 호출하여 서비스 인스턴스를 등록."""
     _services["store"] = store
-    _services["graph_store"] = graph_store
     _services["reasoner"] = reasoner
     _services["vector_index_manager"] = vector_index_manager
     logger.info("MCP tools: services registered")
@@ -290,11 +289,12 @@ async def get_subgraph(
     Returns:
         { nodes: [...], edges: [...] }
     """
-    graph_store = _services.get("graph_store")
-    if graph_store is None:
-        return {"nodes": [], "edges": [], "error": "graph_store not available"}
+    store = _services.get("store")
+    if store is None:
+        return {"nodes": [], "edges": [], "error": "store not available"}
+    from api.subgraph import _get_subgraph_sparql
     depth = max(1, min(depth, 5))
-    return await graph_store.get_subgraph(ontology_id, entity_iris, depth)
+    return await _get_subgraph_sparql(store, ontology_id, entity_iris, depth, ont_iri=None)
 
 
 @mcp.tool()
@@ -424,7 +424,6 @@ async def add_individual(
         )
     """
     store = _services.get("store")
-    graph_store = _services.get("graph_store")
     if store is None:
         return {"error": "store not available"}
 
@@ -474,16 +473,6 @@ async def add_individual(
         + "\n} }"
     )
 
-    # Neo4j 동기화 (graph_store 미설정 시 RDF 저장은 완료된 상태이므로 경고만 반환)
-    if graph_store is not None:
-        dp_map = {dp["property_iri"]: dp["value"] for dp in (data_properties or []) if dp.get("property_iri")}
-        await graph_store.upsert_individual(ontology_id, iri, label, types or [], dp_map)
-        for op in (object_properties or []):
-            if op.get("property_iri") and op.get("target_iri"):
-                await graph_store.upsert_object_property_value(iri, op["property_iri"], op["target_iri"])
-    else:
-        logger.warning("add_individual: graph_store not available, Neo4j sync skipped")
-
     logger.info("add_individual: created %s in %s", iri, graph_iri)
     return {"status": "created", "iri": iri, "graph_iri": graph_iri}
 
@@ -524,7 +513,6 @@ async def update_individual(
         실패: {"error": "오류 메시지"}
     """
     store = _services.get("store")
-    graph_store = _services.get("graph_store")
     if store is None:
         return {"error": "store not available"}
 
@@ -591,19 +579,6 @@ WHERE  {{ GRAPH <{g}> {{ <{iri}> {pred_str} ?o }} }}""")
                 triples = "\n".join([f"    <{iri}> {pred_str} <{v}> ." for v in vals])
                 await store.sparql_update(f"{_SPARQL_PREFIXES}\nINSERT DATA {{ GRAPH <{g}> {{\n{triples}\n}} }}")
 
-    # Neo4j 동기화
-    if graph_store is not None:
-        dp_map = {dp["property_iri"]: dp["value"] for dp in (data_properties or []) if dp.get("property_iri")}
-        await graph_store.upsert_individual(ontology_id, iri, label or "", types or [], dp_map)
-        if object_properties is not None:
-            await graph_store.sync_object_property_values(
-                iri,
-                [{"property_iri": op["property_iri"], "target_iri": op["target_iri"]}
-                 for op in object_properties if op.get("property_iri") and op.get("target_iri")],
-            )
-    else:
-        logger.warning("update_individual: graph_store not available, Neo4j sync skipped")
-
     logger.info("update_individual: updated %s", iri)
     return {"status": "updated", "iri": iri}
 
@@ -644,7 +619,6 @@ async def add_concept(
         )
     """
     store = _services.get("store")
-    graph_store = _services.get("graph_store")
     if store is None:
         return {"error": "store not available"}
 
@@ -679,12 +653,6 @@ async def add_concept(
         + "\n} }"
     )
 
-    # Neo4j 동기화
-    if graph_store is not None:
-        await graph_store.upsert_concept(ontology_id, iri, label, super_classes or [])
-    else:
-        logger.warning("add_concept: graph_store not available, Neo4j sync skipped")
-
     logger.info("add_concept: created %s in %s", iri, tbox_graph)
     return {"status": "created", "iri": iri, "graph_iri": tbox_graph}
 
@@ -705,7 +673,6 @@ async def delete_individual(ontology_id: str, iri: str) -> dict:
         실패: {"error": "오류 메시지"}
     """
     store = _services.get("store")
-    graph_store = _services.get("graph_store")
     if store is None:
         return {"error": "store not available"}
 
@@ -721,11 +688,6 @@ DELETE {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}
 WHERE  {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}""")
     # Default graph 트리플도 삭제
     await store.sparql_update(f"{_SPARQL_PREFIXES}\nDELETE WHERE {{ <{iri}> ?p ?o }}")
-
-    if graph_store is not None:
-        await graph_store.delete_node(iri)
-    else:
-        logger.warning("delete_individual: graph_store not available, Neo4j sync skipped")
 
     logger.info("delete_individual: deleted %s", iri)
     return {"status": "deleted", "iri": iri}

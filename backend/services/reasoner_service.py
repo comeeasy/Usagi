@@ -90,16 +90,16 @@ class ReasonerService:
             # 추론된 트리플을 inferred Named Graph에 저장
             if result.inferred_axioms:
                 from services.ontology_store import Triple
-                from pyoxigraph import NamedNode
+                from rdflib import URIRef
 
                 triples = []
                 for ax in result.inferred_axioms:
                     try:
                         triples.append(
                             Triple(
-                                subject=NamedNode(ax.subject),
-                                predicate=NamedNode(ax.predicate),
-                                object_=NamedNode(ax.object),
+                                subject=URIRef(ax.subject),
+                                predicate=URIRef(ax.predicate),
+                                object_=URIRef(ax.object),
                             )
                         )
                     except Exception:

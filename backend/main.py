@@ -15,7 +15,6 @@ from fastapi.staticfiles import StaticFiles
 
 from config import settings
 from services.ontology_store import OntologyStore
-from services.graph_store import GraphStore
 from services.reasoner_service import ReasonerService
 from services.merge_service import MergeService
 from services.vector_index import VectorIndexManager
@@ -33,10 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Ontology Platform starting up...")
 
     # 스토어 초기화
-    app.state.ontology_store = OntologyStore(settings.oxigraph_path)
-    app.state.graph_store = GraphStore(
-        settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password
-    )
+    app.state.ontology_store = OntologyStore(settings.fuseki_url, settings.fuseki_dataset)
     app.state.reasoner_service = ReasonerService(app.state.ontology_store)
     app.state.merge_service = MergeService(app.state.ontology_store)
     app.state.vector_index_manager = VectorIndexManager()
@@ -46,26 +42,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app_mcp.tools import init_services as _init_mcp_services
     _init_mcp_services(
         app.state.ontology_store,
-        app.state.graph_store,
         app.state.reasoner_service,
         app.state.vector_index_manager,
     )
 
     # 백그라운드 태스크
-    from workers.sync_worker import run_sync_worker
     from workers.kafka_worker import run_kafka_worker
-
-    sync_task = asyncio.create_task(run_sync_worker())
     kafka_task = asyncio.create_task(run_kafka_worker())
 
     yield
 
     # 종료 처리
-    sync_task.cancel()
     kafka_task.cancel()
-    await asyncio.gather(sync_task, kafka_task, return_exceptions=True)
+    await asyncio.gather(kafka_task, return_exceptions=True)
     app.state.kafka_producer.close()
-    await app.state.graph_store.close()
+    await app.state.ontology_store.close()
 
     logger.info("Ontology Platform shut down.")
 
@@ -104,7 +95,6 @@ app.include_router(sources.router, prefix=API_PREFIX)
 
 app.mount("/mcp", _mcp_app)
 
-# 업로드된 CSV 파일 정적 서빙 (Neo4j LOAD CSV 접근용)
 _UPLOADS_DIR = Path("uploads")
 _UPLOADS_DIR.mkdir(exist_ok=True)
 app.mount("/static/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")

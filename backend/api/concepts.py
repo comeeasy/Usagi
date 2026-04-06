@@ -135,7 +135,6 @@ ORDER BY ?label LIMIT {page_size} OFFSET {offset}""")
 @router.post("", response_model=Concept, status_code=201)
 async def create_concept(request: Request, ontology_id: str, body: ConceptCreate) -> Concept:
     store = request.app.state.ontology_store
-    graph_store = request.app.state.graph_store
     tbox = await _resolve_tbox(store, ontology_id)
     if tbox is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
@@ -161,8 +160,6 @@ async def create_concept(request: Request, ontology_id: str, body: ConceptCreate
 INSERT DATA {{ GRAPH <{tbox}> {{
 {chr(10).join(triples)}
 }} }}""")
-
-    await graph_store.upsert_concept(ontology_id, body.iri, body.label, body.super_classes)
 
     return Concept(
         iri=body.iri, ontology_id=ontology_id, label=body.label,
@@ -256,7 +253,6 @@ SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE {{ ?ind rdf:type <{iri}> . }}""")
 @router.put("/{iri:path}", response_model=Concept)
 async def update_concept(request: Request, ontology_id: str, iri: str, body: ConceptUpdate) -> Concept:
     store = request.app.state.ontology_store
-    graph_store = request.app.state.graph_store
     iri = unquote(iri)
     tbox = await _resolve_tbox(store, ontology_id)
     if tbox is None:
@@ -298,9 +294,7 @@ WHERE  {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn a owl:Restriction 
             block = _restriction_triples(iri, body.restrictions, "upd")
             await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{tbox}> {{\n{block}\n}} }}")
 
-    updated = await get_concept(request, ontology_id, iri)
-    await graph_store.upsert_concept(ontology_id, iri, updated.label, updated.super_classes)
-    return updated
+    return await get_concept(request, ontology_id, iri)
 
 
 # ── 삭제 ──────────────────────────────────────────────────────────────────
@@ -308,7 +302,6 @@ WHERE  {{ GRAPH <{tbox}> {{ <{iri}> rdfs:subClassOf ?bn . ?bn a owl:Restriction 
 @router.delete("/{iri:path}", status_code=204)
 async def delete_concept(request: Request, ontology_id: str, iri: str) -> None:
     store = request.app.state.ontology_store
-    graph_store = request.app.state.graph_store
     iri = unquote(iri)
     tbox = await _resolve_tbox(store, ontology_id)
     if tbox is None:
@@ -329,4 +322,3 @@ WHERE  {{ GRAPH <{tbox}> {{ <{iri}> ?p ?o }} }}""")
     await store.sparql_update(f"""{_P}
 DELETE {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}
 WHERE  {{ GRAPH <{tbox}> {{ ?s ?p <{iri}> }} }}""")
-    await graph_store.delete_node(iri)

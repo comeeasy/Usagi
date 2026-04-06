@@ -131,7 +131,7 @@ async def upload_csv(
     """
     CSV 파일 업로드 → Oxigraph + Neo4j 즉시 import.
 
-    응답: { file_name, row_count, headers, triples_inserted, neo4j_nodes_upserted, named_graph }
+    응답: { file_name, row_count, headers, triples_inserted, named_graph }
     """
     source = _source_store.get(source_id)
     if source is None or source.ontology_id != ontology_id:
@@ -155,13 +155,12 @@ async def upload_csv(
 
     # import 실행
     store = getattr(request.app.state, "ontology_store", None)
-    graph_store = getattr(request.app.state, "graph_store", None)
 
-    if store is None or graph_store is None:
+    if store is None:
         raise HTTPException(status_code=503, detail="Store not initialized")
 
     from services.ingestion.csv_importer import CSVImporter
-    importer = CSVImporter(store, graph_store)
+    importer = CSVImporter(store)
 
     try:
         preview = await importer.preview(file_path, source.config)
@@ -213,12 +212,11 @@ async def trigger_sync(
             raise HTTPException(status_code=404, detail=f"Uploaded file '{cfg.file_name}' not found on server.")
 
         store = getattr(request.app.state, "ontology_store", None)
-        graph_store = getattr(request.app.state, "graph_store", None)
-        if store is None or graph_store is None:
+        if store is None:
             raise HTTPException(status_code=503, detail="Store not initialized")
 
         from services.ingestion.csv_importer import CSVImporter
-        importer = CSVImporter(store, graph_store)
+        importer = CSVImporter(store)
         try:
             result = await importer.import_file(file_path, source, ontology_id)
         except Exception as exc:
