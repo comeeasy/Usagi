@@ -17,6 +17,7 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 import services.import_service as import_svc
+from api.graphs import record_import_provenance
 from services.ontology_graph import resolve_kg_graph_iri
 
 router = APIRouter(prefix="/ontologies/{ontology_id}/import", tags=["import"])
@@ -141,6 +142,11 @@ async def import_file(
         "store": round(ms_store, 1),
         "total": round(ms_total, 1),
     }
+    try:
+        await record_import_provenance(store, kg_iri, "file", file.filename or "", dataset=dataset)
+    except Exception:
+        logger.warning("PROVENANCE_WRITE_ERROR graph=%s", kg_iri)
+
     return {"imported": count, "graph_iri": kg_iri, "format": fmt, "timing_ms": timing_ms}
 
 
@@ -165,6 +171,12 @@ async def import_url(
         raise HTTPException(400, detail={"code": "FETCH_ERROR", "message": str(e)})
 
     count = await import_svc.bulk_insert(store, triples, kg_iri, dataset=dataset)
+
+    try:
+        await record_import_provenance(store, kg_iri, "url", body.url, dataset=dataset)
+    except Exception:
+        logger.warning("PROVENANCE_WRITE_ERROR graph=%s", kg_iri)
+
     return {"imported": count, "graph_iri": kg_iri, "url": body.url}
 
 
@@ -189,4 +201,10 @@ async def import_standard(
         raise HTTPException(400, detail={"code": "IMPORT_ERROR", "message": str(e)})
 
     count = await import_svc.bulk_insert(store, triples, kg_iri, dataset=dataset)
+
+    try:
+        await record_import_provenance(store, kg_iri, "standard", body.name, dataset=dataset)
+    except Exception:
+        logger.warning("PROVENANCE_WRITE_ERROR graph=%s", kg_iri)
+
     return {"imported": count, "graph_iri": kg_iri, "name": body.name}

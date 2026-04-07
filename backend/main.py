@@ -79,7 +79,7 @@ app.add_middleware(
 API_PREFIX = "/api/v1"
 
 from api import ontologies, concepts, individuals, properties, search, subgraph
-from api import sparql, import_, merge, reasoner, sources, datasets
+from api import sparql, import_, merge, reasoner, sources, datasets, graphs
 
 app.include_router(ontologies.router, prefix=API_PREFIX)
 app.include_router(concepts.router, prefix=API_PREFIX)
@@ -93,6 +93,7 @@ app.include_router(merge.router, prefix=API_PREFIX)
 app.include_router(reasoner.router, prefix=API_PREFIX)
 app.include_router(sources.router, prefix=API_PREFIX)
 app.include_router(datasets.router, prefix=API_PREFIX)
+app.include_router(graphs.router, prefix=API_PREFIX)
 
 app.mount("/mcp", _mcp_app)
 

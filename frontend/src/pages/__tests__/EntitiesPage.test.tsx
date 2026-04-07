@@ -2,9 +2,26 @@ import { describe, it, expect, vi } from 'vitest'
 import { screen, waitFor, fireEvent } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../tests/mocks/server'
-import { mockConcept } from '../../tests/mocks/handlers'
+import { mockConcept, mockIndividual } from '../../tests/mocks/handlers'
 import { renderWithProviders } from '../../tests/utils'
 import EntitiesPage from '../ontology/EntitiesPage'
+
+// GraphCanvas uses cytoscape — mock to avoid jsdom issues
+vi.mock('@/components/graph/GraphCanvas', () => ({
+  default: ({ elements }: { elements: unknown[] }) => (
+    <div data-testid="graph-canvas" data-elements={elements.length} />
+  ),
+}))
+
+// Mock getConcept for detail panel
+vi.mock('@/api/entities', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/entities')>()
+  return {
+    ...actual,
+    getConcept: vi.fn().mockResolvedValue(mockConcept),
+    getIndividual: vi.fn().mockResolvedValue(mockIndividual),
+  }
+})
 
 const ROUTE_PATH = '/:ontologyId/entities'
 const INITIAL_ENTRY = '/test-ont-uuid/entities'
@@ -65,6 +82,51 @@ describe('EntitiesPage', () => {
     renderEntitiesPage()
     await waitFor(() => {
       expect(screen.queryByText(mockConcept.label)).not.toBeInTheDocument()
+    })
+  })
+
+  // ── New: embedded graph panel ──────────────────────────────────────────
+
+  it('shows graph panel when a concept is clicked', async () => {
+    renderEntitiesPage()
+    await waitFor(() => screen.getByText(mockConcept.label))
+    fireEvent.click(screen.getByText(mockConcept.label))
+    await waitFor(() => {
+      expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
+    })
+  })
+
+  it('loads subgraph for the clicked concept IRI', async () => {
+    let capturedBody: unknown
+    server.use(
+      http.post('/api/v1/ontologies/:id/subgraph', async ({ request }) => {
+        capturedBody = await request.json()
+        return HttpResponse.json({ nodes: [], edges: [] })
+      }),
+    )
+    renderEntitiesPage()
+    await waitFor(() => screen.getByText(mockConcept.label))
+    fireEvent.click(screen.getByText(mockConcept.label))
+    await waitFor(() => {
+      expect((capturedBody as { entity_iris: string[] }).entity_iris).toContain(mockConcept.iri)
+    })
+  })
+
+  // ── New: individuals sidebar ───────────────────────────────────────────
+
+  it('shows individuals sidebar when a concept is selected', async () => {
+    renderEntitiesPage()
+    await waitFor(() => screen.getByText(mockConcept.label))
+    fireEvent.click(screen.getByText(mockConcept.label))
+    await waitFor(() => {
+      expect(screen.getByText(mockIndividual.label)).toBeInTheDocument()
+    })
+  })
+
+  it('hides individuals sidebar when no concept is selected', async () => {
+    renderEntitiesPage()
+    await waitFor(() => {
+      expect(screen.queryByText(mockIndividual.label)).not.toBeInTheDocument()
     })
   })
 })

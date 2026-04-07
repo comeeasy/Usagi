@@ -12,6 +12,7 @@ services:
       - ontology-net
 
   backend:
+    platform: linux/amd64
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -46,6 +47,7 @@ services:
       - ontology-net
 
   fuseki:
+    platform: linux/amd64
     image: stain/jena-fuseki:5.1.0
     ports:
       - "3030:3030"

@@ -268,6 +268,20 @@ export function mergeOntologies(
   return apiPost(`/ontologies/${targetId}/merge${qs}`, { source_ontology_id: sourceId, resolutions })
 }
 
+// ── Named Graphs API ─────────────────────────────────────────────────────────
+
+export interface NamedGraph {
+  iri: string
+  triple_count: number
+  source_type: 'file' | 'url' | 'standard' | 'manual' | null
+  source_label: string | null
+}
+
+export function listNamedGraphs(ontologyId: string, dataset?: string): Promise<NamedGraph[]> {
+  const qs = dataset ? `?dataset=${dataset}` : ''
+  return apiGet(`/ontologies/${ontologyId}/graphs${qs}`)
+}
+
 // ── Datasets API ────────────────────────────────────────────────────────────
 
 export interface DatasetInfo {

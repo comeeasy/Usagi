@@ -5,11 +5,12 @@ import OntologyTabs from '@/components/layout/OntologyTabs'
 import EntitySearchBar from '@/components/entities/EntitySearchBar'
 import EntityTable from '@/components/entities/EntityTable'
 import ConceptTreeView from '@/components/entities/ConceptTreeView'
-import EntityDetailPanel from '@/components/entities/EntityDetailPanel'
 import ConceptForm from '@/components/entities/ConceptForm'
 import IndividualForm from '@/components/entities/IndividualForm'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import ErrorBoundary from '@/components/shared/ErrorBoundary'
+import EntityGraphPanel from '@/components/graph/EntityGraphPanel'
+import IndividualsSidebar from '@/components/graph/IndividualsSidebar'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { listConcepts, listIndividuals, createConcept, createIndividual, getConcept, getIndividual, updateConcept, updateIndividual, deleteConcept, deleteIndividual } from '@/api/entities'
 import { getOntology } from '@/api/ontologies'
@@ -359,18 +360,50 @@ export default function EntitiesPage() {
             )}
           </div>
 
-          {/* Detail panel */}
+          {/* Graph panel */}
           {selectedIri && !editingEntity && (
-            <EntityDetailPanel
-              entity={selectedEntityQuery.data as EntityKind | null}
-              iri={selectedIri}
-              onClose={() => setSelectedIri(null)}
-              onEdit={() => selectedEntityQuery.data ? setEditingEntity(selectedEntityQuery.data as EntityKind) : undefined}
-              onDelete={() => tab === 'concepts'
-                ? deleteConceptMutation.mutate(selectedIri)
-                : deleteIndividualMutation.mutate(selectedIri)
-              }
-            />
+            <aside className="w-96 flex flex-col border-l overflow-hidden"
+                   style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center justify-between px-3 py-2 border-b flex-shrink-0"
+                   style={{ borderColor: 'var(--color-border)' }}>
+                <span className="text-xs font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+                  Graph
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => selectedEntityQuery.data ? setEditingEntity(selectedEntityQuery.data as EntityKind) : undefined}
+                    className="px-2 py-1 rounded text-xs hover:opacity-80"
+                    style={{ background: 'var(--color-primary)', color: '#fff' }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => tab === 'concepts'
+                      ? deleteConceptMutation.mutate(selectedIri)
+                      : deleteIndividualMutation.mutate(selectedIri)
+                    }
+                    className="px-2 py-1 rounded text-xs hover:opacity-80"
+                    style={{ background: 'var(--color-error, #ef4444)', color: '#fff' }}
+                  >
+                    Delete
+                  </button>
+                  <button onClick={() => setSelectedIri(null)}
+                    className="p-1 rounded hover:opacity-60" style={{ color: 'var(--color-text-secondary)' }}>
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <EntityGraphPanel ontologyId={ontologyId!} entityIri={selectedIri} />
+              </div>
+            </aside>
+          )}
+
+          {/* Individuals sidebar — visible when a concept is selected */}
+          {tab === 'concepts' && selectedIri && !editingEntity && (
+            <div className="w-48 shrink-0 overflow-hidden">
+              <IndividualsSidebar ontologyId={ontologyId!} conceptIri={selectedIri} />
+            </div>
           )}
 
           {/* Edit form panel */}

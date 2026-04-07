@@ -43,6 +43,28 @@ export const mockDataProperty = {
   isFunctional: false,
 }
 
+export const mockIndividual = {
+  iri: 'https://test.example.org/onto#john',
+  ontology_id: 'test-ont-uuid',
+  label: 'John',
+  comment: 'A person named John',
+  type_iris: ['https://test.example.org/onto#Person'],
+}
+
+export const mockNamedGraph = {
+  iri: 'https://test.example.org/graphs/schema',
+  triple_count: 42,
+  source_type: 'url' as const,
+  source_label: 'https://schema.org/version/latest/schemaorg-current-https.ttl',
+}
+
+export const mockSubgraphData = {
+  nodes: [
+    { iri: 'https://test.example.org/onto#Person', label: 'Person', kind: 'concept' },
+  ],
+  edges: [],
+}
+
 export const handlers = [
   // Ontologies
   http.get(`${BASE}/ontologies`, () =>
@@ -70,10 +92,15 @@ export const handlers = [
     return HttpResponse.json({ ...mockConcept, ...body }, { status: 201 })
   }),
 
-  // Individuals
-  http.get(`${BASE}/ontologies/:id/individuals`, () =>
-    HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
-  ),
+  // Individuals (with optional type filter)
+  http.get(`${BASE}/ontologies/:id/individuals`, ({ request }) => {
+    const url = new URL(request.url)
+    const typeIri = url.searchParams.get('type')
+    if (typeIri === mockConcept.iri) {
+      return HttpResponse.json({ items: [mockIndividual], total: 1, page: 1, page_size: 20 })
+    }
+    return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 })
+  }),
 
   // Properties (Relations) — GET /properties?kind=object|data
   http.get(`${BASE}/ontologies/:id/properties`, ({ request }) => {
@@ -88,6 +115,16 @@ export const handlers = [
     const body = await request.json() as Record<string, unknown>
     return HttpResponse.json({ ...mockObjectProperty, ...body }, { status: 201 })
   }),
+
+  // Named Graphs
+  http.get(`${BASE}/ontologies/:id/graphs`, () =>
+    HttpResponse.json([mockNamedGraph]),
+  ),
+
+  // Subgraph
+  http.post(`${BASE}/ontologies/:id/subgraph`, () =>
+    HttpResponse.json(mockSubgraphData),
+  ),
 
   // Merge
   http.post(`${BASE}/ontologies/:id/merge/preview`, () =>

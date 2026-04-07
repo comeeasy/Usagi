@@ -8,6 +8,7 @@ import RelationDetailPanel from '@/components/relations/RelationDetailPanel'
 import PropertyForm from '@/components/relations/PropertyForm'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import ErrorBoundary from '@/components/shared/ErrorBoundary'
+import EntityGraphPanel from '@/components/graph/EntityGraphPanel'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   listObjectProperties,
@@ -206,12 +207,29 @@ export default function RelationsPage() {
           </div>
 
           {selectedIri && !editingProperty && (
-            <RelationDetailPanel
-              property={selectedProperty ?? null}
-              iri={selectedIri}
-              onClose={() => setSelectedIri(null)}
-              onEdit={() => selectedProperty ? setEditingProperty(selectedProperty) : undefined}
-            />
+            <aside className="w-96 flex flex-col border-l overflow-hidden"
+                   style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center justify-between px-3 py-2 border-b flex-shrink-0"
+                   style={{ borderColor: 'var(--color-border)' }}>
+                <span className="text-xs font-semibold" style={{ color: 'var(--color-text-muted)' }}>Graph</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => selectedProperty ? setEditingProperty(selectedProperty) : undefined}
+                    className="px-2 py-1 rounded text-xs hover:opacity-80"
+                    style={{ background: 'var(--color-primary)', color: '#fff' }}
+                  >
+                    Edit
+                  </button>
+                  <button onClick={() => setSelectedIri(null)}
+                    className="p-1 rounded hover:opacity-60" style={{ color: 'var(--color-text-secondary)' }}>
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <EntityGraphPanel ontologyId={ontologyId!} entityIri={selectedIri} />
+              </div>
+            </aside>
           )}
 
           {editingProperty && (

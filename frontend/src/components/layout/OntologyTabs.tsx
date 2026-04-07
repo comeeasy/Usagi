@@ -6,7 +6,6 @@ const tabs = [
   { path: 'relations', label: 'Relations' },
   { path: 'sparql', label: 'SPARQL' },
   { path: 'sources', label: 'Sources' },
-  { path: 'import', label: 'Import' },
   { path: 'merge', label: 'Merge' },
   { path: 'reasoner', label: 'Reasoner' },
 ]
