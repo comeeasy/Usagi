@@ -85,12 +85,24 @@ describe('EntitiesPage', () => {
     })
   })
 
-  // ── New: embedded graph panel ──────────────────────────────────────────
+  // ── New: embedded graph panel (via Graph tab in EntityRightPanel) ─────
 
-  it('shows graph panel when a concept is clicked', async () => {
+  it('shows Graph tab when a concept is clicked', async () => {
     renderEntitiesPage()
     await waitFor(() => screen.getByText(mockConcept.label))
     fireEvent.click(screen.getByText(mockConcept.label))
+    await waitFor(() => {
+      // EntityRightPanel shows "graph" tab button
+      expect(screen.getByRole('button', { name: /^graph$/i })).toBeInTheDocument()
+    })
+  })
+
+  it('shows graph canvas after clicking Graph tab', async () => {
+    renderEntitiesPage()
+    await waitFor(() => screen.getByText(mockConcept.label))
+    fireEvent.click(screen.getByText(mockConcept.label))
+    await waitFor(() => screen.getByRole('button', { name: /^graph$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^graph$/i }))
     await waitFor(() => {
       expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
     })
@@ -107,6 +119,8 @@ describe('EntitiesPage', () => {
     renderEntitiesPage()
     await waitFor(() => screen.getByText(mockConcept.label))
     fireEvent.click(screen.getByText(mockConcept.label))
+    await waitFor(() => screen.getByRole('button', { name: /^graph$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^graph$/i }))
     await waitFor(() => {
       expect((capturedBody as { entity_iris: string[] }).entity_iris).toContain(mockConcept.iri)
     })

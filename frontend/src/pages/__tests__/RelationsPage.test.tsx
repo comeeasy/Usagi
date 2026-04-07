@@ -82,12 +82,23 @@ describe('RelationsPage', () => {
     })
   })
 
-  // ── New: embedded graph panel ──────────────────────────────────────────
+  // ── New: embedded graph panel (via Graph tab in EntityRightPanel) ─────
 
-  it('shows graph panel when an object property is clicked', async () => {
+  it('shows right panel when an object property is clicked', async () => {
     renderRelationsPage()
     await waitFor(() => screen.getByText(mockObjectProperty.label))
     fireEvent.click(screen.getByText(mockObjectProperty.label))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^graph$/i })).toBeInTheDocument()
+    })
+  })
+
+  it('shows graph canvas after clicking Graph tab', async () => {
+    renderRelationsPage()
+    await waitFor(() => screen.getByText(mockObjectProperty.label))
+    fireEvent.click(screen.getByText(mockObjectProperty.label))
+    await waitFor(() => screen.getByRole('button', { name: /^graph$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^graph$/i }))
     await waitFor(() => {
       expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
     })
@@ -104,14 +115,16 @@ describe('RelationsPage', () => {
     renderRelationsPage()
     await waitFor(() => screen.getByText(mockObjectProperty.label))
     fireEvent.click(screen.getByText(mockObjectProperty.label))
+    await waitFor(() => screen.getByRole('button', { name: /^graph$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^graph$/i }))
     await waitFor(() => {
       expect((capturedBody as { entity_iris: string[] }).entity_iris).toContain(mockObjectProperty.iri)
     })
   })
 
-  it('hides graph panel before any property is selected', async () => {
+  it('hides right panel before any property is selected', async () => {
     renderRelationsPage()
     await waitFor(() => screen.getByText(mockObjectProperty.label))
-    expect(screen.queryByTestId('graph-canvas')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^graph$/i })).not.toBeInTheDocument()
   })
 })

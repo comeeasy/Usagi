@@ -8,7 +8,7 @@ import RelationDetailPanel from '@/components/relations/RelationDetailPanel'
 import PropertyForm from '@/components/relations/PropertyForm'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import ErrorBoundary from '@/components/shared/ErrorBoundary'
-import EntityGraphPanel from '@/components/graph/EntityGraphPanel'
+import EntityRightPanel from '@/components/graph/EntityRightPanel'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   listObjectProperties,
@@ -32,6 +32,7 @@ export default function RelationsPage() {
   const [tab, setTab] = useState<RelTab>('object')
   const [page, setPage] = useState(1)
   const [selectedIri, setSelectedIri] = useState<string | null>(null)
+  const [graphIris, setGraphIris] = useState<string[]>([])
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [editingProperty, setEditingProperty] = useState<ObjectProperty | DataProperty | null>(null)
@@ -199,37 +200,36 @@ export default function RelationsPage() {
                   page={page}
                   pageSize={PAGE_SIZE}
                   onPageChange={setPage}
-                  onRelationSelect={setSelectedIri}
+                  onRelationSelect={(iri) => {
+                    setSelectedIri(iri)
+                    setGraphIris((prev) => prev.includes(iri) ? prev : [...prev, iri])
+                  }}
                   selectedIri={selectedIri}
                 />
               </div>
             )}
           </div>
 
-          {selectedIri && !editingProperty && (
-            <aside className="w-96 flex flex-col border-l overflow-hidden"
-                   style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center justify-between px-3 py-2 border-b flex-shrink-0"
-                   style={{ borderColor: 'var(--color-border)' }}>
-                <span className="text-xs font-semibold" style={{ color: 'var(--color-text-muted)' }}>Graph</span>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => selectedProperty ? setEditingProperty(selectedProperty) : undefined}
-                    className="px-2 py-1 rounded text-xs hover:opacity-80"
-                    style={{ background: 'var(--color-primary)', color: '#fff' }}
-                  >
-                    Edit
-                  </button>
-                  <button onClick={() => setSelectedIri(null)}
-                    className="p-1 rounded hover:opacity-60" style={{ color: 'var(--color-text-secondary)' }}>
-                    ×
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-hidden">
-                <EntityGraphPanel ontologyId={ontologyId!} entityIri={selectedIri} />
-              </div>
-            </aside>
+          {(selectedIri || graphIris.length > 0) && !editingProperty && (
+            <EntityRightPanel
+              ontologyId={ontologyId!}
+              selectedIri={selectedIri}
+              graphIris={graphIris}
+              onRemoveIri={(iri) => {
+                setGraphIris((prev) => prev.filter((i) => i !== iri))
+                if (selectedIri === iri) setSelectedIri(null)
+              }}
+              onClose={() => { setSelectedIri(null); setGraphIris([]) }}
+              detailContent={
+                selectedProperty ? (
+                  <RelationDetailPanel
+                    property={selectedProperty}
+                    iri={selectedIri}
+                    onEdit={() => setEditingProperty(selectedProperty)}
+                  />
+                ) : undefined
+              }
+            />
           )}
 
           {editingProperty && (

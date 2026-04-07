@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, fireEvent } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../tests/mocks/server'
 import { renderWithProviders } from '../../../tests/utils'
@@ -14,17 +14,22 @@ vi.mock('../GraphCanvas', () => ({
 
 const ONTOLOGY_ID = 'test-ont-uuid'
 const CONCEPT_IRI = 'https://test.example.org/onto#Person'
+const ANIMAL_IRI = 'https://test.example.org/onto#Animal'
 
-function renderPanel(entityIri: string | null) {
-  return renderWithProviders(
-    <EntityGraphPanel ontologyId={ONTOLOGY_ID} entityIri={entityIri} />,
-    { initialEntries: [`/${ONTOLOGY_ID}/entities`], path: '/:ontologyId/entities' },
-  )
+function renderPanel(entityIris: string[]) {
+  const onRemoveIri = vi.fn()
+  return {
+    onRemoveIri,
+    ...renderWithProviders(
+      <EntityGraphPanel ontologyId={ONTOLOGY_ID} entityIris={entityIris} onRemoveIri={onRemoveIri} />,
+      { initialEntries: [`/${ONTOLOGY_ID}/entities`], path: '/:ontologyId/entities' },
+    ),
+  }
 }
 
 describe('EntityGraphPanel', () => {
   it('shows placeholder when no entity is selected', () => {
-    renderPanel(null)
+    renderPanel([])
     expect(screen.getByText(/select an entity/i)).toBeInTheDocument()
   })
 
@@ -35,15 +40,30 @@ describe('EntityGraphPanel', () => {
         return HttpResponse.json({ nodes: [], edges: [] })
       }),
     )
-    renderPanel(CONCEPT_IRI)
+    renderPanel([CONCEPT_IRI])
     expect(screen.getByRole('status')).toBeInTheDocument()
   })
 
   it('renders graph canvas after subgraph loads', async () => {
-    renderPanel(CONCEPT_IRI)
+    renderPanel([CONCEPT_IRI])
     await waitFor(() => {
       expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
     })
+  })
+
+  it('shows chip for each selected entity', async () => {
+    renderPanel([CONCEPT_IRI, ANIMAL_IRI])
+    await waitFor(() => {
+      expect(screen.getByText('Person')).toBeInTheDocument()
+      expect(screen.getByText('Animal')).toBeInTheDocument()
+    })
+  })
+
+  it('calls onRemoveIri when chip × is clicked', async () => {
+    const { onRemoveIri } = renderPanel([CONCEPT_IRI])
+    await waitFor(() => screen.getByText('Person'))
+    fireEvent.click(screen.getAllByRole('button').find(b => b.closest('span'))!)
+    expect(onRemoveIri).toHaveBeenCalledWith(CONCEPT_IRI)
   })
 
   it('shows error message when subgraph fails', async () => {
@@ -52,21 +72,19 @@ describe('EntityGraphPanel', () => {
         HttpResponse.json({ detail: 'Server error' }, { status: 500 }),
       ),
     )
-    renderPanel(CONCEPT_IRI)
+    renderPanel([CONCEPT_IRI])
     await waitFor(() => {
       expect(screen.getByText(/failed to load graph/i)).toBeInTheDocument()
     })
   })
 
-  it('reloads graph when entityIri changes', async () => {
-    const { rerender } = renderPanel(CONCEPT_IRI)
+  it('reloads graph when entityIris changes', async () => {
+    const { rerender } = renderPanel([CONCEPT_IRI])
     await waitFor(() => expect(screen.getByTestId('graph-canvas')).toBeInTheDocument())
 
-    const NEW_IRI = 'https://test.example.org/onto#Animal'
     rerender(
-      <EntityGraphPanel ontologyId={ONTOLOGY_ID} entityIri={NEW_IRI} />,
+      <EntityGraphPanel ontologyId={ONTOLOGY_ID} entityIris={[CONCEPT_IRI, ANIMAL_IRI]} onRemoveIri={vi.fn()} />,
     )
-    // Should trigger a new subgraph load (canvas still present)
     await waitFor(() => {
       expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
     })

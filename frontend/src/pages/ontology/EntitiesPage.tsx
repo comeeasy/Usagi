@@ -9,8 +9,9 @@ import ConceptForm from '@/components/entities/ConceptForm'
 import IndividualForm from '@/components/entities/IndividualForm'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import ErrorBoundary from '@/components/shared/ErrorBoundary'
-import EntityGraphPanel from '@/components/graph/EntityGraphPanel'
+import EntityRightPanel from '@/components/graph/EntityRightPanel'
 import IndividualsSidebar from '@/components/graph/IndividualsSidebar'
+import EntityDetailPanel from '@/components/entities/EntityDetailPanel'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { listConcepts, listIndividuals, createConcept, createIndividual, getConcept, getIndividual, updateConcept, updateIndividual, deleteConcept, deleteIndividual } from '@/api/entities'
 import { getOntology } from '@/api/ontologies'
@@ -31,6 +32,7 @@ export default function EntitiesPage() {
   const [viewMode, setViewMode] = useState<'flat' | 'tree'>('flat')
   const [page, setPage] = useState(1)
   const [selectedIri, setSelectedIri] = useState<string | null>(null)
+  const [graphIris, setGraphIris] = useState<string[]>([])
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [editingEntity, setEditingEntity] = useState<EntityKind | null>(null)
@@ -180,6 +182,12 @@ export default function EntitiesPage() {
   const handleEntitySelect = (iri: string) => {
     if (editingEntity) setEditingEntity(null)
     setSelectedIri(iri)
+    setGraphIris((prev) => prev.includes(iri) ? prev : [...prev, iri])
+  }
+
+  const handleRemoveGraphIri = (iri: string) => {
+    setGraphIris((prev) => prev.filter((i) => i !== iri))
+    if (selectedIri === iri) setSelectedIri(null)
   }
 
   const handleIndividualSelect = (iri: string) => {
@@ -193,6 +201,7 @@ export default function EntitiesPage() {
     setViewMode('flat')
     setPage(1)
     setSelectedIri(null)
+    setGraphIris([])
     setEditingEntity(null)
   }
 
@@ -360,43 +369,26 @@ export default function EntitiesPage() {
             )}
           </div>
 
-          {/* Graph panel */}
-          {selectedIri && !editingEntity && (
-            <aside className="w-96 flex flex-col border-l overflow-hidden"
-                   style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center justify-between px-3 py-2 border-b flex-shrink-0"
-                   style={{ borderColor: 'var(--color-border)' }}>
-                <span className="text-xs font-semibold" style={{ color: 'var(--color-text-muted)' }}>
-                  Graph
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => selectedEntityQuery.data ? setEditingEntity(selectedEntityQuery.data as EntityKind) : undefined}
-                    className="px-2 py-1 rounded text-xs hover:opacity-80"
-                    style={{ background: 'var(--color-primary)', color: '#fff' }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => tab === 'concepts'
-                      ? deleteConceptMutation.mutate(selectedIri)
-                      : deleteIndividualMutation.mutate(selectedIri)
-                    }
-                    className="px-2 py-1 rounded text-xs hover:opacity-80"
-                    style={{ background: 'var(--color-error, #ef4444)', color: '#fff' }}
-                  >
-                    Delete
-                  </button>
-                  <button onClick={() => setSelectedIri(null)}
-                    className="p-1 rounded hover:opacity-60" style={{ color: 'var(--color-text-secondary)' }}>
-                    ×
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-hidden">
-                <EntityGraphPanel ontologyId={ontologyId!} entityIri={selectedIri} />
-              </div>
-            </aside>
+          {/* Right panel: Detail + Graph + Reasoner */}
+          {(selectedIri || graphIris.length > 0) && !editingEntity && (
+            <EntityRightPanel
+              ontologyId={ontologyId!}
+              selectedIri={selectedIri}
+              graphIris={graphIris}
+              onRemoveIri={handleRemoveGraphIri}
+              onClose={() => { setSelectedIri(null); setGraphIris([]) }}
+              detailContent={
+                <EntityDetailPanel
+                  entity={selectedEntityQuery.data as EntityKind | null}
+                  iri={selectedIri}
+                  onEdit={() => selectedEntityQuery.data ? setEditingEntity(selectedEntityQuery.data as EntityKind) : undefined}
+                  onDelete={() => tab === 'concepts'
+                    ? deleteConceptMutation.mutate(selectedIri!)
+                    : deleteIndividualMutation.mutate(selectedIri!)
+                  }
+                />
+              }
+            />
           )}
 
           {/* Individuals sidebar — visible when a concept is selected */}
