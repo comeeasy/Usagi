@@ -190,14 +190,33 @@ SELECT DISTINCT ?iri WHERE {{
 }} ORDER BY ?iri LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
         return total, rows
 
-    # rdf:Property: OWL 어휘가 아닌 non-OWL 어휘(DC Terms 등)에서 사용하는 상위 타입.
-    # owl:ObjectProperty / owl:DatatypeProperty 는 이미 rdf:Property 의 하위타입이지만
-    # Fuseki TDB2 는 추론을 수행하지 않으므로 명시 선언만 매칭됨 → 중복 없음.
-    _OBJ_PATTERN = (
-        "{ ?iri a owl:ObjectProperty }"
-        " UNION "
-        "{ ?iri a rdf:Property . FILTER NOT EXISTS { ?iri a owl:DatatypeProperty } }"
-    )
+    # 시스템 네임스페이스 predicate 제외 필터
+    _SYS_NS_FILTER = """FILTER(
+        !STRSTARTS(STR(?iri), "http://www.w3.org/1999/02/22-rdf-syntax-ns#") &&
+        !STRSTARTS(STR(?iri), "http://www.w3.org/2000/01/rdf-schema#") &&
+        !STRSTARTS(STR(?iri), "http://www.w3.org/2002/07/owl#") &&
+        !STRSTARTS(STR(?iri), "http://www.w3.org/2001/XMLSchema#")
+    )"""
+
+    # Object Property: 명시 선언 + IRI→IRI predicate 사용 추론
+    _OBJ_PATTERN = f"""
+        {{ ?iri a owl:ObjectProperty }}
+        UNION
+        {{ ?iri a rdf:Property . FILTER NOT EXISTS {{ ?iri a owl:DatatypeProperty }} }}
+        UNION
+        {{ ?_s ?iri ?_o . FILTER(isIRI(?iri) && isIRI(?_o))
+           FILTER NOT EXISTS {{ ?iri a owl:DatatypeProperty }}
+           {_SYS_NS_FILTER} }}
+    """
+
+    # Data Property: 명시 선언 + IRI→literal predicate 사용 추론
+    _DATA_PATTERN = f"""
+        {{ ?iri a owl:DatatypeProperty }}
+        UNION
+        {{ ?_s ?iri ?_o . FILTER(isIRI(?iri) && isLiteral(?_o))
+           FILTER NOT EXISTS {{ ?iri a owl:ObjectProperty }}
+           {_SYS_NS_FILTER} }}
+    """
 
     items: list = []
     total = 0
@@ -209,7 +228,7 @@ SELECT DISTINCT ?iri WHERE {{
             items.append(await _fetch_object_property(store, _v(r.get("iri")), ontology_id, kg, dataset=dataset))
 
     if kind != "object":
-        data_total, data_rows = await fetch_pattern("?iri a owl:DatatypeProperty")
+        data_total, data_rows = await fetch_pattern(_DATA_PATTERN)
         total += data_total
         for r in data_rows:
             items.append(await _fetch_data_property(store, _v(r.get("iri")), ontology_id, kg, dataset=dataset))
