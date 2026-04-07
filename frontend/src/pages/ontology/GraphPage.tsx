@@ -1,10 +1,9 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import { deleteConcept, deleteIndividual } from '@/api/entities'
 import { syncOntology } from '@/api/ontologies'
 import { X, Search, RefreshCw } from 'lucide-react'
-import cytoscape from 'cytoscape'
 import OntologyTabs from '@/components/layout/OntologyTabs'
 import GraphCanvas from '@/components/graph/GraphCanvas'
 import GraphControls from '@/components/graph/GraphControls'
@@ -30,6 +29,7 @@ export default function GraphPage() {
   const [layout, setLayout] = useState('dagre')
   const [elements, setElements] = useState<CyElement[]>([])
   const [hasLoaded, setHasLoaded] = useState(false)
+  const expandedIrisRef = useRef<Set<string>>(new Set())
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
@@ -65,6 +65,7 @@ export default function GraphPage() {
   })
 
   const loadGraph = async (iris: string[], d: number) => {
+    expandedIrisRef.current = new Set(iris) // 초기 seed는 이미 확장된 것으로 간주
     const result = await subgraphMutation.mutateAsync({ rootIris: iris.length > 0 ? iris : undefined, depth: d })
     const cyElements: CyElement[] = [
       ...result.nodes.map((n) => ({ group: 'nodes' as const, data: n.data as CyElement['data'], classes: n.classes })),
@@ -73,6 +74,44 @@ export default function GraphPage() {
     setElements(cyElements)
     setHasLoaded(true)
   }
+
+  const handleNodeDoubleClick = useCallback(async (nodeId: string) => {
+    const cy = cyRef.current
+    if (!cy) return
+    const node = cy.getElementById(nodeId)
+    if (!node || node.length === 0) return
+    const iri = node.data('iri') as string | undefined
+    if (!iri) return
+
+    // 이미 확장된 노드는 재호출하지 않음
+    if (expandedIrisRef.current.has(iri)) return
+    expandedIrisRef.current.add(iri)
+
+    let result: Awaited<ReturnType<typeof subgraphMutation.mutateAsync>>
+    try {
+      result = await subgraphMutation.mutateAsync({ rootIris: [iri], depth: 1 })
+    } catch {
+      expandedIrisRef.current.delete(iri)
+      return
+    }
+
+    const existingIds = new Set(cy.elements().map((el) => el.id()))
+
+    const newNodes = result.nodes
+      .filter((n) => !existingIds.has(n.data.id))
+      .map((n) => ({ group: 'nodes' as const, data: n.data, classes: n.classes }))
+
+    const newEdges = result.edges
+      .filter((e) => !existingIds.has(e.data.id))
+      .map((e) => ({ group: 'edges' as const, data: e.data, classes: e.classes }))
+
+    if (newNodes.length === 0 && newEdges.length === 0) return
+
+    cy.add([...newNodes, ...newEdges] as Parameters<typeof cy.add>[0])
+    // 확장된 노드 표시
+    node.addClass('expanded')
+    cy.layout({ name: layout === 'dagre' ? 'dagre' : layout } as Parameters<typeof cy.layout>[0]).run()
+  }, [subgraphMutation, layout])
 
   const handleSelectEntity = (entity: SearchResult) => {
     if (rootEntities.find((e) => e.iri === entity.iri)) return
@@ -294,6 +333,7 @@ export default function GraphPage() {
                 elements={elements}
                 layout={layout}
                 onNodeSelect={setSelectedNodeId}
+                onNodeDoubleClick={handleNodeDoubleClick}
                 cyRef={cyRef}
               />
             </div>

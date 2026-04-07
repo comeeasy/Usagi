@@ -22,13 +22,20 @@ interface GraphCanvasProps {
   elements?: CyElement[]
   layout?: string
   onNodeSelect?: (nodeId: string) => void
+  onNodeDoubleClick?: (nodeId: string) => void
   cyRef?: React.MutableRefObject<cytoscape.Core | null>
 }
 
-export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSelect, cyRef: externalCyRef }: GraphCanvasProps) {
+export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSelect, onNodeDoubleClick, cyRef: externalCyRef }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const internalCyRef = useRef<cytoscape.Core | null>(null)
   const cyRef = externalCyRef ?? internalCyRef
+
+  // Use refs for callbacks to avoid re-initializing cy on every render
+  const onNodeSelectRef = useRef(onNodeSelect)
+  const onNodeDoubleClickRef = useRef(onNodeDoubleClick)
+  useEffect(() => { onNodeSelectRef.current = onNodeSelect }, [onNodeSelect])
+  useEffect(() => { onNodeDoubleClickRef.current = onNodeDoubleClick }, [onNodeDoubleClick])
 
   const initCy = useCallback(() => {
     if (!containerRef.current) return
@@ -137,6 +144,14 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
             'border-color': '#F0F6FC',
           },
         },
+        {
+          selector: 'node.expanded',
+          style: {
+            'border-width': 2,
+            'border-color': '#F0A500',
+            'border-style': 'solid',
+          },
+        },
       ],
       layout: {
         name: layout === 'dagre' ? 'dagre' : layout,
@@ -148,13 +163,17 @@ export default function GraphCanvas({ elements = [], layout = 'dagre', onNodeSel
     })
 
     cy.on('tap', 'node', (evt) => {
-      onNodeSelect?.(evt.target.id())
+      onNodeSelectRef.current?.(evt.target.id())
+    })
+
+    cy.on('dbltap', 'node', (evt) => {
+      onNodeDoubleClickRef.current?.(evt.target.id())
     })
 
     cy.one('layoutstop', () => { cy.fit(undefined, 40) })
 
     cyRef.current = cy
-  }, [elements, layout, onNodeSelect])
+  }, [elements, layout])
 
   useEffect(() => {
     initCy()
