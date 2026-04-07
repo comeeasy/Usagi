@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { X } from 'lucide-react'
 import { getSubgraph } from '@/api/ontologies'
 import { useDataset } from '@/contexts/DatasetContext'
@@ -21,20 +21,50 @@ export default function EntityGraphPanel({ ontologyId, entityIris, onRemoveIri }
   const [elements, setElements] = useState<CyElement[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [expandedIris, setExpandedIris] = useState<Set<string>>(new Set())
 
+  // 초기 로드: entityIris 변경 시 전체 재조회
   useEffect(() => {
     if (entityIris.length === 0) {
       setElements([])
+      setExpandedIris(new Set())
       setError(null)
       return
     }
     setLoading(true)
     setError(null)
-    getSubgraph(ontologyId, { rootIris: entityIris, depth: 2, dataset })
-      .then((data) => setElements([...data.nodes, ...data.edges]))
+    getSubgraph(ontologyId, { rootIris: entityIris, depth: 1, dataset })
+      .then((data) => {
+        setElements([...data.nodes, ...data.edges])
+        setExpandedIris(new Set())
+      })
       .catch(() => setError('Failed to load graph'))
       .finally(() => setLoading(false))
   }, [ontologyId, entityIris.join(','), dataset]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 더블클릭: 해당 노드를 depth=1 로 확장
+  const handleNodeDoubleClick = useCallback(async (iri: string) => {
+    if (expandedIris.has(iri)) return
+    setExpandedIris((prev) => new Set([...prev, iri]))
+    try {
+      const data = await getSubgraph(ontologyId, { rootIris: [iri], depth: 1, dataset })
+      const newElems = [...data.nodes, ...data.edges]
+      setElements((prev) => {
+        const existingIds = new Set(prev.map((e) => e.data.id))
+        const toAdd = newElems.filter((e) => !existingIds.has(e.data.id))
+        return toAdd.length > 0 ? [...prev, ...toAdd] : prev
+      })
+    } catch {
+      setExpandedIris((prev) => { const s = new Set(prev); s.delete(iri); return s })
+    }
+  }, [ontologyId, dataset, expandedIris])
+
+  // expanded 클래스 마킹
+  const displayElements = elements.map((e) =>
+    expandedIris.has(e.data.id)
+      ? { ...e, classes: ((e.classes ?? '') + ' expanded').trim() }
+      : e,
+  )
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -79,7 +109,11 @@ export default function EntityGraphPanel({ ontologyId, entityIris, onRemoveIri }
         )}
 
         {entityIris.length > 0 && !loading && !error && (
-          <GraphCanvas elements={elements} layout="dagre" />
+          <GraphCanvas
+            elements={displayElements}
+            layout="dagre"
+            onNodeDoubleClick={handleNodeDoubleClick}
+          />
         )}
       </div>
     </div>

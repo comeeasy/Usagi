@@ -1,217 +1,229 @@
 /**
- * EntityRightPanel — Entities / Relations 탭의 우측 패널
+ * EntityRightPanel — Entities / Relations 탭 하단 패널
  *
- * 탭:
- *   Detail   — entity/property 상세 정보
- *   Graph    — 선택된 entities 그래프 (multi-IRI chips + canvas)
- *   Reasoner — 현재 그래프 entity들로 즉시 추론 실행
+ * 레이아웃 (탭 없음):
+ *   상단 좌: SubGraph (EntityGraphPanel, flex-1)
+ *   상단 우: Detail (detailContent prop, w-80)
+ *   하단:    Reasoner 섹션 (헤더 바 + 토글 시 Config + Results 확장)
  */
 import { useState } from 'react'
-import { X, Brain, Play, CheckCircle, AlertTriangle } from 'lucide-react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { X, Brain, Play, ChevronDown, ChevronUp } from 'lucide-react'
 import EntityGraphPanel from './EntityGraphPanel'
+import ReasonerResults from '@/components/reasoner/ReasonerResults'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
-import { runReasoner, getReasonerResult } from '@/api/reasoner'
-import { useDataset } from '@/contexts/DatasetContext'
-import type { ReasonerResultData } from '@/types/reasoner'
-
-type PanelTab = 'detail' | 'graph' | 'reasoner'
+import { useReasoner } from '@/hooks/useReasoner'
 
 interface EntityRightPanelProps {
   ontologyId: string
-  /** Currently focused IRI (for detail display) */
   selectedIri: string | null
-  /** All IRIs pinned in the graph */
   graphIris: string[]
   onRemoveIri: (iri: string) => void
   onClose: () => void
-  /** Slot for the detail content (rendered by parent) */
   detailContent?: React.ReactNode
+  /** true이면 하단 고정 패널로 렌더링 */
+  bottomLayout?: boolean
 }
 
 export default function EntityRightPanel({
   ontologyId,
-  selectedIri,
+  selectedIri: _selectedIri,
   graphIris,
   onRemoveIri,
   onClose,
   detailContent,
+  bottomLayout = false,
 }: EntityRightPanelProps) {
-  const { dataset } = useDataset()
-  const [tab, setTab] = useState<PanelTab>('detail')
-  const [jobId, setJobId] = useState<string | null>(null)
+  const [reasonerOpen, setReasonerOpen] = useState(false)
+  const [checkConsistency, setCheckConsistency] = useState(true)
+  const [includeInferences, setIncludeInferences] = useState(true)
+  const [profile, setProfile] = useState<'EL' | 'RL' | 'QL' | 'FULL'>('EL')
 
-  // Reasoner quick-run
-  const runMutation = useMutation({
-    mutationFn: () =>
-      runReasoner(
-        ontologyId,
-        { subgraph_entity_iris: graphIris.length ? graphIris : undefined },
-        dataset,
-      ),
-    onSuccess: (job) => setJobId(job.job_id),
-  })
-
-  const resultQuery = useQuery({
-    queryKey: ['reasoner-inline', jobId],
-    queryFn: () => getReasonerResult(ontologyId, jobId!),
-    enabled: !!jobId,
-    refetchInterval: (q) => {
-      const s = q.state.data?.status
-      return s === 'completed' || s === 'failed' ? false : 1000
-    },
-  })
+  const { runMutation, resultQuery, jobId } = useReasoner(ontologyId)
 
   const isRunning =
     runMutation.isPending ||
     resultQuery.data?.status === 'pending' ||
     resultQuery.data?.status === 'running'
 
-  const resultData: ReasonerResultData | undefined = resultQuery.data?.result
+  const handleRun = () => {
+    runMutation.mutate({
+      subgraph_entity_iris: graphIris.length ? graphIris : undefined,
+      include_inferences: includeInferences,
+      check_consistency: checkConsistency,
+      reasoner_profile: profile,
+    })
+  }
 
   return (
     <aside
-      className="w-96 flex flex-col border-l overflow-hidden flex-shrink-0"
-      style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}
+      className={
+        bottomLayout
+          ? 'flex flex-col border-t overflow-hidden flex-shrink-0'
+          : 'w-[680px] flex flex-col border-l overflow-hidden flex-shrink-0'
+      }
+      style={{
+        backgroundColor: 'var(--color-bg-surface)',
+        borderColor: 'var(--color-border)',
+      }}
     >
-      {/* Tabs header */}
-      <div
-        className="flex items-center border-b flex-shrink-0"
-        style={{ borderColor: 'var(--color-border)' }}
-      >
-        {(['detail', 'graph', 'reasoner'] as PanelTab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className="px-3 py-2 text-xs font-medium border-b-2 transition-colors capitalize"
-            style={{
-              borderColor: tab === t ? 'var(--color-primary)' : 'transparent',
-              color: tab === t ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-            }}
+      {/* 상단: Graph (좌) + Detail (우) — 고정 높이로 graph canvas 보장 */}
+      <div className="flex overflow-hidden flex-shrink-0" style={{ height: '288px' }}>
+        {/* SubGraph */}
+        <div className="flex-1 overflow-hidden">
+          <EntityGraphPanel
+            ontologyId={ontologyId}
+            entityIris={graphIris}
+            onRemoveIri={onRemoveIri}
+          />
+        </div>
+
+        {/* Detail */}
+        {detailContent && (
+          <div
+            className="w-80 flex-shrink-0 overflow-y-auto border-l"
+            style={{ borderColor: 'var(--color-border)' }}
           >
-            {t === 'reasoner' ? <Brain size={12} className="inline mr-1" /> : null}
-            {t}
-          </button>
-        ))}
-        <button
-          onClick={onClose}
-          className="ml-auto mr-2 p-1 rounded hover:opacity-60"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          <X size={14} />
-        </button>
+            {detailContent}
+          </div>
+        )}
       </div>
 
-      {/* Tab content */}
-      <div className="flex-1 overflow-hidden flex flex-col">
-        {/* Detail */}
-        {tab === 'detail' && (
-          <div className="flex-1 overflow-y-auto">
-            {detailContent ?? (
-              <div className="flex items-center justify-center h-full text-sm"
-                   style={{ color: 'var(--color-text-muted)' }}>
-                {selectedIri ? 'Loading…' : 'Select an entity to view details'}
-              </div>
-            )}
-          </div>
-        )}
+      {/* 하단: Reasoner 섹션 */}
+      <div className="flex flex-col flex-shrink-0 border-t" style={{ borderColor: 'var(--color-border)' }}>
+        {/* Reasoner 헤더 바 */}
+        <div className="flex items-center gap-2 px-3 py-2">
+          <Brain size={13} style={{ color: 'var(--color-primary)', flexShrink: 0 }} />
+          <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+            Reasoner
+          </span>
+          <button
+            onClick={() => setReasonerOpen((v) => !v)}
+            className="p-0.5 rounded hover:opacity-60"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            {reasonerOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
 
-        {/* Graph */}
-        {tab === 'graph' && (
-          <div className="flex-1 overflow-hidden">
-            <EntityGraphPanel
-              ontologyId={ontologyId}
-              entityIris={graphIris}
-              onRemoveIri={onRemoveIri}
-            />
-          </div>
-        )}
+          {/* 상태 칩 (결과 요약) */}
+          {resultQuery.data?.result && !isRunning && (
+            <div className="flex items-center gap-1.5 ml-1">
+              <span
+                className="text-xs px-1.5 py-0.5 rounded"
+                style={{
+                  background: resultQuery.data.result.consistent
+                    ? 'rgba(34,197,94,0.15)'
+                    : 'rgba(239,68,68,0.15)',
+                  color: resultQuery.data.result.consistent
+                    ? '#22c55e'
+                    : 'var(--color-error)',
+                }}
+              >
+                {resultQuery.data.result.consistent ? 'Consistent' : 'Inconsistent'}
+              </span>
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                {resultQuery.data.result.violations.length} violations ·{' '}
+                {resultQuery.data.result.inferred_axioms.length} inferred ·{' '}
+                {resultQuery.data.result.execution_ms} ms
+              </span>
+            </div>
+          )}
+          {isRunning && (
+            <div className="flex items-center gap-1 ml-1">
+              <LoadingSpinner size="sm" />
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Running…</span>
+            </div>
+          )}
 
-        {/* Reasoner */}
-        {tab === 'reasoner' && (
-          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
-            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              Runs OWL reasoning on the current graph selection
-              {graphIris.length > 0 && ` (${graphIris.length} entities)`}.
-            </p>
+          {/* Close panel */}
+          <button
+            onClick={onClose}
+            className="ml-auto p-1 rounded hover:opacity-60"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <X size={14} />
+          </button>
+        </div>
 
-            <button
-              onClick={() => { setJobId(null); runMutation.reset(); runMutation.mutate() }}
-              disabled={isRunning}
-              className="flex items-center justify-center gap-2 py-2 rounded text-xs font-medium hover:opacity-80 disabled:opacity-50"
-              style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
+        {/* Reasoner 확장 패널 */}
+        {reasonerOpen && (
+          <div className="flex flex-col border-t" style={{ borderColor: 'var(--color-border)' }}>
+            {/* Config row */}
+            <div
+              className="flex items-center gap-4 px-3 py-2 flex-wrap border-b"
+              style={{ borderColor: 'var(--color-border)' }}
             >
-              {isRunning ? <><LoadingSpinner size="sm" /> Running…</> : <><Play size={12} /> Run Reasoner</>}
-            </button>
+              {/* Checkboxes */}
+              <label className="flex items-center gap-1.5 text-xs cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+                <input
+                  type="checkbox"
+                  checked={checkConsistency}
+                  onChange={(e) => setCheckConsistency(e.target.checked)}
+                  className="w-3 h-3"
+                />
+                Check consistency
+              </label>
+              <label className="flex items-center gap-1.5 text-xs cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+                <input
+                  type="checkbox"
+                  checked={includeInferences}
+                  onChange={(e) => setIncludeInferences(e.target.checked)}
+                  className="w-3 h-3"
+                />
+                Include inferences
+              </label>
 
-            {runMutation.error && (
-              <p className="text-xs" style={{ color: 'var(--color-error)' }}>
-                {runMutation.error.message}
-              </p>
-            )}
-
-            {resultData && (
-              <div className="flex flex-col gap-2">
-                {/* Consistency */}
-                <div className={`flex items-center gap-1.5 text-xs font-medium ${resultData.consistent ? 'text-green-500' : 'text-red-500'}`}>
-                  {resultData.consistent
-                    ? <><CheckCircle size={12} /> Consistent</>
-                    : <><AlertTriangle size={12} /> Inconsistent</>
-                  }
-                  <span className="font-normal ml-auto" style={{ color: 'var(--color-text-muted)' }}>
-                    {resultData.execution_ms} ms
-                  </span>
-                </div>
-
-                {/* Violations */}
-                {resultData.violations.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                      Violations ({resultData.violations.length})
-                    </p>
-                    <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
-                      {resultData.violations.map((v, i) => (
-                        <div key={i} className="text-xs p-2 rounded"
-                             style={{ background: 'rgba(248,81,73,0.1)', color: 'var(--color-text-primary)' }}>
-                          <span className="font-medium text-red-400">{v.type}</span>
-                          <p className="mt-0.5 break-words">{v.description}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Inferred */}
-                {resultData.inferred_axioms.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                      Inferred ({resultData.inferred_axioms.length})
-                    </p>
-                    <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
-                      {resultData.inferred_axioms.slice(0, 20).map((ax, i) => (
-                        <div key={i} className="text-xs p-1.5 rounded font-mono break-all"
-                             style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-secondary)' }}>
-                          {shortIri(ax.subject)} · {shortIri(ax.predicate)} · {shortIri(ax.object)}
-                        </div>
-                      ))}
-                      {resultData.inferred_axioms.length > 20 && (
-                        <p className="text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
-                          +{resultData.inferred_axioms.length - 20} more
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
+              {/* Profile selector */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Profile:</span>
+                <select
+                  value={profile}
+                  onChange={(e) => setProfile(e.target.value as typeof profile)}
+                  className="text-xs px-1.5 py-0.5 rounded border"
+                  style={{
+                    backgroundColor: 'var(--color-bg-elevated)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)',
+                  }}
+                >
+                  {(['EL', 'RL', 'QL', 'FULL'] as const).map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
               </div>
-            )}
+
+              {/* Run button */}
+              <button
+                onClick={handleRun}
+                disabled={isRunning}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium hover:opacity-80 disabled:opacity-50 ml-auto"
+                style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
+              >
+                {isRunning ? <LoadingSpinner size="sm" /> : <Play size={10} />}
+                {isRunning ? 'Running…' : 'Run Reasoner'}
+              </button>
+
+              {runMutation.error && (
+                <span className="text-xs w-full" style={{ color: 'var(--color-error)' }}>
+                  {runMutation.error.message}
+                </span>
+              )}
+            </div>
+
+            {/* Results */}
+            <div className="overflow-y-auto p-3" style={{ maxHeight: '320px' }}>
+              {!jobId && !runMutation.isPending && (
+                <p className="text-xs text-center py-4" style={{ color: 'var(--color-text-muted)' }}>
+                  Configure options and click Run Reasoner
+                </p>
+              )}
+              <ReasonerResults
+                result={resultQuery.data ?? null}
+                isLoading={isRunning}
+              />
+            </div>
           </div>
         )}
       </div>
     </aside>
   )
-}
-
-function shortIri(iri: string) {
-  if (iri.includes('#')) return iri.split('#').at(-1) ?? iri
-  return iri.split('/').at(-1) ?? iri
 }

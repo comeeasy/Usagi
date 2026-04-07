@@ -126,8 +126,8 @@ export default function RelationsPage() {
       <div className="flex flex-col h-full">
         <OntologyTabs />
 
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex flex-col flex-1 overflow-hidden p-4 gap-3">
+        <div className="flex flex-col flex-1 overflow-y-auto">
+          <div className="flex flex-col p-4 gap-3">
             {/* Header */}
             <div className="flex items-center justify-between">
               <div className="flex border rounded overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
@@ -193,7 +193,7 @@ export default function RelationsPage() {
             )}
 
             {!activeQuery.isLoading && !activeQuery.error && (
-              <div className="flex-1 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="rounded-lg border overflow-hidden" style={{ height: '45vh', minHeight: '200px', borderColor: 'var(--color-border)' }}>
                 <RelationTable
                   items={items}
                   total={activeQuery.data?.total ?? 0}
@@ -210,8 +210,10 @@ export default function RelationsPage() {
             )}
           </div>
 
+          {/* Bottom panel: Detail + Graph */}
           {(selectedIri || graphIris.length > 0) && !editingProperty && (
             <EntityRightPanel
+              bottomLayout
               ontologyId={ontologyId!}
               selectedIri={selectedIri}
               graphIris={graphIris}
@@ -233,10 +235,11 @@ export default function RelationsPage() {
             />
           )}
 
+          {/* Edit form — 하단 인라인 */}
           {editingProperty && (
-            <aside
-              className="w-96 flex flex-col border-l overflow-hidden"
-              style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}
+            <div
+              className="flex flex-col border-t overflow-hidden flex-shrink-0"
+              style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)', height: '480px' }}
             >
               <div
                 className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
@@ -284,7 +287,7 @@ export default function RelationsPage() {
                   onCancel={() => setEditingProperty(null)}
                 />
               </div>
-            </aside>
+            </div>
           )}
         </div>
       </div>

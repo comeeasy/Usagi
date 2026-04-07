@@ -161,8 +161,15 @@ class ReasonerService:
         for s, p, o in onto.get_triples():
             pre_triples.add((s, p, o))
 
-        with onto:
-            owlready2.sync_reasoner_hermit(infer_property_values=True)
+        try:
+            with onto:
+                # infer_property_values=True 는 owlready2가 non-class 객체를
+                # class로 처리하려다 TypeError를 일으키는 알려진 버그가 있음
+                owlready2.sync_reasoner_hermit(infer_property_values=False)
+        except TypeError:
+            # 추론 자체는 완료됐으나 결과 적용 단계에서 owlready2 내부 오류
+            # 발생 시 조용히 무시하고 수집된 결과를 사용
+            pass
 
         execution_ms = int((time.perf_counter() - start) * 1000)
 

@@ -7,9 +7,11 @@ import type { Individual } from '@/types/individual'
 interface IndividualsSidebarProps {
   ontologyId: string
   conceptIri: string | null
+  /** true이면 사이드바 대신 하단 인라인 스트립으로 렌더링 */
+  inline?: boolean
 }
 
-export default function IndividualsSidebar({ ontologyId, conceptIri }: IndividualsSidebarProps) {
+export default function IndividualsSidebar({ ontologyId, conceptIri, inline = false }: IndividualsSidebarProps) {
   const { dataset } = useDataset()
 
   const query = useQuery({
@@ -21,8 +23,16 @@ export default function IndividualsSidebar({ ontologyId, conceptIri }: Individua
 
   if (!conceptIri) return null
 
+  const wrapperStyle = inline
+    ? { borderTop: '1px solid var(--color-border)' }
+    : { borderLeft: '1px solid var(--color-border)' }
+  const wrapperClass = inline
+    ? 'flex flex-col overflow-hidden'
+    : 'flex flex-col h-full overflow-hidden'
+  const listClass = inline ? 'overflow-y-auto max-h-36' : 'flex-1 overflow-y-auto'
+
   return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ borderLeft: '1px solid var(--color-border)' }}>
+    <div className={wrapperClass} style={wrapperStyle}>
       <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide flex items-center justify-between"
            style={{ borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
         <span>Individuals</span>
@@ -31,7 +41,7 @@ export default function IndividualsSidebar({ ontologyId, conceptIri }: Individua
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className={listClass}>
         {query.isPending && (
           <div className="flex justify-center py-4">
             <LoadingSpinner size="sm" />

@@ -226,9 +226,9 @@ export default function EntitiesPage() {
         )}
         <OntologyTabs />
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 overflow-y-auto">
           {/* Main content */}
-          <div className="flex flex-col flex-1 overflow-hidden p-4 gap-3">
+          <div className="flex flex-col p-4 gap-3">
             {/* Header */}
             <div className="flex items-center justify-between">
               <div className="flex border rounded overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
@@ -328,7 +328,7 @@ export default function EntitiesPage() {
 
             {/* Tree view */}
             {viewMode === 'tree' ? (
-              <div className="flex-1 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="rounded-lg border overflow-hidden" style={{ height: '45vh', minHeight: '200px', borderColor: 'var(--color-border)' }}>
                 <ConceptTreeView
                   ontologyId={ontologyId!}
                   dataset={dataset}
@@ -353,7 +353,7 @@ export default function EntitiesPage() {
                   </div>
                 )}
                 {!activeQuery.isLoading && !activeQuery.error && (
-                  <div className="flex-1 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="rounded-lg border overflow-hidden" style={{ height: '45vh', minHeight: '200px', borderColor: 'var(--color-border)' }}>
                     <EntityTable
                       items={items}
                       total={activeQuery.data?.total ?? 0}
@@ -369,9 +369,15 @@ export default function EntitiesPage() {
             )}
           </div>
 
-          {/* Right panel: Detail + Graph + Reasoner */}
+          {/* Individuals — concept 선택 시 테이블 아래 인라인 스트립 */}
+          {tab === 'concepts' && selectedIri && !editingEntity && (
+            <IndividualsSidebar ontologyId={ontologyId!} conceptIri={selectedIri} inline />
+          )}
+
+          {/* Bottom panel: Detail + Graph */}
           {(selectedIri || graphIris.length > 0) && !editingEntity && (
             <EntityRightPanel
+              bottomLayout
               ontologyId={ontologyId!}
               selectedIri={selectedIri}
               graphIris={graphIris}
@@ -392,18 +398,11 @@ export default function EntitiesPage() {
             />
           )}
 
-          {/* Individuals sidebar — visible when a concept is selected */}
-          {tab === 'concepts' && selectedIri && !editingEntity && (
-            <div className="w-48 shrink-0 overflow-hidden">
-              <IndividualsSidebar ontologyId={ontologyId!} conceptIri={selectedIri} />
-            </div>
-          )}
-
-          {/* Edit form panel */}
+          {/* Edit form — 하단 인라인 */}
           {editingEntity && (
-            <aside
-              className="w-96 flex flex-col border-l overflow-hidden"
-              style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}
+            <div
+              className="flex flex-col border-t overflow-hidden flex-shrink-0"
+              style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)', height: '480px' }}
             >
               <div
                 className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
@@ -472,7 +471,7 @@ export default function EntitiesPage() {
                   />
                 )}
               </div>
-            </aside>
+            </div>
           )}
         </div>
       </div>
