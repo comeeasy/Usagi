@@ -11,8 +11,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/mcp': 'http://localhost:8000',
+      '/api': 'http://backend:8000',
+      '/mcp': 'http://backend:8000',
     },
   },
   test: {

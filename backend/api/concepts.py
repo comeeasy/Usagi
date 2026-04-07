@@ -137,8 +137,14 @@ async def list_concepts(
     if super_class:
         extra += f"\n    ?iri rdfs:subClassOf <{super_class}> ."
     if root:
-        # 그래프 내에서 rdfs:subClassOf의 object로 등장하지 않는 클래스 = 루트
-        extra += f"\n    FILTER NOT EXISTS {{ GRAPH <{kg}> {{ [] rdfs:subClassOf ?iri }} }}"
+        # owl:Thing / rdfs:Resource 이외의 IRI 부모가 없는 클래스 = 루트
+        extra += (
+            f"\n    OPTIONAL {{ ?iri rdfs:subClassOf ?rootPar ."
+            f" FILTER(isIRI(?rootPar)"
+            f" && ?rootPar != owl:Thing"
+            f" && ?rootPar != rdfs:Resource) }}"
+            f"\n    FILTER(!BOUND(?rootPar))"
+        )
 
     count_rows = await store.sparql_select(f"""{_P}
 SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
@@ -151,7 +157,8 @@ SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
 
     rows = await store.sparql_select(f"""{_P}
 SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment)
-       (COUNT(DISTINCT ?child) AS ?subclassCount) WHERE {{
+       (COUNT(DISTINCT ?child) AS ?subclassCount)
+       (COUNT(DISTINCT ?ind) AS ?individualCount) WHERE {{
     {{
         SELECT DISTINCT ?iri WHERE {{
             GRAPH <{kg}> {{
@@ -163,6 +170,7 @@ SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment)
     OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:label ?lbl }} }}
     OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:comment ?cmt }} }}
     OPTIONAL {{ GRAPH <{kg}> {{ ?child rdfs:subClassOf ?iri }} }}
+    OPTIONAL {{ GRAPH <{kg}> {{ ?ind rdf:type ?iri }} }}
 }} GROUP BY ?iri
 ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
 
@@ -172,7 +180,7 @@ ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
             ontology_id=ontology_id,
             label=_v(r.get("label")) or _v(r.get("iri")),
             comment=_v(r.get("comment")) or None,
-            individual_count=0,
+            individual_count=int(_v(r.get("individualCount"), "0")),
             subclass_count=int(_v(r.get("subclassCount"), "0")),
         )
         for r in rows
@@ -207,7 +215,8 @@ SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
 
     rows = await store.sparql_select(f"""{_P}
 SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment)
-       (COUNT(DISTINCT ?child) AS ?subclassCount) WHERE {{
+       (COUNT(DISTINCT ?child) AS ?subclassCount)
+       (COUNT(DISTINCT ?ind) AS ?individualCount) WHERE {{
     {{
         SELECT DISTINCT ?iri WHERE {{
             GRAPH <{kg}> {{ ?iri rdfs:subClassOf <{iri}> . FILTER(isIRI(?iri)) }}
@@ -216,6 +225,7 @@ SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment)
     OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:label ?lbl }} }}
     OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:comment ?cmt }} }}
     OPTIONAL {{ GRAPH <{kg}> {{ ?child rdfs:subClassOf ?iri }} }}
+    OPTIONAL {{ GRAPH <{kg}> {{ ?ind rdf:type ?iri }} }}
 }} GROUP BY ?iri
 ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
 
@@ -225,7 +235,7 @@ ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
             ontology_id=ontology_id,
             label=_v(r.get("label")) or _v(r.get("iri")),
             comment=_v(r.get("comment")) or None,
-            individual_count=0,
+            individual_count=int(_v(r.get("individualCount"), "0")),
             subclass_count=int(_v(r.get("subclassCount"), "0")),
         )
         for r in rows
