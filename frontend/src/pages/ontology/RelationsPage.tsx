@@ -223,6 +223,7 @@ export default function RelationsPage() {
               detailContent={
                 selectedProperty ? (
                   <RelationDetailPanel
+                    embedded
                     property={selectedProperty}
                     iri={selectedIri}
                     onEdit={() => setEditingProperty(selectedProperty)}

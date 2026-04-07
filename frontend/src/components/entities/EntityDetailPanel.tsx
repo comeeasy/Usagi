@@ -11,85 +11,102 @@ interface EntityDetailPanelProps {
   onClose?: () => void
   onEdit?: () => void
   onDelete?: () => void
+  /** true이면 aside 래퍼 없이 내용만 렌더링 (EntityRightPanel 내 임베딩용) */
+  embedded?: boolean
 }
 
 function isConcept(e: Concept | Individual): e is Concept {
   return 'super_classes' in e
 }
 
-export default function EntityDetailPanel({ entity, iri, onClose, onEdit, onDelete }: EntityDetailPanelProps) {
+export default function EntityDetailPanel({ entity, iri, onClose, onEdit, onDelete, embedded }: EntityDetailPanelProps) {
   const [tab, setTab] = useState<'details' | 'provenance'>('details')
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const displayIri = entity?.iri ?? iri
   if (!displayIri) return null
 
+  const Wrapper = embedded ? 'div' : 'aside'
+  const wrapperClass = embedded
+    ? 'flex flex-col overflow-hidden'
+    : 'w-96 flex flex-col border-l overflow-hidden'
+  const wrapperStyle = embedded
+    ? {}
+    : { backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }
+
   return (
-    <aside
-      className="w-96 flex flex-col border-l overflow-hidden"
-      style={{
-        backgroundColor: 'var(--color-bg-surface)',
-        borderColor: 'var(--color-border)',
-      }}
-    >
-      {/* Header */}
-      <div
-        className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
-        style={{ borderColor: 'var(--color-border)' }}
-      >
-        <h3 className="font-semibold text-sm" style={{ color: 'var(--color-text-primary)' }}>
-          Entity Detail
-        </h3>
-        <div className="flex items-center gap-2">
+    <Wrapper className={wrapperClass} style={wrapperStyle}>
+      {/* Header — embedded 시 Close 버튼 숨김 */}
+      {!embedded && (
+        <div
+          className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
+          style={{ borderColor: 'var(--color-border)' }}
+        >
+          <h3 className="font-semibold text-sm" style={{ color: 'var(--color-text-primary)' }}>
+            Entity Detail
+          </h3>
+          <div className="flex items-center gap-2">
+            {onEdit && (
+              <button onClick={onEdit} className="p-1 rounded hover:opacity-80"
+                style={{ color: 'var(--color-text-secondary)' }} title="Edit">
+                <Edit2 size={14} />
+              </button>
+            )}
+            {onDelete && !confirmDelete && (
+              <button onClick={() => setConfirmDelete(true)} className="p-1 rounded hover:opacity-80"
+                style={{ color: 'var(--color-error, #ef4444)' }} title="Delete">
+                <Trash2 size={14} />
+              </button>
+            )}
+            {onDelete && confirmDelete && (
+              <div className="flex items-center gap-1">
+                <span className="text-xs" style={{ color: 'var(--color-error, #ef4444)' }}>Delete?</span>
+                <button onClick={() => { onDelete(); setConfirmDelete(false) }}
+                  className="px-2 py-0.5 rounded text-xs font-medium"
+                  style={{ backgroundColor: 'var(--color-error, #ef4444)', color: '#fff' }}>Yes</button>
+                <button onClick={() => setConfirmDelete(false)}
+                  className="px-2 py-0.5 rounded text-xs"
+                  style={{ color: 'var(--color-text-secondary)' }}>No</button>
+              </div>
+            )}
+            <button onClick={onClose} className="p-1 rounded hover:opacity-80"
+              style={{ color: 'var(--color-text-secondary)' }} title="Close">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+      {/* embedded 모드: Edit / Delete 툴바 */}
+      {embedded && (onEdit || onDelete) && (
+        <div className="flex items-center gap-1.5 px-3 py-2 flex-shrink-0"
+             style={{ borderBottom: '1px solid var(--color-border)' }}>
           {onEdit && (
-            <button
-              onClick={onEdit}
-              className="p-1 rounded hover:opacity-80"
-              style={{ color: 'var(--color-text-secondary)' }}
-              title="Edit"
-            >
-              <Edit2 size={14} />
+            <button onClick={onEdit}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:opacity-80"
+              style={{ background: 'var(--color-primary)', color: '#fff' }}>
+              <Edit2 size={10} /> Edit
             </button>
           )}
           {onDelete && !confirmDelete && (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="p-1 rounded hover:opacity-80"
-              style={{ color: 'var(--color-error, #ef4444)' }}
-              title="Delete"
-            >
-              <Trash2 size={14} />
+            <button onClick={() => setConfirmDelete(true)}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:opacity-80"
+              style={{ background: 'var(--color-error, #ef4444)', color: '#fff' }}>
+              <Trash2 size={10} /> Delete
             </button>
           )}
           {onDelete && confirmDelete && (
             <div className="flex items-center gap-1">
               <span className="text-xs" style={{ color: 'var(--color-error, #ef4444)' }}>Delete?</span>
-              <button
-                onClick={() => { onDelete(); setConfirmDelete(false) }}
+              <button onClick={() => { onDelete(); setConfirmDelete(false) }}
                 className="px-2 py-0.5 rounded text-xs font-medium"
-                style={{ backgroundColor: 'var(--color-error, #ef4444)', color: '#fff' }}
-              >
-                Yes
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
+                style={{ backgroundColor: 'var(--color-error, #ef4444)', color: '#fff' }}>Yes</button>
+              <button onClick={() => setConfirmDelete(false)}
                 className="px-2 py-0.5 rounded text-xs"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                No
-              </button>
+                style={{ color: 'var(--color-text-secondary)' }}>No</button>
             </div>
           )}
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:opacity-80"
-            style={{ color: 'var(--color-text-secondary)' }}
-            title="Close"
-          >
-            <X size={14} />
-          </button>
         </div>
-      </div>
+      )}
 
       {/* Tabs */}
       <div
@@ -282,6 +299,6 @@ export default function EntityDetailPanel({ entity, iri, onClose, onEdit, onDele
           </p>
         )}
       </div>
-    </aside>
+    </Wrapper>
   )
 }

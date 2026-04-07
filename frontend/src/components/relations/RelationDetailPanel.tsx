@@ -14,17 +14,25 @@ interface RelationDetailPanelProps {
   iri?: string | null
   onClose?: () => void
   onEdit?: () => void
+  /** true이면 aside 래퍼 없이 내용만 렌더링 (EntityRightPanel 내 임베딩용) */
+  embedded?: boolean
 }
 
-export default function RelationDetailPanel({ property, iri, onClose, onEdit }: RelationDetailPanelProps) {
+export default function RelationDetailPanel({ property, iri, onClose, onEdit, embedded }: RelationDetailPanelProps) {
   const displayIri = property?.iri ?? iri
   if (!displayIri) return null
 
+  const Wrapper = embedded ? 'div' : 'aside'
+  const wrapperClass = embedded
+    ? 'flex flex-col h-full overflow-hidden'
+    : 'w-80 flex flex-col border-l overflow-hidden'
+  const wrapperStyle = embedded
+    ? {}
+    : { backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }
+
   return (
-    <aside
-      className="w-80 flex flex-col border-l overflow-hidden"
-      style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}
-    >
+    <Wrapper className={wrapperClass} style={wrapperStyle}>
+      {!embedded && (
       <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--color-border)' }}>
         <h3 className="font-semibold text-sm" style={{ color: 'var(--color-text-primary)' }}>
           Property Detail
@@ -40,6 +48,7 @@ export default function RelationDetailPanel({ property, iri, onClose, onEdit }: 
           </button>
         </div>
       </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
         {/* Type badge */}
@@ -116,6 +125,6 @@ export default function RelationDetailPanel({ property, iri, onClose, onEdit }: 
           </div>
         )}
       </div>
-    </aside>
+    </Wrapper>
   )
 }

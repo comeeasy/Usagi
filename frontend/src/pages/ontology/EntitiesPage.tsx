@@ -379,6 +379,7 @@ export default function EntitiesPage() {
               onClose={() => { setSelectedIri(null); setGraphIris([]) }}
               detailContent={
                 <EntityDetailPanel
+                  embedded
                   entity={selectedEntityQuery.data as EntityKind | null}
                   iri={selectedIri}
                   onEdit={() => selectedEntityQuery.data ? setEditingEntity(selectedEntityQuery.data as EntityKind) : undefined}
