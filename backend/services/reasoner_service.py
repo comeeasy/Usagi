@@ -213,21 +213,29 @@ class ReasonerService:
             pass
 
         # 추론 후 새로 생긴 트리플 → InferredAxiom
+        # onto.get_triples()는 IRI 문자열이 아닌 owlready2 내부 storid(int)를 반환하므로
+        # world._unabbreviate()로 실제 IRI로 변환해야 함
         try:
+            world = onto.world
             post_triples: set[tuple] = set()
             for s, p, o in onto.get_triples():
                 post_triples.add((s, p, o))
 
             new_triples = post_triples - pre_triples
             for s, p, o in new_triples:
-                inferred_axioms.append(
-                    InferredAxiom(
-                        subject=str(s),
-                        predicate=str(p),
-                        object=str(o),
-                        inference_rule="HermiT",
+                s_iri = world._unabbreviate(s) if isinstance(s, int) else str(s)
+                p_iri = world._unabbreviate(p) if isinstance(p, int) else str(p)
+                o_iri = world._unabbreviate(o) if isinstance(o, int) else str(o)
+                # 내부 시스템 트리플(owlready2 메타데이터) 제외
+                if s_iri.startswith("http") and p_iri.startswith("http"):
+                    inferred_axioms.append(
+                        InferredAxiom(
+                            subject=s_iri,
+                            predicate=p_iri,
+                            object=o_iri,
+                            inference_rule="HermiT",
+                        )
                     )
-                )
         except Exception:
             pass
 
