@@ -1,10 +1,16 @@
 /**
- * SchemaPage — Entities + Relations 통합 탭
+ * SchemaPage — Schema 탭 (Concepts + Properties + Individuals 통합)
  *
  * 레이아웃:
- *   LEFT  (38%): SchemaLeftPanel (Concepts 섹션 + Properties 섹션)
- *   RIGHT (62%): SchemaDetailPanel (선택 항목 context-aware detail)
- *   BOTTOM:      EntityRightPanel (SubGraph + Reasoner, 항목 선택 시 표시)
+ *   TOP (4열, flex-1):
+ *     Col1 (20%): SchemaLeftPanel — Concept/Property 목록
+ *     Col2 (25%): SchemaDetailPanel — 선택 항목 Detail (Concept: Detail+Relations, Property: 단일)
+ *     Col3 (25%): IndividualsPanel — Concept 선택 시 Individual 목록
+ *     Col4 (30%): IndividualDetailPanel — Individual 선택 시 세부 정보
+ *
+ *   BOTTOM (576px, 2열):
+ *     Left (60%): ConceptGraphPanel — Concept-only 그래프
+ *     Right (40%): SchemaReasonerPanel — Reasoner
  */
 import { useState, useEffect } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
@@ -13,7 +19,10 @@ import OntologyTabs from '@/components/layout/OntologyTabs'
 import ErrorBoundary from '@/components/shared/ErrorBoundary'
 import SchemaLeftPanel from '@/components/schema/SchemaLeftPanel'
 import SchemaDetailPanel from '@/components/schema/SchemaDetailPanel'
-import EntityRightPanel from '@/components/graph/EntityRightPanel'
+import IndividualsPanel from '@/components/schema/IndividualsPanel'
+import IndividualDetailPanel from '@/components/schema/IndividualDetailPanel'
+import ConceptGraphPanel from '@/components/schema/ConceptGraphPanel'
+import SchemaReasonerPanel from '@/components/schema/SchemaReasonerPanel'
 import ConceptForm from '@/components/entities/ConceptForm'
 import PropertyForm from '@/components/relations/PropertyForm'
 import {
@@ -53,7 +62,8 @@ export default function SchemaPage() {
   const [selectedIri, setSelectedIri] = useState<string | null>(null)
   const [selectedKind, setSelectedKind] = useState<SelectionKind>(null)
   const [selectedProperty, setSelectedProperty] = useState<ObjectProperty | DataProperty | null>(null)
-  const [graphIris, setGraphIris] = useState<string[]>([])
+  const [selectedIndividualIri, setSelectedIndividualIri] = useState<string | null>(null)
+  const [conceptGraphIris, setConceptGraphIris] = useState<string[]>([])
 
   // ── Left panel controls ──────────────────────────────────────
   const [conceptViewMode, setConceptViewMode] = useState<ConceptViewMode>('flat')
@@ -187,7 +197,8 @@ export default function SchemaPage() {
     setSelectedIri(null)
     setSelectedKind(null)
     setSelectedProperty(null)
-    setGraphIris([])
+    setSelectedIndividualIri(null)
+    setConceptGraphIris([])
     setEditingItem(null)
   }
 
@@ -195,7 +206,8 @@ export default function SchemaPage() {
     setSelectedIri(iri)
     setSelectedKind('concept')
     setSelectedProperty(null)
-    setGraphIris((prev) => (prev.includes(iri) ? prev : [...prev, iri]))
+    setSelectedIndividualIri(null)
+    setConceptGraphIris((prev) => (prev.includes(iri) ? prev : [...prev, iri]))
     setShowConceptForm(false)
     setShowPropertyForm(false)
     setEditingItem(null)
@@ -205,19 +217,23 @@ export default function SchemaPage() {
     setSelectedIri(iri)
     setSelectedKind('property')
     setSelectedProperty(property)
-    setGraphIris((prev) => (prev.includes(iri) ? prev : [...prev, iri]))
+    setSelectedIndividualIri(null)
     setShowConceptForm(false)
     setShowPropertyForm(false)
     setEditingItem(null)
   }
 
-  // Property detail에서 domain/range 클릭 → Concept으로 이동
   const handleNavigateToConcept = (iri: string) => {
     setSelectedIri(iri)
     setSelectedKind('concept')
     setSelectedProperty(null)
-    setGraphIris((prev) => (prev.includes(iri) ? prev : [...prev, iri]))
+    setSelectedIndividualIri(null)
+    setConceptGraphIris((prev) => (prev.includes(iri) ? prev : [...prev, iri]))
     setEditingItem(null)
+  }
+
+  const handleSelectIndividual = (iri: string) => {
+    setSelectedIndividualIri(iri)
   }
 
   const handleEditConcept = () => {
@@ -243,23 +259,11 @@ export default function SchemaPage() {
     else if (selectedKind === 'property') deletePropertyMutation.mutate(selectedIri)
   }
 
-  const handleRemoveGraphIri = (iri: string) => {
-    setGraphIris((prev) => prev.filter((i) => i !== iri))
-    if (selectedIri === iri) {
-      setSelectedIri(null)
-      setSelectedKind(null)
-      setSelectedProperty(null)
-    }
-  }
-
-  // ── Right panel content ──────────────────────────────────────
-  // showConceptForm / showPropertyForm / editingItem → 폼 표시
-  // 그 외 → SchemaDetailPanel
   const isShowingForm = showConceptForm || showPropertyForm || !!editingItem
 
   return (
     <ErrorBoundary>
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full overflow-hidden">
 
         {/* Toast notifications */}
         {saveSuccess && (
@@ -277,11 +281,11 @@ export default function SchemaPage() {
 
         <OntologyTabs />
 
-        {/* Main 2-column layout */}
-        <div className="flex flex-1 overflow-hidden">
+        {/* ── TOP: 4-column layout ─────────────────────────────── */}
+        <div className="flex flex-1 overflow-hidden min-h-0">
 
-          {/* LEFT: SchemaLeftPanel */}
-          <div className="w-[38%] overflow-hidden">
+          {/* Col 1: Concept + Property list (20%) */}
+          <div className="w-[20%] overflow-hidden flex-shrink-0">
             <SchemaLeftPanel
               ontologyId={ontologyId!}
               dataset={dataset}
@@ -297,12 +301,12 @@ export default function SchemaPage() {
             />
           </div>
 
-          {/* RIGHT: Detail or Form */}
+          {/* Col 2: Detail or Form (25%) */}
           <div
-            className="flex-1 flex flex-col overflow-hidden"
+            className="w-[25%] flex flex-col overflow-hidden flex-shrink-0"
             style={{ borderLeft: '1px solid var(--color-border)' }}
           >
-            {/* ── Concept create form ── */}
+            {/* Concept create */}
             {showConceptForm && (
               <div className="flex flex-col h-full overflow-y-auto p-4">
                 <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
@@ -312,20 +316,16 @@ export default function SchemaPage() {
                   mode="create"
                   iriPrefix={iriPrefix}
                   onSubmit={(v) => createConceptMutation.mutate({
-                    iri: v.iri,
-                    label: v.label,
-                    comment: v.comment,
-                    super_classes: v.superClasses,
-                    equivalent_classes: v.equivalentClasses,
-                    disjoint_with: v.disjointWith,
-                    restrictions: v.restrictions,
+                    iri: v.iri, label: v.label, comment: v.comment,
+                    super_classes: v.superClasses, equivalent_classes: v.equivalentClasses,
+                    disjoint_with: v.disjointWith, restrictions: v.restrictions,
                   })}
                   onCancel={() => setShowConceptForm(false)}
                 />
               </div>
             )}
 
-            {/* ── Property create form ── */}
+            {/* Property create */}
             {showPropertyForm && (
               <div className="flex flex-col h-full overflow-y-auto p-4">
                 <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
@@ -360,33 +360,26 @@ export default function SchemaPage() {
               </div>
             )}
 
-            {/* ── Concept edit form ── */}
+            {/* Concept edit */}
             {editingItem?.kind === 'concept' && (
               <div className="flex flex-col h-full overflow-y-auto p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-                    Edit Concept
-                  </h3>
+                  <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Edit Concept</h3>
                   <button onClick={() => setEditingItem(null)} className="p-1 hover:opacity-60" style={{ color: 'var(--color-text-secondary)' }}>×</button>
                 </div>
                 <ConceptForm
                   mode="edit"
                   initialValues={{
-                    iri: editingItem.data.iri,
-                    label: editingItem.data.label,
-                    comment: editingItem.data.comment,
-                    superClasses: editingItem.data.super_classes,
+                    iri: editingItem.data.iri, label: editingItem.data.label,
+                    comment: editingItem.data.comment, superClasses: editingItem.data.super_classes,
                     equivalentClasses: editingItem.data.equivalent_classes,
-                    disjointWith: editingItem.data.disjoint_with,
-                    restrictions: editingItem.data.restrictions,
+                    disjointWith: editingItem.data.disjoint_with, restrictions: editingItem.data.restrictions,
                   }}
                   onSubmit={(v) => updateConceptMutation.mutate({
                     iri: editingItem.data.iri,
                     data: {
-                      label: v.label, comment: v.comment,
-                      super_classes: v.superClasses,
-                      equivalent_classes: v.equivalentClasses,
-                      disjoint_with: v.disjointWith,
+                      label: v.label, comment: v.comment, super_classes: v.superClasses,
+                      equivalent_classes: v.equivalentClasses, disjoint_with: v.disjointWith,
                       restrictions: v.restrictions,
                     },
                   })}
@@ -395,23 +388,19 @@ export default function SchemaPage() {
               </div>
             )}
 
-            {/* ── Object property edit form ── */}
+            {/* Object property edit */}
             {editingItem?.kind === 'object-property' && (
               <div className="flex flex-col h-full overflow-y-auto p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-                    Edit Object Property
-                  </h3>
+                  <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Edit Object Property</h3>
                   <button onClick={() => setEditingItem(null)} className="p-1 hover:opacity-60" style={{ color: 'var(--color-text-secondary)' }}>×</button>
                 </div>
                 <PropertyForm
                   propertyType="object"
                   mode="edit"
                   initialValues={{
-                    iri: editingItem.data.iri,
-                    label: editingItem.data.label,
-                    comment: editingItem.data.comment,
-                    domain: editingItem.data.domain,
+                    iri: editingItem.data.iri, label: editingItem.data.label,
+                    comment: editingItem.data.comment, domain: editingItem.data.domain,
                     range: editingItem.data.range as string[],
                     characteristics: editingItem.data.characteristics,
                     inverseOf: editingItem.data.inverseOf,
@@ -428,25 +417,20 @@ export default function SchemaPage() {
               </div>
             )}
 
-            {/* ── Data property edit form ── */}
+            {/* Data property edit */}
             {editingItem?.kind === 'data-property' && (
               <div className="flex flex-col h-full overflow-y-auto p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-                    Edit Data Property
-                  </h3>
+                  <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Edit Data Property</h3>
                   <button onClick={() => setEditingItem(null)} className="p-1 hover:opacity-60" style={{ color: 'var(--color-text-secondary)' }}>×</button>
                 </div>
                 <PropertyForm
                   propertyType="data"
                   mode="edit"
                   initialValues={{
-                    iri: editingItem.data.iri,
-                    label: editingItem.data.label,
-                    comment: editingItem.data.comment,
-                    domain: editingItem.data.domain,
-                    range: editingItem.data.range as string[],
-                    isFunctional: editingItem.data.isFunctional,
+                    iri: editingItem.data.iri, label: editingItem.data.label,
+                    comment: editingItem.data.comment, domain: editingItem.data.domain,
+                    range: editingItem.data.range as string[], isFunctional: editingItem.data.isFunctional,
                   }}
                   onSubmit={(v) => {
                     const vals = v as { label: string; comment?: string; domain: string[]; range: DataProperty['range']; isFunctional: boolean }
@@ -460,7 +444,7 @@ export default function SchemaPage() {
               </div>
             )}
 
-            {/* ── SchemaDetailPanel (폼이 없을 때) ── */}
+            {/* Detail panel */}
             {!isShowingForm && (
               <SchemaDetailPanel
                 ontologyId={ontologyId!}
@@ -474,19 +458,54 @@ export default function SchemaPage() {
               />
             )}
           </div>
+
+          {/* Col 3: Individuals list (25%) — Concept 선택 시만 표시 */}
+          {selectedKind === 'concept' && selectedIri && !isShowingForm && (
+            <div className="w-[25%] overflow-hidden flex-shrink-0">
+              <IndividualsPanel
+                ontologyId={ontologyId!}
+                dataset={dataset}
+                conceptIri={selectedIri}
+                selectedIndividualIri={selectedIndividualIri}
+                onSelectIndividual={handleSelectIndividual}
+              />
+            </div>
+          )}
+
+          {/* Col 4: Individual Detail (flex-1) — Individual 선택 시만 표시 */}
+          {selectedIndividualIri && !isShowingForm && (
+            <div className="flex-1 overflow-hidden min-w-0">
+              <IndividualDetailPanel
+                ontologyId={ontologyId!}
+                dataset={dataset}
+                individualIri={selectedIndividualIri}
+              />
+            </div>
+          )}
         </div>
 
-        {/* BOTTOM: SubGraph + Reasoner (항목 선택 시만 표시) */}
-        {graphIris.length > 0 && (
-          <EntityRightPanel
-            bottomLayout
-            ontologyId={ontologyId!}
-            selectedIri={selectedIri}
-            graphIris={graphIris}
-            onRemoveIri={handleRemoveGraphIri}
-            onClose={clearSelection}
-          />
-        )}
+        {/* ── BOTTOM: Graph (60%) + Reasoner (40%), 576px ─────── */}
+        <div
+          className="flex flex-shrink-0 border-t overflow-hidden"
+          style={{ height: '576px', borderColor: 'var(--color-border)' }}
+        >
+          {/* Graph — Concept-only */}
+          <div className="flex-1 overflow-hidden min-w-0">
+            <ConceptGraphPanel
+              ontologyId={ontologyId!}
+              conceptIris={conceptGraphIris}
+            />
+          </div>
+
+          {/* Reasoner */}
+          <div className="w-[40%] overflow-hidden flex-shrink-0">
+            <SchemaReasonerPanel
+              ontologyId={ontologyId!}
+              entityIris={conceptGraphIris}
+            />
+          </div>
+        </div>
+
       </div>
     </ErrorBoundary>
   )

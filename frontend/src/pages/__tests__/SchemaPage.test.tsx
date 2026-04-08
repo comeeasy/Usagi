@@ -103,6 +103,20 @@ describe('SchemaPage — 초기 렌더링', () => {
     })
   })
 
+  it('Graph canvas가 항상 표시된다', async () => {
+    renderSchemaPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
+    })
+  })
+
+  it('Reasoner 패널이 항상 표시된다 (Run Reasoner 버튼)', async () => {
+    renderSchemaPage()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Run Reasoner/i })).toBeInTheDocument()
+    })
+  })
+
   it('초기 상태에서 우측 Detail 서브탭은 없다', async () => {
     renderSchemaPage()
     // concepts 섹션 로드 대기
@@ -134,19 +148,19 @@ describe('SchemaPage — Concept 선택', () => {
     })
   })
 
-  it('Concept 선택 시 Instances 탭 버튼이 표시된다', async () => {
+  it('Concept 선택 시 Instances 탭 버튼이 없다 (개별 Individuals 패널로 이동됨)', async () => {
     renderSchemaPage()
     await clickConcept()
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^Instances$/i })).toBeInTheDocument()
-    })
+    // Instances 탭이 개념 detail 패널에서 제거됨
+    await waitFor(() => screen.getByRole('button', { name: /^Detail$/i }))
+    expect(screen.queryByRole('button', { name: /^Instances$/i })).not.toBeInTheDocument()
   })
 
-  it('Concept 선택 후 SubGraph 패널이 표시된다', async () => {
+  it('Concept 선택 시 3열 Individuals 패널이 표시된다', async () => {
     renderSchemaPage()
     await clickConcept()
     await waitFor(() => {
-      expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
+      expect(screen.getByTestId('schema-individuals-panel')).toBeInTheDocument()
     })
   })
 })
@@ -181,35 +195,54 @@ describe('SchemaPage — Concept Relations 탭', () => {
     await waitFor(() => screen.getByRole('button', { name: /^Relations$/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Relations$/i }))
     await waitFor(() => {
-      // Relations 탭 영역에서 property label 확인
       expect(screen.getAllByText(mockObjectProperty.label).length).toBeGreaterThan(0)
     })
   })
 })
 
 // ─────────────────────────────────────────────
-// 4. Concept — Instances 탭
+// 4. Individuals 패널 (3열)
 // ─────────────────────────────────────────────
-describe('SchemaPage — Concept Instances 탭', () => {
-  it('Instances 탭 클릭 시 해당 Concept의 Individual이 표시된다', async () => {
+describe('SchemaPage — Individuals 패널', () => {
+  it('Concept 선택 시 Individuals 패널에 Individual이 표시된다', async () => {
     renderSchemaPage()
     await clickConcept()
-    await waitFor(() => screen.getByRole('button', { name: /^Instances$/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^Instances$/i }))
+    const panel = await screen.findByTestId('schema-individuals-panel')
     await waitFor(() => {
-      expect(screen.getByText(mockIndividual.label)).toBeInTheDocument()
+      expect(within(panel).getByText(mockIndividual.label)).toBeInTheDocument()
     })
   })
 
-  it('Instances 탭에 총 개수(1)가 표시된다', async () => {
+  it('Individuals 패널에 총 개수가 표시된다', async () => {
     renderSchemaPage()
     await clickConcept()
-    await waitFor(() => screen.getByRole('button', { name: /^Instances$/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^Instances$/i }))
+    const panel = await screen.findByTestId('schema-individuals-panel')
     await waitFor(() => {
-      // IndividualsSidebar header에 total: 1 표시
-      const header = screen.getByText('Individuals').closest('div')!
-      expect(within(header).getByText('1')).toBeInTheDocument()
+      // total: 1
+      expect(within(panel).getByText('1')).toBeInTheDocument()
+    })
+  })
+
+  it('Individual 클릭 시 4열 Individual Detail 패널이 표시된다', async () => {
+    renderSchemaPage()
+    await clickConcept()
+    const panel = await screen.findByTestId('schema-individuals-panel')
+    const indItem = await within(panel).findByText(mockIndividual.label)
+    fireEvent.click(indItem)
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-individual-detail-panel')).toBeInTheDocument()
+    })
+  })
+
+  it('Individual Detail 패널에 label이 표시된다', async () => {
+    renderSchemaPage()
+    await clickConcept()
+    const panel = await screen.findByTestId('schema-individuals-panel')
+    const indItem = await within(panel).findByText(mockIndividual.label)
+    fireEvent.click(indItem)
+    const detailPanel = await screen.findByTestId('schema-individual-detail-panel')
+    await waitFor(() => {
+      expect(within(detailPanel).getByText(mockIndividual.label)).toBeInTheDocument()
     })
   })
 })
@@ -230,7 +263,6 @@ describe('SchemaPage — Property 선택', () => {
     renderSchemaPage()
     await clickObjectProperty()
     await waitFor(() => {
-      // 우측 상세 패널에 "Domain" 레이블 표시
       const labels = screen.getAllByText(/^Domain$/i)
       expect(labels.length).toBeGreaterThan(0)
     })
@@ -254,14 +286,6 @@ describe('SchemaPage — Property 선택', () => {
       expect(within(section).getByText(mockDataProperty.label)).toBeInTheDocument()
     })
   })
-
-  it('Property 선택 시 SubGraph 패널이 표시된다', async () => {
-    renderSchemaPage()
-    await clickObjectProperty()
-    await waitFor(() => {
-      expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
-    })
-  })
 })
 
 // ─────────────────────────────────────────────
@@ -281,7 +305,7 @@ describe('SchemaPage — Property Domain 클릭', () => {
     if (domainBadge) {
       fireEvent.click(domainBadge)
       await waitFor(() => {
-        // Concept 뷰로 전환 → Detail/Relations/Instances 서브탭 출현
+        // Concept 뷰로 전환 → Detail/Relations 서브탭 출현
         expect(screen.getByRole('button', { name: /^Detail$/i })).toBeInTheDocument()
       })
     }

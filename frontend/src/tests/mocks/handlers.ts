@@ -47,8 +47,12 @@ export const mockIndividual = {
   iri: 'https://test.example.org/onto#john',
   ontology_id: 'test-ont-uuid',
   label: 'John',
-  comment: 'A person named John',
-  type_iris: ['https://test.example.org/onto#Person'],
+  types: ['https://test.example.org/onto#Person'],
+  data_property_values: [
+    { property_iri: 'https://test.example.org/onto#age', value: '30', datatype: 'xsd:integer' },
+  ],
+  object_property_values: [],
+  provenance: [],
 }
 
 export const mockNamedGraph = {

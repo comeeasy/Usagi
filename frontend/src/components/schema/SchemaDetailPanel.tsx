@@ -1,10 +1,9 @@
 /**
  * SchemaDetailPanel — Schema 탭 우측 Detail 패널
  *
- * - Concept 선택 시: [Detail] [Relations] [Instances] 서브탭
+ * - Concept 선택 시: [Detail] [Relations] 서브탭
  *     Detail    → EntityDetailPanel (embedded)
  *     Relations → "as domain" / "as range" property 목록
- *     Instances → IndividualsSidebar (inline)
  *
  * - Property 선택 시: 단일 뷰
  *     type, IRI, label, Domain(클릭 가능), Range, Characteristics
@@ -17,13 +16,12 @@ import { useQuery } from '@tanstack/react-query'
 import { getConcept } from '@/api/entities'
 import { searchRelations } from '@/api/relations'
 import EntityDetailPanel from '@/components/entities/EntityDetailPanel'
-import IndividualsSidebar from '@/components/graph/IndividualsSidebar'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import IRIBadge from '@/components/shared/IRIBadge'
 import type { ObjectProperty, DataProperty } from '@/types/property'
 import type { Concept } from '@/types/concept'
 
-type RightSubTab = 'detail' | 'relations' | 'instances'
+type RightSubTab = 'detail' | 'relations'
 
 function isObjectProperty(p: ObjectProperty | DataProperty): p is ObjectProperty {
   return 'characteristics' in p
@@ -248,12 +246,11 @@ export default function SchemaDetailPanel({
   }
 
   // ════════════════════════════════════════════════════════════
-  // Concept 선택 뷰 — [Detail] [Relations] [Instances] 탭
+  // Concept 선택 뷰 — [Detail] [Relations] 탭
   // ════════════════════════════════════════════════════════════
   const SUB_TABS: { key: RightSubTab; label: string }[] = [
     { key: 'detail', label: 'Detail' },
     { key: 'relations', label: 'Relations' },
-    { key: 'instances', label: 'Instances' },
   ]
 
   return (
@@ -398,14 +395,6 @@ export default function SchemaDetailPanel({
           </div>
         )}
 
-        {/* ── Instances tab ── */}
-        {subTab === 'instances' && (
-          <IndividualsSidebar
-            ontologyId={ontologyId}
-            conceptIri={selectedIri}
-            inline
-          />
-        )}
       </div>
     </div>
   )
