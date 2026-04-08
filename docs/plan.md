@@ -1118,3 +1118,21 @@ SchemaPage
 - [x] **RZ-7** 테스트 통과 확인 (전체 회귀 포함) — 34/34 passed
 - [x] **RZ-8** `docs/plan.md` 업데이트
 
+---
+
+## Section 24 — react-resizable-panels v2 API 복원
+
+### 배경
+`react-resizable-panels`를 버전 지정 없이 설치해 v4.9.0이 설치됨.
+v4는 export 이름이 완전히 바뀌어(`PanelGroup`→`Group`, `PanelResizeHandle`→`Separator`) 코드가 오동작.
+`package.json`을 `^2.1.9`로 수정했으나 코드는 아직 v4 API 사용 중.
+
+### 작업 체크리스트
+
+- [x] **RV-1** `ResizeHandle.tsx` — `Separator` → `PanelResizeHandle`, import 복원
+- [x] **RV-2** `SchemaPage.tsx` — `Group as PanelGroup` → `PanelGroup` import 복원
+- [x] **RV-3** `SchemaPage.test.tsx` mock — `PanelGroup`/`PanelResizeHandle` 복원 + v2 export 검증 테스트 추가
+- [x] **RV-4** 테스트 통과 확인 — SchemaPage 34/34, ResizeHandle 5/5
+- [x] **RV-5** 컨테이너 볼륨 포함 재시작 확인 (`docker compose down -v && up -d`)
+- [x] **RV-6** `docs/plan.md` 업데이트
+
