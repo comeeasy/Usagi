@@ -1136,3 +1136,170 @@ v4는 export 이름이 완전히 바뀌어(`PanelGroup`→`Group`, `PanelResizeH
 - [x] **RV-5** 컨테이너 볼륨 포함 재시작 확인 (`docker compose down -v && up -d`)
 - [x] **RV-6** `docs/plan.md` 업데이트
 
+---
+
+## Section 25 — Concept 리스팅 Protege 방식으로 전환
+
+### 현재 방식 vs Protege 방식 비교
+
+#### 현재 (`_CLASS_PATTERN`)
+```sparql
+{ ?iri a owl:Class }
+UNION { ?iri a rdfs:Class }
+UNION { ?iri a skos:Concept }
+UNION { [] rdf:type ?iri }          ← ABox instance의 type → 암묵적 클래스 추론
+UNION { ?iri rdfs:subClassOf [] }   ← subClassOf 참여만으로도 클래스 취급
+UNION { [] rdfs:subClassOf ?iri }
+```
+
+문제: ABox-only 데이터의 노이즈 클래스 포함, 외부 vocabulary IRI 오염 가능성
+
+#### Protege 방식 (`getClassesInSignature()`)
+OWL API 기준: **온톨로지 TBox axiom에 명시적으로 등장하는 named class만** 반환
+- `rdf:type owl:Class` 로 선언된 클래스
+- `rdfs:subClassOf` axiom에 등장하는 named class (단, `owl:Thing`/`rdfs:Resource` 제외)
+- `owl:equivalentClass`, domain/range 선언에 등장하는 named class
+
+레이블: `rdfs:label` → `skos:prefLabel` 우선순위, 언어 태그 필터, IRI fragment 폴백
+
+---
+
+### 변경 범위
+
+**백엔드 `api/concepts.py`**
+
+`_CLASS_PATTERN` 교체:
+```sparql
+-- Before (현재)
+{ [] rdf:type ?iri }              ← 제거 (ABox 노이즈)
+{ ?iri rdfs:subClassOf [] }       ← 유지 (TBox axiom)
+{ [] rdfs:subClassOf ?iri }       ← 유지 (TBox axiom)
+
+-- After (Protege 방식)
+{ ?iri a owl:Class }
+UNION { ?iri a rdfs:Class . FILTER NOT EXISTS { ?iri a owl:Ontology } }
+UNION { ?iri a skos:Concept }
+UNION { ?iri rdfs:subClassOf ?_any . FILTER(isIRI(?_any)) }    ← subClassOf subject
+UNION { ?_any rdfs:subClassOf ?iri . FILTER(isIRI(?_any)) }    ← subClassOf object
+UNION { ?_p rdfs:domain ?iri }    ← property domain
+UNION { ?_p rdfs:range  ?iri }    ← property range
+```
+
+레이블 쿼리: `rdfs:label` 우선, `skos:prefLabel` 폴백 추가
+```sparql
+OPTIONAL { GRAPH ?_lg { ?iri rdfs:label ?lbl } }
+OPTIONAL { GRAPH ?_lg { ?iri <http://www.w3.org/2004/02/skos/core#prefLabel> ?skosLbl } }
+BIND(COALESCE(?lbl, ?skosLbl) AS ?label)
+```
+
+---
+
+### 작업 체크리스트
+
+- [x] **PC-1** 현재 `_CLASS_PATTERN` 문제점 테스트 작성 (ABox 노이즈 클래스 미포함 검증) — 4개 테스트 작성, 2개 실패로 시작
+- [x] **PC-2** `_CLASS_PATTERN` → Protege 방식으로 교체 (`[] rdf:type ?iri` 제거, domain/range 패턴 추가)
+- [x] **PC-3** 레이블 쿼리에 `skos:prefLabel` 폴백 추가 (`COALESCE(?_rdfsLbl, ?_skosLbl)`)
+- [x] **PC-4** `list_subclasses`도 동일하게 적용
+- [x] **PC-5** 테스트 통과 확인 — 4/4 passed, 회귀 없음
+- [x] **PC-6** `docs/plan.md` 업데이트
+
+---
+
+## Appendix — Protege 클래스 로딩 방식 분석
+
+> 참고: https://github.com/protegeproject/protege
+
+### 사용 라이브러리
+
+**OWL API (OWLAPI) 4.5.29** (`net.sourceforge.owlapi:owlapi-osgidistribution`)
+Protege는 자체 파싱 없이 OWL API에 완전 위임. OSGi(Apache Felix 7.0.5) 위에서 동작.
+
+---
+
+### 클래스 목록 로딩
+
+핵심 메서드: `OWLOntology.getClassesInSignature()`
+
+```java
+// OWLEntityRenderingCacheImpl.rebuild()
+for (OWLOntology ont : owlModelManager.getOntologies()) {
+    for (OWLClass cls : ont.getClassesInSignature()) {
+        addRendering(cls, owlClassMap);  // 렌더링 문자열 → OWLClass 캐시
+    }
+}
+```
+
+IRI로 조회: `OWLEntityFinderImpl.getEntities(IRI)` → `ont.containsClassInSignature(iri)`
+
+---
+
+### rdfs:label / 메타데이터 읽기
+
+```java
+// AnnotationValueShortFormProvider.getShortForm()
+for (OWLOntology ontology : ontologies) {
+    for (OWLAxiom ax : ontology.getAnnotationAssertionAxioms(entity.getIRI())) {
+        ax.accept(checker);  // Visitor 패턴으로 리터럴 추출
+    }
+}
+// 어노테이션 없으면 IRI fragment 폴백
+```
+
+우선순위: `rdfs:label` → `skos:prefLabel` → 언어 태그 필터(ko>en 등) → IRI 마지막 세그먼트
+
+기본 설정(`OWLRendererPreferences`):
+```java
+DEFAULT_ANNOTATION_IRIS = [
+    OWLRDFVocabulary.RDFS_LABEL.getIRI(),
+    IRI.create("http://www.w3.org/2004/02/skos/core#prefLabel")
+]
+```
+
+---
+
+### subClassOf 계층 탐색
+
+클래스: `AssertedClassHierarchyProvider`
+
+```java
+// 부모 탐색: 해당 클래스가 주어인 axiom 순회
+for (OWLAxiom ax : ont.getAxioms(cls, Imports.EXCLUDED)) {
+    ax.accept(parentClassExtractor);  // SubClassOfAxiom, EquivalentClassesAxiom 처리
+}
+
+// 자식 탐색: 역방향 — 해당 클래스를 참조하는 axiom 역조회
+for (OWLAxiom ax : ont.getReferencingAxioms(parent)) {
+    ax.accept(childClassExtractor);
+}
+```
+
+`AbstractOWLObjectHierarchyProvider`에서 재귀 탐색(사이클 방지 포함)으로 전체 ancestor/descendant 집합 구성.
+
+---
+
+### Named Graph / Import 처리
+
+- `owl:imports` 선언된 온톨로지를 **자동으로 모두 로드** (imports closure)
+- `getActiveOntologies()` = 현재 온톨로지 + import된 모든 온톨로지
+- 실패한 import는 `MissingImportHandlingStrategy.SILENT`로 무시
+- Named Graph는 별도 `OWLOntology` 객체로 표현, `Imports.EXCLUDED` 플래그로 독립 조회 가능
+
+로딩 흐름:
+```
+OntologyLoader (비동기, EDT 외)
+  └─ IRI 매퍼 체인: UserResolved → WebConnection → AutoMappedRepository(catalog.xml)
+  └─ 임시 매니저 로딩 후 메인 매니저로 MOVE
+  └─ getImportsClosure() 전체 포맷 업데이트
+```
+
+---
+
+### 우리 백엔드와 비교
+
+| | Protege | 우리 백엔드 |
+|---|---|---|
+| 클래스 탐색 | `getClassesInSignature()` (인메모리 Java) | SPARQL 5가지 패턴 (`owl:Class`, `rdfs:Class`, `skos:Concept` 등) |
+| 레이블 | `getAnnotationAssertionAxioms()` + Visitor | SPARQL `OPTIONAL { ?iri rdfs:label ?label }` |
+| 계층 | `getAxioms(cls)` + Visitor 역방향 탐색 | SPARQL `rdfs:subClassOf` |
+| Import | imports closure 자동 포함 | Named Graph 필터로 선택적 조회 |
+

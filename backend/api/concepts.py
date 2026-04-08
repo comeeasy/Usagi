@@ -49,8 +49,8 @@ def _looks_like_iri(value: str) -> bool:
     return v.startswith("http://") or v.startswith("https://") or v.startswith("urn:")
 
 
-# 임포트·LOD 호환: owl:Class, rdfs:Class, SKOS Concept, 암묵적 클래스(rdf:type 대상), subClassOf 참여 클래스
-# RDFS 의미론상 rdf:type 대상 또는 rdfs:subClassOf 참여 IRI는 모두 클래스임 (ABox-only KG 포함)
+# Protege 방식: TBox axiom에 명시적으로 등장하는 named class만 포함
+# (ABox [] rdf:type ?iri 패턴 제거 — 노이즈 클래스 오염 방지)
 _CLASS_FILTER = """
     FILTER(isIRI(?iri))
     FILTER(?iri NOT IN (
@@ -62,19 +62,19 @@ _CLASS_FILTER = """
 """
 
 _CLASS_PATTERN = f"""
-    {{ ?iri a owl:Class }}
+    {{ ?iri a owl:Class . {_CLASS_FILTER} }}
     UNION
-    {{ ?iri a rdfs:Class . FILTER NOT EXISTS {{ ?iri a owl:Ontology }} }}
+    {{ ?iri a rdfs:Class . FILTER NOT EXISTS {{ ?iri a owl:Ontology }} {_CLASS_FILTER} }}
     UNION
-    {{ ?iri a skos:Concept }}
+    {{ ?iri a skos:Concept . {_CLASS_FILTER} }}
     UNION
     {{
-        [] rdf:type ?iri .
+        {{ ?iri rdfs:subClassOf ?_sc }} UNION {{ ?_sc rdfs:subClassOf ?iri }}
         {_CLASS_FILTER}
     }}
     UNION
     {{
-        {{ ?iri rdfs:subClassOf [] }} UNION {{ [] rdfs:subClassOf ?iri }}
+        {{ ?_p rdfs:domain ?iri }} UNION {{ ?_p rdfs:range ?iri }}
         {_CLASS_FILTER}
     }}
 """
@@ -183,12 +183,14 @@ SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment)
             {gf}
         }}
     }}
-    OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:label ?lbl }} }}
+    OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:label ?_rdfsLbl }} }}
+    OPTIONAL {{ GRAPH ?_lg {{ ?iri skos:prefLabel ?_skosLbl }} }}
+    BIND(COALESCE(?_rdfsLbl, ?_skosLbl) AS ?lbl)
     OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:comment ?cmt }} }}
     OPTIONAL {{ GRAPH ?_lg {{ ?child rdfs:subClassOf ?iri }} }}
     OPTIONAL {{ GRAPH ?_lg {{ ?ind rdf:type ?iri }} }}
 }} GROUP BY ?iri
-ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
+ORDER BY ?lbl LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
 
     items = [
         Concept(
@@ -242,12 +244,14 @@ SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment)
             {gf}
         }}
     }}
-    OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:label ?lbl }} }}
+    OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:label ?_rdfsLbl }} }}
+    OPTIONAL {{ GRAPH ?_lg {{ ?iri skos:prefLabel ?_skosLbl }} }}
+    BIND(COALESCE(?_rdfsLbl, ?_skosLbl) AS ?lbl)
     OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:comment ?cmt }} }}
     OPTIONAL {{ GRAPH ?_lg {{ ?child rdfs:subClassOf ?iri }} }}
     OPTIONAL {{ GRAPH ?_lg {{ ?ind rdf:type ?iri }} }}
 }} GROUP BY ?iri
-ORDER BY ?label LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
+ORDER BY ?lbl LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
 
     items = [
         Concept(
