@@ -1,3 +1,4 @@
+import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
 import { screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
@@ -6,6 +7,13 @@ import { mockConcept, mockObjectProperty, mockDataProperty, mockIndividual } fro
 import { renderWithProviders } from '../../tests/utils'
 import SchemaPage from '../ontology/SchemaPage'
 import { NamedGraphsProvider } from '@/contexts/NamedGraphsContext'
+
+// react-resizable-panels — jsdom에서 동작 안 함, 단순 div로 대체
+vi.mock('react-resizable-panels', () => ({
+  PanelGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Panel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PanelResizeHandle: () => <div data-panel-resize-handle-id="mock" />,
+}))
 
 // GraphCanvas uses cytoscape — mock to avoid jsdom issues
 vi.mock('@/components/graph/GraphCanvas', () => ({
@@ -368,6 +376,44 @@ describe('SchemaPage — 빈 상태', () => {
     const section = await screen.findByTestId('schema-properties-section')
     await waitFor(() => {
       expect(within(section).getByText(/No properties/i)).toBeInTheDocument()
+    })
+  })
+})
+
+// ─────────────────────────────────────────────
+// 9. Resizable Panels
+// ─────────────────────────────────────────────
+describe('SchemaPage — Resizable Panels', () => {
+  it('ResizeHandle이 수평 방향으로 렌더된다', async () => {
+    renderSchemaPage()
+    // react-resizable-panels은 data-panel-resize-handle-id 속성을 가진 div를 렌더함
+    await waitFor(() => {
+      const handles = document.querySelectorAll('[data-panel-resize-handle-id]')
+      expect(handles.length).toBeGreaterThanOrEqual(2) // 상하 + 하단 좌우 최소 2개
+    })
+  })
+
+  it('Concept 클릭 후 추가 ResizeHandle이 렌더된다 (Col3 패널 표시)', async () => {
+    renderSchemaPage()
+    await clickConcept()
+    await waitFor(() => {
+      const handles = document.querySelectorAll('[data-panel-resize-handle-id]')
+      expect(handles.length).toBeGreaterThanOrEqual(3)
+    })
+  })
+
+  it('기존 Concepts / Properties 섹션이 여전히 렌더된다', async () => {
+    renderSchemaPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-concepts-section')).toBeInTheDocument()
+      expect(screen.getByTestId('schema-properties-section')).toBeInTheDocument()
+    })
+  })
+
+  it('graph-canvas가 하단 패널에 렌더된다', async () => {
+    renderSchemaPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
     })
   })
 })

@@ -1054,3 +1054,67 @@ const [conceptGraphIris, setConceptGraphIris] = useState<string[]>([])
 - 주요 엔티티(Concept/Property/Individual) 이름이 IRI 원문 대신 의미 라벨로 표시
 - 그래프 엣지가 의미 관계 집합으로만 구성됨
 - 기존 편집/저장/필터 기능 회귀 없음 (기존 테스트 + 신규 테스트 통과)
+
+---
+
+## 23. Schema 탭 패널 크기 조절 (Resizable Panels)
+
+**날짜:** 2026-04-08
+
+### 목표
+
+Schema 탭의 각 패널(열/행) 경계를 드래그하여 크기를 자유롭게 조절할 수 있게 한다.
+마지막으로 조절한 크기는 localStorage에 저장하여 새로고침 후에도 유지된다.
+
+### 대상 경계
+
+| 위치 | 경계 |
+|------|------|
+| 상단 4열 | Col1\|Col2, Col2\|Col3, Col3\|Col4 (수평) |
+| 상하 분리 | TOP 영역 ↕ BOTTOM 영역 (수직) |
+| 하단 2열 | Graph\|Reasoner (수평) |
+
+### 기술 선택
+
+- **`react-resizable-panels`** — 경량 라이브러리, PanelGroup/Panel/PanelResizeHandle API 제공, localStorage 자동 저장(`autoSaveId`) 지원
+
+### 구현 상세
+
+#### 컴포넌트 구조 변경
+
+```
+SchemaPage
+  PanelGroup (direction="vertical" autoSaveId="schema-vertical")
+    Panel (defaultSize=60, minSize=30)         ← 상단 TOP 영역
+      PanelGroup (direction="horizontal" autoSaveId="schema-top-horizontal")
+        Panel (defaultSize=20, minSize=10)     ← Col1: SchemaLeftPanel
+        PanelResizeHandle
+        Panel (defaultSize=25, minSize=10)     ← Col2: SchemaDetailPanel
+        PanelResizeHandle                      ← Col3 존재 시만 렌더
+        Panel (defaultSize=25, minSize=10)     ← Col3: IndividualsPanel
+        PanelResizeHandle                      ← Col4 존재 시만 렌더
+        Panel (defaultSize=30, minSize=10)     ← Col4: IndividualDetailPanel
+    PanelResizeHandle
+    Panel (defaultSize=40, minSize=20)         ← 하단 BOTTOM 영역
+      PanelGroup (direction="horizontal" autoSaveId="schema-bottom-horizontal")
+        Panel (defaultSize=60, minSize=20)     ← Graph
+        PanelResizeHandle
+        Panel (defaultSize=40, minSize=15)     ← Reasoner
+```
+
+#### `PanelResizeHandle` 스타일
+
+- 수평 핸들: 너비 4px, 커서 `col-resize`, hover 시 primary 색상 강조
+- 수직 핸들: 높이 4px, 커서 `row-resize`, hover 시 primary 색상 강조
+
+### 작업 체크리스트
+
+- [x] **RZ-1** `react-resizable-panels` 패키지 설치
+- [x] **RZ-2** `ResizeHandle` 공통 컴포넌트 작성 (`frontend/src/components/shared/ResizeHandle.tsx`)
+- [x] **RZ-3** 테스트 작성 (`SchemaPage.test.tsx` — 패널이 렌더되는지, ResizeHandle이 존재하는지 검증)
+- [x] **RZ-4** `SchemaPage.tsx` — 수직 PanelGroup으로 TOP/BOTTOM 분리
+- [x] **RZ-5** `SchemaPage.tsx` — TOP 영역 수평 PanelGroup으로 4열 변환
+- [x] **RZ-6** `SchemaPage.tsx` — BOTTOM 영역 수평 PanelGroup으로 2열 변환
+- [x] **RZ-7** 테스트 통과 확인 (전체 회귀 포함) — 34/34 passed
+- [x] **RZ-8** `docs/plan.md` 업데이트
+
