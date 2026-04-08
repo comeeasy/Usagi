@@ -63,7 +63,6 @@ export default function SchemaPage() {
   const [selectedKind, setSelectedKind] = useState<SelectionKind>(null)
   const [selectedProperty, setSelectedProperty] = useState<ObjectProperty | DataProperty | null>(null)
   const [selectedIndividualIri, setSelectedIndividualIri] = useState<string | null>(null)
-  const [conceptGraphIris, setConceptGraphIris] = useState<string[]>([])
 
   // ── Left panel controls ──────────────────────────────────────
   const [conceptViewMode, setConceptViewMode] = useState<ConceptViewMode>('flat')
@@ -198,7 +197,6 @@ export default function SchemaPage() {
     setSelectedKind(null)
     setSelectedProperty(null)
     setSelectedIndividualIri(null)
-    setConceptGraphIris([])
     setEditingItem(null)
   }
 
@@ -207,7 +205,6 @@ export default function SchemaPage() {
     setSelectedKind('concept')
     setSelectedProperty(null)
     setSelectedIndividualIri(null)
-    setConceptGraphIris((prev) => (prev.includes(iri) ? prev : [...prev, iri]))
     setShowConceptForm(false)
     setShowPropertyForm(false)
     setEditingItem(null)
@@ -228,7 +225,6 @@ export default function SchemaPage() {
     setSelectedKind('concept')
     setSelectedProperty(null)
     setSelectedIndividualIri(null)
-    setConceptGraphIris((prev) => (prev.includes(iri) ? prev : [...prev, iri]))
     setEditingItem(null)
   }
 
@@ -489,11 +485,11 @@ export default function SchemaPage() {
           className="flex flex-shrink-0 border-t overflow-hidden"
           style={{ height: '576px', borderColor: 'var(--color-border)' }}
         >
-          {/* Graph — Concept-only */}
+          {/* Graph — Concept schema (concepts + object property edges) */}
           <div className="flex-1 overflow-hidden min-w-0">
             <ConceptGraphPanel
               ontologyId={ontologyId!}
-              conceptIris={conceptGraphIris}
+              selectedIri={selectedIri}
             />
           </div>
 
@@ -501,7 +497,6 @@ export default function SchemaPage() {
           <div className="w-[40%] overflow-hidden flex-shrink-0">
             <SchemaReasonerPanel
               ontologyId={ontologyId!}
-              entityIris={conceptGraphIris}
             />
           </div>
         </div>

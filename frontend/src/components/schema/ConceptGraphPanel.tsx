@@ -1,96 +1,139 @@
 /**
- * ConceptGraphPanel — Schema 탭 하단 그래프 (Concept 노드만 표시)
+ * ConceptGraphPanel — Schema 탭 하단 그래프
  *
- * 선택된 Concept IRI 기준으로 subgraph를 조회하되,
- * individual 노드는 필터링하여 Class 구조만 시각화한다.
+ * Concepts API + ObjectProperties API로 직접 그래프 빌드:
+ *   - Concept 노드 (owl:Class)
+ *   - subClassOf 엣지 (concept.super_classes)
+ *   - ObjectProperty 엣지 (domain → range)
+ *
+ * Individual은 원천적으로 포함되지 않는다.
+ * selectedIri: 선택된 노드를 하이라이트하기 위해 사용.
  */
-import { useEffect, useState, useCallback } from 'react'
-import { getSubgraph } from '@/api/ontologies'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { listConcepts } from '@/api/entities'
+import { listObjectProperties } from '@/api/relations'
 import { useDataset } from '@/contexts/DatasetContext'
 import GraphCanvas, { type CyElement } from '@/components/graph/GraphCanvas'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
+import type { Concept } from '@/types/concept'
+import type { ObjectProperty } from '@/types/property'
+
+const PAGE_SIZE = 200
 
 interface Props {
   ontologyId: string
-  conceptIris: string[]
+  selectedIri?: string | null
 }
 
-function filterConceptsOnly(elements: CyElement[]): CyElement[] {
-  // individual 노드 제거, 해당 노드에 연결된 엣지도 제거
-  const individualIds = new Set(
-    elements
-      .filter((e) => !e.data.source && e.data.kind === 'individual')
-      .map((e) => e.data.id),
-  )
-  return elements.filter((e) => {
-    if (individualIds.has(e.data.id)) return false
-    if (e.data.source && (individualIds.has(e.data.source) || (e.data.target != null && individualIds.has(e.data.target)))) return false
-    return true
-  })
+function localName(iri: string): string {
+  const h = iri.lastIndexOf('#')
+  if (h !== -1) return iri.slice(h + 1)
+  const s = iri.lastIndexOf('/')
+  return s !== -1 ? iri.slice(s + 1) : iri
 }
 
-export default function ConceptGraphPanel({ ontologyId, conceptIris }: Props) {
+export default function ConceptGraphPanel({ ontologyId, selectedIri }: Props) {
   const { dataset } = useDataset()
-  const [elements, setElements] = useState<CyElement[]>([])
-  const [loading, setLoading] = useState(false)
-  const [expandedIris, setExpandedIris] = useState<Set<string>>(new Set())
 
-  useEffect(() => {
-    if (conceptIris.length === 0) {
-      setElements([])
-      setExpandedIris(new Set())
-      return
-    }
-    setLoading(true)
-    getSubgraph(ontologyId, { rootIris: conceptIris, depth: 2, dataset })
-      .then((data) => {
-        setElements(filterConceptsOnly([...data.nodes, ...data.edges]))
-        setExpandedIris(new Set())
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [ontologyId, conceptIris.join(','), dataset]) // eslint-disable-line react-hooks/exhaustive-deps
+  const conceptsQuery = useQuery({
+    queryKey: ['concepts', ontologyId, dataset, 'graph'],
+    queryFn: () => listConcepts(ontologyId, { pageSize: PAGE_SIZE, dataset }),
+    enabled: !!ontologyId,
+  })
 
-  const handleNodeDoubleClick = useCallback(async (iri: string) => {
-    if (expandedIris.has(iri)) return
-    setExpandedIris((prev) => new Set([...prev, iri]))
-    try {
-      const data = await getSubgraph(ontologyId, { rootIris: [iri], depth: 1, dataset })
-      const newElems = filterConceptsOnly([...data.nodes, ...data.edges])
-      setElements((prev) => {
-        const existingIds = new Set(prev.map((e) => e.data.id))
-        const toAdd = newElems.filter((e) => !existingIds.has(e.data.id))
-        return toAdd.length > 0 ? [...prev, ...toAdd] : prev
-      })
-    } catch {
-      setExpandedIris((prev) => { const s = new Set(prev); s.delete(iri); return s })
+  const propsQuery = useQuery({
+    queryKey: ['object-properties', ontologyId, dataset, 'graph'],
+    queryFn: () => listObjectProperties(ontologyId, { pageSize: PAGE_SIZE, dataset }),
+    enabled: !!ontologyId,
+  })
+
+  const elements = useMemo<CyElement[]>(() => {
+    const concepts: Concept[] = conceptsQuery.data?.items ?? []
+    const properties: ObjectProperty[] = propsQuery.data?.items ?? []
+
+    const conceptIriSet = new Set(concepts.map((c) => c.iri))
+
+    // 노드: concept 마다 1개
+    const nodes: CyElement[] = concepts.map((c) => ({
+      data: {
+        id: c.iri,
+        label: c.label || localName(c.iri),
+        kind: 'concept',
+        iri: c.iri,
+      },
+      classes: selectedIri === c.iri ? 'concept selected' : 'concept',
+    }))
+
+    const edges: CyElement[] = []
+
+    // subClassOf 엣지
+    for (const c of concepts) {
+      for (const parent of c.super_classes) {
+        if (conceptIriSet.has(parent)) {
+          edges.push({
+            data: {
+              id: `${c.iri}-subClassOf-${parent}`,
+              source: c.iri,
+              target: parent,
+              label: 'subClassOf',
+              kind: 'subclass',
+            },
+            classes: 'subclass',
+          })
+        }
+      }
     }
-  }, [ontologyId, dataset, expandedIris])
+
+    // ObjectProperty 엣지: domain → range
+    for (const prop of properties) {
+      for (const domain of prop.domain) {
+        for (const range of prop.range) {
+          if (conceptIriSet.has(domain) && conceptIriSet.has(range as string)) {
+            const edgeId = `${domain}-${prop.iri}-${range}`
+            edges.push({
+              data: {
+                id: edgeId,
+                source: domain,
+                target: range as string,
+                label: prop.label || localName(prop.iri),
+                kind: 'object',
+              },
+              classes: 'object-property',
+            })
+          }
+        }
+      }
+    }
+
+    return [...nodes, ...edges]
+  }, [conceptsQuery.data, propsQuery.data, selectedIri])
+
+  const isLoading = conceptsQuery.isLoading || propsQuery.isLoading
 
   return (
     <div className="relative w-full h-full overflow-hidden">
-      {/* Placeholder when no concept selected */}
-      {conceptIris.length === 0 && (
+      {/* 로딩 */}
+      {isLoading && (
         <div
-          className="absolute inset-0 flex items-center justify-center text-sm"
-          style={{ color: 'var(--color-text-muted)', zIndex: 1 }}
+          className="absolute inset-0 flex items-center justify-center z-10"
+          style={{ backgroundColor: 'rgba(0,0,0,0.1)' }}
         >
-          Select a concept to visualize class hierarchy
-        </div>
-      )}
-
-      {/* Loading overlay */}
-      {loading && (
-        <div className="absolute inset-0 flex items-center justify-center z-10"
-          style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}>
           <LoadingSpinner size="sm" />
         </div>
       )}
 
-      <GraphCanvas
-        elements={elements}
-        onNodeDoubleClick={handleNodeDoubleClick}
-      />
+      {/* 빈 상태 */}
+      {!isLoading && elements.length === 0 && (
+        <div
+          className="absolute inset-0 flex items-center justify-center text-sm z-10"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          No concepts to display
+        </div>
+      )}
+
+      <GraphCanvas elements={elements} />
     </div>
   )
 }
