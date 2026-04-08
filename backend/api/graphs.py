@@ -8,8 +8,7 @@ api/graphs.py — Named Graph 목록 라우터
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from api.concepts import _resolve_kg_graph
-from services.ontology_graph import kg_graph_iri, resolve_kg_graph_iri
+from services.ontology_graph import resolve_ontology_iri
 
 router = APIRouter(prefix="/ontologies/{ontology_id}/graphs", tags=["graphs"])
 
@@ -64,15 +63,12 @@ async def list_graphs(
     provenance 그래프에 기록된 소스 정보를 함께 반환한다.
     """
     store = request.app.state.ontology_store
-    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
-    if kg is None:
+    ont_iri_prefix = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
+    if ont_iri_prefix is None:
         raise HTTPException(
             404,
             detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"},
         )
-
-    # 온톨로지 IRI prefix (kg IRI에서 /kg suffix 제거)
-    ont_iri_prefix = kg[: -len("/kg")] if kg.endswith("/kg") else kg
 
     # 1. 해당 ontology prefix로 시작하는 Named Graph 목록 + triple count
     rows = await store.sparql_select(
@@ -94,7 +90,8 @@ async def list_graphs(
     counts = {r["g"]["value"]: int(r["cnt"]["value"]) for r in rows}
 
     # 2. provenance 그래프에서 소스 정보 일괄 조회
-    iris_filter = " ".join(f"<{iri}>" for iri in graph_iris)
+    # SPARQL IN(...) requires comma-separated expressions.
+    iris_filter = ", ".join(f"<{iri}>" for iri in graph_iris)
     prov_rows = await store.sparql_select(
         f"""
         SELECT ?g ?type ?label WHERE {{

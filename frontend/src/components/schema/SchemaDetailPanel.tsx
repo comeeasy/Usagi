@@ -18,6 +18,7 @@ import { searchRelations } from '@/api/relations'
 import EntityDetailPanel from '@/components/entities/EntityDetailPanel'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import IRIBadge from '@/components/shared/IRIBadge'
+import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 import type { ObjectProperty, DataProperty } from '@/types/property'
 import type { Concept } from '@/types/concept'
 
@@ -56,6 +57,7 @@ export default function SchemaDetailPanel({
   onDelete,
 }: Props) {
   const [subTab, setSubTab] = useState<RightSubTab>('detail')
+  const { selectedGraphIris } = useNamedGraphs()
 
   // ── Concept 데이터 ────────────────────────────────────────────
   const conceptQuery = useQuery<Concept>({
@@ -66,14 +68,14 @@ export default function SchemaDetailPanel({
 
   // ── Relations 탭: domain/range 조회 ───────────────────────────
   const domainQuery = useQuery({
-    queryKey: ['relations-as-domain', ontologyId, selectedIri, dataset],
-    queryFn: () => searchRelations(ontologyId, '', selectedIri!, undefined, 50, dataset),
+    queryKey: ['relations-as-domain', ontologyId, selectedIri, dataset, selectedGraphIris],
+    queryFn: () => searchRelations(ontologyId, '', selectedIri!, undefined, 50, dataset, selectedGraphIris),
     enabled: !!selectedIri && selectedKind === 'concept' && subTab === 'relations',
   })
 
   const rangeQuery = useQuery({
-    queryKey: ['relations-as-range', ontologyId, selectedIri, dataset],
-    queryFn: () => searchRelations(ontologyId, '', undefined, selectedIri!, 50, dataset),
+    queryKey: ['relations-as-range', ontologyId, selectedIri, dataset, selectedGraphIris],
+    queryFn: () => searchRelations(ontologyId, '', undefined, selectedIri!, 50, dataset, selectedGraphIris),
     enabled: !!selectedIri && selectedKind === 'concept' && subTab === 'relations',
   })
 

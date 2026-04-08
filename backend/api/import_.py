@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 import services.import_service as import_svc
 from api.graphs import record_import_provenance
-from services.ontology_graph import resolve_kg_graph_iri
+from services.ontology_graph import resolve_ontology_iri, import_graph_iri
 
 router = APIRouter(prefix="/ontologies/{ontology_id}/import", tags=["import"])
 
@@ -60,11 +60,12 @@ async def import_file(
     file: UploadFile = File(...),
     dataset: str | None = Query(None),
 ) -> dict:
-    """OWL/TTL/RDF/JSON-LD 파일 업로드 후 파싱해 온톨로지 kg 그래프에 삽입."""
+    """OWL/TTL/RDF/JSON-LD 파일 업로드 후 파싱해 파일별 Named Graph에 삽입."""
     store = request.app.state.ontology_store
-    kg_iri = await resolve_kg_graph_iri(store, ontology_id, dataset=dataset)
-    if kg_iri is None:
+    ont_iri = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
+    if ont_iri is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
+    kg_iri = import_graph_iri(ont_iri, "file", file.filename or "unknown")
 
     t0 = time.perf_counter()
     content = await file.read()
@@ -159,11 +160,12 @@ async def import_url(
     body: ImportURLRequest,
     dataset: str | None = Query(None),
 ) -> dict:
-    """URL에서 온톨로지를 다운로드하여 kg 그래프에 삽입."""
+    """URL에서 온톨로지를 다운로드하여 URL별 Named Graph에 삽입."""
     store = request.app.state.ontology_store
-    kg_iri = await resolve_kg_graph_iri(store, ontology_id, dataset=dataset)
-    if kg_iri is None:
+    ont_iri = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
+    if ont_iri is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
+    kg_iri = import_graph_iri(ont_iri, "url", body.url)
 
     try:
         triples = await import_svc.parse_url(body.url)
@@ -189,11 +191,12 @@ async def import_standard(
     body: ImportStandardRequest,
     dataset: str | None = Query(None),
 ) -> dict:
-    """사전 등록된 표준 온톨로지(schema.org, FOAF 등)를 kg 그래프에 삽입."""
+    """사전 등록된 표준 온톨로지(schema.org, FOAF 등)를 표준별 Named Graph에 삽입."""
     store = request.app.state.ontology_store
-    kg_iri = await resolve_kg_graph_iri(store, ontology_id, dataset=dataset)
-    if kg_iri is None:
+    ont_iri = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
+    if ont_iri is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
+    kg_iri = import_graph_iri(ont_iri, "standard", body.name)
 
     try:
         triples = await import_svc.import_standard(body.name)

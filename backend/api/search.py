@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
-from services.ontology_graph import resolve_kg_graph_iri
+from services.ontology_graph import resolve_ontology_iri, graphs_filter_clause
 from services.ontology_scope import ontology_iri_from_tbox
 
 router = APIRouter(prefix="/ontologies/{ontology_id}/search", tags=["search"])
@@ -34,9 +34,9 @@ def _v(term: dict | None, default: str = "") -> str:
     return str(term)
 
 
-async def _resolve_kg_graph(store, ontology_id: str, dataset: str | None = None) -> str | None:
-    """UUID(dc:identifier)로 kg Named Graph IRI 반환. 없으면 None."""
-    return await resolve_kg_graph_iri(store, ontology_id, dataset=dataset)
+async def _resolve_ont(store, ontology_id: str, dataset: str | None = None) -> str | None:
+    """UUID(dc:identifier)로 온톨로지 IRI 반환. 없으면 None."""
+    return await resolve_ontology_iri(store, ontology_id, dataset=dataset)
 
 
 def _esc(s: str) -> str:
@@ -58,15 +58,17 @@ async def search_entities(
     kind: Literal["concept", "individual", "all"] = Query("all"),
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     dataset: str | None = Query(None),
+    graph_iris: list[str] = Query(default=[]),
 ) -> list[dict]:
     """
     rdfs:label 기반 키워드 검색.
     kind: concept(owl:Class) / individual(owl:NamedIndividual) / all
     """
     store = request.app.state.ontology_store
-    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
-    if kg is None:
+    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    if ont is None:
         return []
+    gf = graphs_filter_clause(graph_iris, ont)
 
     ql = _esc(q.lower()) if q else ""
     q_filter = ""
@@ -109,11 +111,12 @@ async def search_entities(
     if kind in ("concept", "all"):
         rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label WHERE {{
-    GRAPH <{kg}> {{
+    GRAPH ?_g {{
         {_class_pat}
         OPTIONAL {{ ?iri rdfs:label ?label }}
         {q_filter}
     }}
+    {gf}
 }} ORDER BY ?label LIMIT {limit}""", dataset=dataset)
         for r in rows:
             results.append({
@@ -122,10 +125,10 @@ SELECT DISTINCT ?iri ?label WHERE {{
                 "kind": "concept",
             })
 
-    _ind_pat = f"""
-        {{
+    _ind_pat = """
+        {
           ?iri a owl:NamedIndividual
-        }} UNION {{
+        } UNION {
           ?iri rdf:type ?ctype .
           FILTER(isIRI(?ctype))
           FILTER(?ctype NOT IN (
@@ -133,12 +136,12 @@ SELECT DISTINCT ?iri ?label WHERE {{
               owl:ObjectProperty, owl:DatatypeProperty, owl:AnnotationProperty,
               rdfs:Class, rdfs:Datatype, rdf:Property
           ))
-          FILTER NOT EXISTS {{ GRAPH <{kg}> {{ ?iri a owl:Class }} }}
-          FILTER NOT EXISTS {{ GRAPH <{kg}> {{ ?iri a rdfs:Class }} }}
-        }}
+          FILTER NOT EXISTS { GRAPH ?_any { ?iri a owl:Class } }
+          FILTER NOT EXISTS { GRAPH ?_any { ?iri a rdfs:Class } }
+        }
     """
 
-    # Individual 검색 (kg 단일 그래프)
+    # Individual 검색
     if kind in ("individual", "all"):
         remaining = limit - len(results)
         if remaining > 0:
@@ -146,13 +149,14 @@ SELECT DISTINCT ?iri ?label WHERE {{
 SELECT ?iri (MIN(?lbl) AS ?label) WHERE {{
     {{
         SELECT DISTINCT ?iri WHERE {{
-            GRAPH <{kg}> {{
+            GRAPH ?_g {{
                 {_ind_pat}
                 {q_filter}
             }}
+            {gf}
         }}
     }}
-    OPTIONAL {{ GRAPH <{kg}> {{ ?iri rdfs:label ?lbl }} }}
+    OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:label ?lbl }} }}
 }} GROUP BY ?iri
 ORDER BY ?label LIMIT {remaining}""", dataset=dataset)
             types_by_iri: dict[str, list[str]] = defaultdict(list)
@@ -161,10 +165,11 @@ ORDER BY ?label LIMIT {remaining}""", dataset=dataset)
                 type_rows = await store.sparql_select(f"""{_P}
 SELECT ?iri ?t WHERE {{
     VALUES ?iri {{ {iris_vals} }}
-    GRAPH <{kg}> {{
+    GRAPH ?_g {{
         ?iri rdf:type ?t .
         FILTER(?t != owl:NamedIndividual) FILTER(isIRI(?t))
     }}
+    {gf}
 }}""", dataset=dataset)
                 for tr in type_rows:
                     types_by_iri[_v(tr.get("iri"))].append(_v(tr.get("t")))
@@ -191,12 +196,14 @@ async def search_relations(
     range_iri: str | None = Query(None, alias="range"),
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     dataset: str | None = Query(None),
+    graph_iris: list[str] = Query(default=[]),
 ) -> list[dict]:
     """ObjectProperty + DataProperty 키워드 검색."""
     store = request.app.state.ontology_store
-    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
-    if kg is None:
+    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    if ont is None:
         return []
+    gf = graphs_filter_clause(graph_iris, ont)
 
     q_filter = f'FILTER(CONTAINS(LCASE(STR(?label)), "{_esc(q.lower())}"))' if q else ""
     domain_filter = f"?iri rdfs:domain <{domain_iri}> ." if domain_iri else ""
@@ -207,7 +214,7 @@ SELECT ?iri ?label ?kind
        (GROUP_CONCAT(DISTINCT STR(?domain); SEPARATOR="\t") AS ?domains)
        (GROUP_CONCAT(DISTINCT STR(?range);  SEPARATOR="\t") AS ?ranges)
 WHERE {{
-    GRAPH <{kg}> {{
+    GRAPH ?_g {{
         {{ ?iri a owl:ObjectProperty . BIND("object" AS ?kind) }}
         UNION
         {{ ?iri a owl:DatatypeProperty . BIND("data" AS ?kind) }}
@@ -222,6 +229,7 @@ WHERE {{
         {domain_filter}
         {range_filter}
     }}
+    {gf}
 }} GROUP BY ?iri ?label ?kind
 ORDER BY ?label LIMIT {limit}""", dataset=dataset)
 
@@ -257,11 +265,11 @@ async def vector_search(
     store = request.app.state.ontology_store
     manager = getattr(request.app.state, "vector_index_manager", None)
 
-    kg = await _resolve_kg_graph(store, ontology_id, dataset=dataset)
-    if kg is None:
+    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    if ont is None:
         return []
 
-    ontology_iri = ontology_iri_from_tbox(kg)
+    ontology_iri = ont  # already the ontology IRI (no /kg suffix)
 
     if manager is not None:
         try:

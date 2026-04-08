@@ -7,7 +7,7 @@ import type { PaginatedResponse } from '@/types/ontology'
 
 export function listConcepts(
   ontologyId: string,
-  params?: { page?: number; pageSize?: number; search?: string; dataset?: string; root?: boolean },
+  params?: { page?: number; pageSize?: number; search?: string; dataset?: string; root?: boolean; graphIris?: string[] },
 ): Promise<PaginatedResponse<Concept>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
@@ -15,6 +15,7 @@ export function listConcepts(
   if (params?.search) qs.set('search', params.search)
   if (params?.dataset) qs.set('dataset', params.dataset)
   if (params?.root) qs.set('root', 'true')
+  for (const iri of params?.graphIris ?? []) qs.append('graph_iris', iri)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies/${ontologyId}/concepts${query}`)
 }
@@ -22,12 +23,13 @@ export function listConcepts(
 export function listSubclasses(
   ontologyId: string,
   iri: string,
-  params?: { page?: number; pageSize?: number; dataset?: string },
+  params?: { page?: number; pageSize?: number; dataset?: string; graphIris?: string[] },
 ): Promise<PaginatedResponse<Concept>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
   if (params?.dataset) qs.set('dataset', params.dataset)
+  for (const iri of params?.graphIris ?? []) qs.append('graph_iris', iri)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies/${ontologyId}/concepts/${encodeURIComponent(iri)}/subclasses${query}`)
 }
@@ -54,7 +56,7 @@ export function deleteConcept(ontologyId: string, iri: string, dataset?: string)
 
 export function listIndividuals(
   ontologyId: string,
-  params?: { page?: number; pageSize?: number; search?: string; dataset?: string; typeIri?: string },
+  params?: { page?: number; pageSize?: number; search?: string; dataset?: string; typeIri?: string; graphIris?: string[] },
 ): Promise<PaginatedResponse<Individual>> {
   const qs = new URLSearchParams()
   if (params?.page) qs.set('page', String(params.page))
@@ -62,6 +64,7 @@ export function listIndividuals(
   if (params?.search) qs.set('search', params.search)
   if (params?.dataset) qs.set('dataset', params.dataset)
   if (params?.typeIri) qs.set('type', params.typeIri)
+  for (const iri of params?.graphIris ?? []) qs.append('graph_iris', iri)
   const query = qs.toString() ? `?${qs.toString()}` : ''
   return apiGet(`/ontologies/${ontologyId}/individuals${query}`)
 }
@@ -92,10 +95,12 @@ export function searchEntities(
   kind?: string,
   limit = 20,
   dataset?: string,
+  graphIris?: string[],
 ): Promise<Array<Concept | Individual>> {
   const qs = new URLSearchParams({ q, limit: String(limit) })
   if (kind && kind !== 'all') qs.set('kind', kind)
   if (dataset) qs.set('dataset', dataset)
+  for (const iri of graphIris ?? []) qs.append('graph_iris', iri)
   return apiGet(`/ontologies/${ontologyId}/search/entities?${qs.toString()}`)
 }
 

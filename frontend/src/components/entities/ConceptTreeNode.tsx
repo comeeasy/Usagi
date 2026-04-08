@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronRight, ChevronDown, Loader2 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { listSubclasses, listIndividuals } from '@/api/entities'
+import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 import type { Concept } from '@/types/concept'
 
 interface Props {
@@ -26,17 +27,18 @@ export default function ConceptTreeNode({
   const [expanded, setExpanded] = useState(false)
   const hasChildren = concept.subclass_count > 0
   const hasIndividuals = concept.individual_count > 0
+  const { selectedGraphIris } = useNamedGraphs()
 
   const childrenQuery = useQuery({
-    queryKey: ['subclasses', ontologyId, concept.iri, dataset],
-    queryFn: () => listSubclasses(ontologyId, concept.iri, { pageSize: 200, dataset }),
+    queryKey: ['subclasses', ontologyId, concept.iri, dataset, selectedGraphIris],
+    queryFn: () => listSubclasses(ontologyId, concept.iri, { pageSize: 200, dataset, graphIris: selectedGraphIris }),
     enabled: expanded && hasChildren,
     staleTime: 60_000,
   })
 
   const individualsQuery = useQuery({
-    queryKey: ['concept-type-individuals', ontologyId, concept.iri, dataset],
-    queryFn: () => listIndividuals(ontologyId, { pageSize: 100, dataset, typeIri: concept.iri }),
+    queryKey: ['concept-type-individuals', ontologyId, concept.iri, dataset, selectedGraphIris],
+    queryFn: () => listIndividuals(ontologyId, { pageSize: 100, dataset, typeIri: concept.iri, graphIris: selectedGraphIris }),
     enabled: expanded && hasIndividuals,
     staleTime: 60_000,
   })

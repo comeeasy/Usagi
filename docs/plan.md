@@ -605,3 +605,227 @@ interface SchemaPageState {
 - [x] Step 6: `App.tsx` 수정 (라우트 변경)
 - [x] Step 7: `EntitiesPage.tsx`, `RelationsPage.tsx` 삭제
 - [x] Step 8: 테스트 통과 확인 (27/27 SchemaPage, 111/111 전체)
+
+---
+
+## 16. Schema 탭 레이아웃 개편 — 4열 + 하단 Graph/Reasoner 분리
+
+### 배경
+
+- Individuals 수가 많아 Graph에 포함하면 시각화가 과부하됨 → Graph를 **Concept 전용**으로 분리
+- Individual 탐색을 위한 전용 열 추가 (Concept 선택 시 해당 Concept의 Individuals 리스트)
+- Reasoner를 하단 전체 패널에서 **Graph 우측**으로 이동
+- 하단 Graph 높이 **288px → 576px (2배)**
+
+---
+
+### 목표 레이아웃
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Graph | Schema | SPARQL | Sources | Merge | Reasoner                   │
+├──────────────┬──────────────────┬──────────────┬──────────────────────  │
+│  Concepts    │  Concept Detail  │  Individuals │  Individual Detail      │
+│  Properties  │  [Detail]        │  (선택된     │                        │
+│  (~20%)      │  [Relations]     │  Concept의)  │  IRI, types,           │
+│              │  (~25%)          │  스크롤 목록  │  data/obj props        │
+│              │                  │  (~20%)      │  (~35%)                │
+├──────────────┴──────────────────┴──────────────┴────────────────────────┤
+│  Graph (Concept 노드만, height=576px)    │  Reasoner                    │
+│  (~65%)                                 │  (~35%)                       │
+└─────────────────────────────────────────┴───────────────────────────────┘
+```
+
+---
+
+### 변경 상세
+
+#### 상단 4열 패널
+
+| 열 | 너비 | 내용 | 변경 여부 |
+|----|------|------|---------|
+| 1열 | ~20% | SchemaLeftPanel (Concepts + Properties) | 기존 유지 |
+| 2열 | ~25% | SchemaDetailPanel — **Instances 탭 제거** | 수정 |
+| 3열 | ~20% | **IndividualsPanel** (신규) — Concept 선택 시 해당 Individuals 목록 | 신규 |
+| 4열 | ~35% | **IndividualDetailPanel** (신규) — Individual 클릭 시 상세 정보 | 신규 |
+
+#### 하단 2열 패널 (height=576px)
+
+| 영역 | 너비 | 내용 | 변경 여부 |
+|------|------|------|---------|
+| 좌 | ~65% | **ConceptGraphPanel** — Concept 노드만 표시 (individual 노드 프론트엔드 필터링) | 신규/수정 |
+| 우 | ~35% | **SchemaReasonerPanel** — 기존 Reasoner를 독립 컴포넌트로 추출 | 신규 |
+
+---
+
+### 신규 컴포넌트 상세
+
+#### `IndividualsPanel.tsx`
+
+- 선택된 Concept의 Individuals를 페이지네이션 목록으로 표시
+- 각 항목: label + IRI badge + type chip
+- 클릭 시 `onSelectIndividual(iri)` → 4열 IndividualDetailPanel 오픈
+- Concept 미선택 시 placeholder 표시
+
+#### `IndividualDetailPanel.tsx`
+
+- `getIndividual(ontologyId, iri, dataset)` 호출
+- 표시 항목:
+  - IRI, label, types (클릭 시 해당 Concept 포커스)
+  - Data Properties: property label → value
+  - Object Properties: property label → target IRI (클릭 시 해당 Individual 포커스)
+- Edit / Delete 버튼
+
+#### `ConceptGraphPanel.tsx` (EntityGraphPanel 수정 또는 래퍼)
+
+- 기존 `EntityGraphPanel`과 동일하나 API 응답에서 `kind === 'individual'` 노드를 **프론트엔드 필터링**으로 제거
+- 별도 파일로 분리 (EntityGraphPanel은 다른 곳에서 그대로 사용)
+
+#### `SchemaReasonerPanel.tsx`
+
+- 기존 EntityRightPanel 내 Reasoner 섹션을 독립 컴포넌트로 추출
+- `graphIris` prop으로 추론 대상 수신
+- Run Reasoner 버튼, Profile 선택, 결과 표시 (기존 코드 그대로)
+
+---
+
+### 상태 변경 (SchemaPage)
+
+```typescript
+// 추가
+const [selectedIndividualIri, setSelectedIndividualIri] = useState<string | null>(null)
+const [conceptGraphIris, setConceptGraphIris] = useState<string[]>([])
+
+// 제거
+// graphIris (기존 general purpose) → conceptGraphIris로 대체
+//   Individual 클릭은 graph에 추가하지 않음
+//   Concept / Property 클릭만 conceptGraphIris에 추가
+```
+
+---
+
+### 변경 파일 목록
+
+#### 신규 파일 (4개)
+
+| 파일 | 내용 |
+|------|------|
+| `frontend/src/components/schema/IndividualsPanel.tsx` | 3열: Concept의 Individuals 목록 |
+| `frontend/src/components/schema/IndividualDetailPanel.tsx` | 4열: Individual 상세 |
+| `frontend/src/components/schema/ConceptGraphPanel.tsx` | 하단 좌: Concept 전용 그래프 |
+| `frontend/src/components/schema/SchemaReasonerPanel.tsx` | 하단 우: 독립 Reasoner 패널 |
+
+#### 수정 파일 (3개)
+
+| 파일 | 변경 내용 |
+|------|---------|
+| `frontend/src/pages/ontology/SchemaPage.tsx` | 4열 레이아웃 + 하단 2열, 상태 변경 |
+| `frontend/src/components/schema/SchemaDetailPanel.tsx` | Instances 탭 제거 |
+| `frontend/src/pages/__tests__/SchemaPage.test.tsx` | 새 레이아웃에 맞게 테스트 업데이트 |
+
+---
+
+### 단계별 작업
+
+- [ ] Step 1: 테스트 업데이트 (`SchemaPage.test.tsx`)
+- [ ] Step 2: `SchemaDetailPanel.tsx` — Instances 탭 제거
+- [ ] Step 3: `IndividualsPanel.tsx` 구현
+- [ ] Step 4: `IndividualDetailPanel.tsx` 구현
+- [ ] Step 5: `ConceptGraphPanel.tsx` 구현
+- [ ] Step 6: `SchemaReasonerPanel.tsx` 구현
+- [ ] Step 7: `SchemaPage.tsx` 레이아웃 개편 (4열 상단 + 2열 하단 576px)
+- [ ] Step 8: 테스트 통과 확인
+
+
+---
+
+
+---
+
+## 17. Named Graph per Import 분리 + Graph 선택 필터
+
+**날짜:** 2026-04-08
+
+### 목표
+
+1. 수동 생성 데이터(Concept/Property/Individual UI 생성) → `{ont_iri}/manual`
+2. Import 파일/URL/표준 별 독립 Named Graph
+3. NamedGraph 체크박스 선택 → 선택된 그래프에서만 모든 기능 동작
+4. (후속) 각 Named Graph TTL 편집기
+
+### Named Graph IRI 규칙
+
+| 소스 | Named Graph IRI |
+|------|----------------|
+| UI 수동 생성 | `{ont_iri}/manual` |
+| 파일 import | `{ont_iri}/imports/{filename}` |
+| URL import | `{ont_iri}/imports/url/{hostname_path_slug}` |
+| 표준 import | `{ont_iri}/imports/standard/{name}` |
+
+### 아키텍처 변경
+
+```
+현재:
+  모든 쓰기/읽기 → GRAPH <{ont_iri}/kg>
+
+변경 후:
+  수동 쓰기   → GRAPH <{ont_iri}/manual>
+  import 쓰기 → GRAPH <{ont_iri}/imports/...>
+
+  읽기 (선택된 그래프 기준):
+    GRAPH ?_g { ... }
+    FILTER(?_g IN (<iri1>, <iri2>, ...))
+```
+
+- **기본 선택값:** 온톨로지에 속한 모든 Named Graph (처음 로드 시 전체 체크)
+- **쓰기(INSERT/UPDATE/DELETE):** 항상 `/manual` 또는 해당 import graph 사용 (선택과 무관)
+
+### 구현 단계
+
+#### Part A — Backend: Named Graph IRI 분리
+
+- [ ] **A1** `services/ontology_graph.py`
+  - [x] `manual_graph_iri(ont_iri)` 추가: `{ont_iri}/manual`
+  - [x] `import_graph_iri(ont_iri, source_type, source_label)` 추가
+  - 기존 `kg_graph_iri` 유지 (subgraph backward-compat용)
+- [x] **A2** `api/import_.py` — 3개 엔드포인트 `import_graph_iri` 사용
+- [x] **A3** 수동 쓰기 쿼리 전환
+  - `api/concepts.py`, `api/properties.py`, `api/individuals.py`
+  - INSERT/DELETE → `GRAPH <{manual_iri}>`
+
+#### Part B — Backend: Graph 선택 필터
+
+- [x] **B1** 공통 헬퍼 `_graphs_filter(graph_iris)` 추가
+  - `graph_iris` 없으면 → `STRSTARTS(STR(?_g), "{ont_prefix}")` (전체 조회)
+  - `graph_iris` 있으면 → `?_g IN (<iri1>, <iri2>...)` 필터
+- [x] **B2** `api/concepts.py` SELECT 쿼리 변환 (`GRAPH ?_g + filter`)
+- [x] **B3** `api/properties.py` SELECT 쿼리 변환
+- [x] **B4** `api/individuals.py` SELECT 쿼리 변환
+- [x] **B5** `api/search.py` SELECT 쿼리 변환
+- [x] **B6** `api/subgraph.py` BFS + 엣지 쿼리 변환
+- [x] **B7** 모든 list/get 엔드포인트 — `graph_iris: list[str] = Query(default=[])` 파라미터 추가
+
+#### Part C — Frontend: Named Graph 선택 UI
+
+- [x] **C1** `NamedGraphsContext.tsx` 추가 — 선택된 graph IRI 목록 전역 관리
+- [x] **C2** `NamedGraphList.tsx` — 체크박스 추가, 전체선택/해제 버튼, 로드 시 전체 자동 선택
+- [x] **C3** `api/entities.ts`, `api/relations.ts`, `api/ontologies.ts` — 모든 list/get 함수에 `graphIris?: string[]` 파라미터 추가
+- [x] **C4** 모든 useQuery 호출에 선택된 graph IRI 전달
+  - `SchemaLeftPanel`, `ConceptGraphPanel`, `IndividualsPanel`, `SchemaDetailPanel`
+  - `ConceptTreeView`, `ConceptTreeNode`, `IndividualsSidebar`
+  - `useEntitySearch`, `useSearchRelations`, `useSubgraph`
+  - `App.tsx`: `NamedGraphsProvider` per-ontology (`key={ontologyId}`)
+  - `SPARQLPage`는 사용자가 직접 GRAPH 지정하므로 제외
+
+#### Part D — 테스트
+
+- [x] **D1** Backend 테스트: `import/file` 후 named graph IRI 검증 (`/imports/{filename}`)
+- [x] **D2** Backend 테스트: `graph_iris` 파라미터로 선택된 그래프만 조회되는지 검증
+- [ ] **D3** Frontend 테스트: `NamedGraphList` 체크박스 토글 UI
+- [ ] **D4** Frontend 테스트: 특정 graph 선택 시 해당 데이터만 반환
+
+#### Part E — 후속: TTL 편집기
+
+- [ ] **E1** `GET /ontologies/{id}/graphs/{graph_iri_encoded}/ttl` — GSP GET으로 TTL 반환
+- [ ] **E2** `PUT /ontologies/{id}/graphs/{graph_iri_encoded}/ttl` — TTL 교체 (GSP PUT)
+- [ ] **E3** Frontend `NamedGraphList` — 편집 버튼 + CodeMirror TTL 편집기 패널

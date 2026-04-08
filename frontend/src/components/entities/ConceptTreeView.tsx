@@ -4,6 +4,7 @@ import { listConcepts } from '@/api/entities'
 import ConceptTreeNode from './ConceptTreeNode'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import Pagination from '@/components/shared/Pagination'
+import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 
 interface Props {
   ontologyId: string
@@ -17,11 +18,12 @@ const PAGE_SIZE = 50
 
 export default function ConceptTreeView({ ontologyId, dataset, selectedIri, onSelect, onSelectIndividual }: Props) {
   const [page, setPage] = useState(1)
+  const { selectedGraphIris } = useNamedGraphs()
 
   // 루트 클래스만 로드 (IRI 부모를 선언하지 않는 클래스 = 최상위)
   const rootQuery = useQuery({
-    queryKey: ['concepts-root', ontologyId, dataset, page],
-    queryFn: () => listConcepts(ontologyId, { root: true, page, pageSize: PAGE_SIZE, dataset }),
+    queryKey: ['concepts-root', ontologyId, dataset, page, selectedGraphIris],
+    queryFn: () => listConcepts(ontologyId, { root: true, page, pageSize: PAGE_SIZE, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId,
     staleTime: 60_000,
   })

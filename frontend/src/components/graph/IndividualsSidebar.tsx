@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { listIndividuals } from '@/api/entities'
 import { useDataset } from '@/contexts/DatasetContext'
+import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import type { Individual } from '@/types/individual'
 
@@ -13,11 +14,12 @@ interface IndividualsSidebarProps {
 
 export default function IndividualsSidebar({ ontologyId, conceptIri, inline = false }: IndividualsSidebarProps) {
   const { dataset } = useDataset()
+  const { selectedGraphIris } = useNamedGraphs()
 
   const query = useQuery({
-    queryKey: ['individuals-by-concept', ontologyId, conceptIri, dataset],
+    queryKey: ['individuals-by-concept', ontologyId, conceptIri, dataset, selectedGraphIris],
     queryFn: () =>
-      listIndividuals(ontologyId, { typeIri: conceptIri!, pageSize: 50, dataset }),
+      listIndividuals(ontologyId, { typeIri: conceptIri!, pageSize: 50, dataset, graphIris: selectedGraphIris }),
     enabled: !!conceptIri,
   })
 

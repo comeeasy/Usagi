@@ -13,6 +13,7 @@ import { listConcepts } from '@/api/entities'
 import { listObjectProperties, listDataProperties } from '@/api/relations'
 import ConceptTreeView from '@/components/entities/ConceptTreeView'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
+import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 import type { ObjectProperty, DataProperty } from '@/types/property'
 
 type PropertyFilter = 'all' | 'object' | 'data'
@@ -60,24 +61,25 @@ export default function SchemaLeftPanel({
 }: Props) {
   const [conceptsOpen, setConceptsOpen] = useState(true)
   const [propertiesOpen, setPropertiesOpen] = useState(true)
+  const { selectedGraphIris } = useNamedGraphs()
 
   // ── Concept queries (flat mode만) ──────────────────────────────
   const conceptsQuery = useQuery({
-    queryKey: ['concepts', ontologyId, dataset, 1],
-    queryFn: () => listConcepts(ontologyId, { page: 1, pageSize: PAGE_SIZE, dataset }),
+    queryKey: ['concepts', ontologyId, dataset, 1, selectedGraphIris],
+    queryFn: () => listConcepts(ontologyId, { page: 1, pageSize: PAGE_SIZE, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId && conceptViewMode === 'flat',
   })
 
   // ── Property queries ───────────────────────────────────────────
   const objectQuery = useQuery({
-    queryKey: ['object-properties', ontologyId, dataset, 1],
-    queryFn: () => listObjectProperties(ontologyId, { page: 1, pageSize: PAGE_SIZE, dataset }),
+    queryKey: ['object-properties', ontologyId, dataset, 1, selectedGraphIris],
+    queryFn: () => listObjectProperties(ontologyId, { page: 1, pageSize: PAGE_SIZE, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId && propertyFilter !== 'data',
   })
 
   const dataQuery = useQuery({
-    queryKey: ['data-properties', ontologyId, dataset, 1],
-    queryFn: () => listDataProperties(ontologyId, { page: 1, pageSize: PAGE_SIZE, dataset }),
+    queryKey: ['data-properties', ontologyId, dataset, 1, selectedGraphIris],
+    queryFn: () => listDataProperties(ontologyId, { page: 1, pageSize: PAGE_SIZE, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId && propertyFilter !== 'object',
   })
 

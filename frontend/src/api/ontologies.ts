@@ -78,10 +78,13 @@ export interface SubgraphData {
 
 export function getSubgraph(
   ontologyId: string,
-  params: { rootIris?: string[]; depth?: number; includeIndividuals?: boolean; dataset?: string },
+  params: { rootIris?: string[]; depth?: number; includeIndividuals?: boolean; dataset?: string; graphIris?: string[] },
 ): Promise<SubgraphData> {
-  const qs = params.dataset ? `?dataset=${params.dataset}` : ''
-  return apiPost(`/ontologies/${ontologyId}/subgraph${qs}`, {
+  const qs = new URLSearchParams()
+  if (params.dataset) qs.set('dataset', params.dataset)
+  for (const iri of params.graphIris ?? []) qs.append('graph_iris', iri)
+  const qstr = qs.toString() ? `?${qs.toString()}` : ''
+  return apiPost(`/ontologies/${ontologyId}/subgraph${qstr}`, {
     entity_iris: params.rootIris ?? [],
     depth: params.depth ?? 2,
   }).then((raw: { nodes: { iri: string; label: string; kind: string }[]; edges: { source: string; target: string; propertyIri: string; propertyLabel: string }[] }) => ({

@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query'
 import { listConcepts } from '@/api/entities'
 import { listObjectProperties } from '@/api/relations'
 import { useDataset } from '@/contexts/DatasetContext'
+import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 import GraphCanvas, { type CyElement } from '@/components/graph/GraphCanvas'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import type { Concept } from '@/types/concept'
@@ -35,16 +36,17 @@ function localName(iri: string): string {
 
 export default function ConceptGraphPanel({ ontologyId, selectedIri }: Props) {
   const { dataset } = useDataset()
+  const { selectedGraphIris } = useNamedGraphs()
 
   const conceptsQuery = useQuery({
-    queryKey: ['concepts', ontologyId, dataset, 'graph'],
-    queryFn: () => listConcepts(ontologyId, { pageSize: PAGE_SIZE, dataset }),
+    queryKey: ['concepts', ontologyId, dataset, 'graph', selectedGraphIris],
+    queryFn: () => listConcepts(ontologyId, { pageSize: PAGE_SIZE, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId,
   })
 
   const propsQuery = useQuery({
-    queryKey: ['object-properties', ontologyId, dataset, 'graph'],
-    queryFn: () => listObjectProperties(ontologyId, { pageSize: PAGE_SIZE, dataset }),
+    queryKey: ['object-properties', ontologyId, dataset, 'graph', selectedGraphIris],
+    queryFn: () => listObjectProperties(ontologyId, { pageSize: PAGE_SIZE, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId,
   })
 

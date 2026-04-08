@@ -6,25 +6,27 @@ import type { PaginatedResponse } from '@/types/ontology'
 
 export function listObjectProperties(
   ontologyId: string,
-  params?: { page?: number; pageSize?: number; search?: string; dataset?: string },
+  params?: { page?: number; pageSize?: number; search?: string; dataset?: string; graphIris?: string[] },
 ): Promise<PaginatedResponse<ObjectProperty>> {
   const qs = new URLSearchParams({ kind: 'object' })
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
   if (params?.search) qs.set('search', params.search)
   if (params?.dataset) qs.set('dataset', params.dataset)
+  for (const iri of params?.graphIris ?? []) qs.append('graph_iris', iri)
   return apiGet(`/ontologies/${ontologyId}/properties?${qs.toString()}`)
 }
 
 export function listDataProperties(
   ontologyId: string,
-  params?: { page?: number; pageSize?: number; search?: string; dataset?: string },
+  params?: { page?: number; pageSize?: number; search?: string; dataset?: string; graphIris?: string[] },
 ): Promise<PaginatedResponse<DataProperty>> {
   const qs = new URLSearchParams({ kind: 'data' })
   if (params?.page) qs.set('page', String(params.page))
   if (params?.pageSize) qs.set('page_size', String(params.pageSize))
   if (params?.search) qs.set('search', params.search)
   if (params?.dataset) qs.set('dataset', params.dataset)
+  for (const iri of params?.graphIris ?? []) qs.append('graph_iris', iri)
   return apiGet(`/ontologies/${ontologyId}/properties?${qs.toString()}`)
 }
 
@@ -60,10 +62,12 @@ export function searchRelations(
   rangeIri?: string,
   limit = 20,
   dataset?: string,
+  graphIris?: string[],
 ): Promise<Array<ObjectProperty | DataProperty>> {
   const qs = new URLSearchParams({ q, limit: String(limit) })
   if (domainIri) qs.set('domain_iri', domainIri)
   if (rangeIri) qs.set('range_iri', rangeIri)
   if (dataset) qs.set('dataset', dataset)
+  for (const iri of graphIris ?? []) qs.append('graph_iris', iri)
   return apiGet(`/ontologies/${ontologyId}/search/relations?${qs.toString()}`)
 }

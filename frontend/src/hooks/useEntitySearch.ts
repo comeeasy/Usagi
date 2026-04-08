@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { searchEntities, vectorSearch } from '@/api/entities'
 import { useDataset } from '@/contexts/DatasetContext'
+import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 
 export function useEntitySearch(
   ontologyId: string | undefined,
@@ -10,6 +11,7 @@ export function useEntitySearch(
   useVector = false,
 ) {
   const { dataset } = useDataset()
+  const { selectedGraphIris } = useNamedGraphs()
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery)
 
   useEffect(() => {
@@ -18,13 +20,13 @@ export function useEntitySearch(
   }, [initialQuery])
 
   return useQuery({
-    queryKey: ['entities', ontologyId, debouncedQuery, kind, useVector, dataset],
+    queryKey: ['entities', ontologyId, debouncedQuery, kind, useVector, dataset, selectedGraphIris],
     queryFn: async () => {
-      if (!useVector) return searchEntities(ontologyId!, debouncedQuery, kind, 20, dataset)
+      if (!useVector) return searchEntities(ontologyId!, debouncedQuery, kind, 20, dataset, selectedGraphIris)
 
       // Vector ON: keyword + vector 병렬 호출 후 병합 (IRI 중복 제거, keyword 결과 우선)
       const [keywordResults, vectorResults] = await Promise.all([
-        searchEntities(ontologyId!, debouncedQuery, kind, 20, dataset),
+        searchEntities(ontologyId!, debouncedQuery, kind, 20, dataset, selectedGraphIris),
         vectorSearch(ontologyId!, debouncedQuery, 10, dataset),
       ])
       const seen = new Set(keywordResults.map((r) => r.iri))
@@ -42,6 +44,7 @@ export function useSearchRelations(
   rangeIri?: string,
 ) {
   const { dataset } = useDataset()
+  const { selectedGraphIris } = useNamedGraphs()
   const [debouncedQuery, setDebouncedQuery] = useState(query)
 
   useEffect(() => {
@@ -50,10 +53,10 @@ export function useSearchRelations(
   }, [query])
 
   return useQuery({
-    queryKey: ['relations-search', ontologyId, debouncedQuery, domainIri, rangeIri, dataset],
+    queryKey: ['relations-search', ontologyId, debouncedQuery, domainIri, rangeIri, dataset, selectedGraphIris],
     queryFn: async () => {
       const { searchRelations } = await import('@/api/relations')
-      return searchRelations(ontologyId!, debouncedQuery, domainIri, rangeIri, 20, dataset)
+      return searchRelations(ontologyId!, debouncedQuery, domainIri, rangeIri, 20, dataset, selectedGraphIris)
     },
     enabled: !!ontologyId && debouncedQuery.length > 0,
   })

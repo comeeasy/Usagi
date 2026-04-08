@@ -4,6 +4,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { listIndividuals } from '@/api/entities'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
+import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 import type { Individual } from '@/types/individual'
 
 interface Props {
@@ -21,9 +22,10 @@ export default function IndividualsPanel({
   selectedIndividualIri,
   onSelectIndividual,
 }: Props) {
+  const { selectedGraphIris } = useNamedGraphs()
   const query = useQuery({
-    queryKey: ['individuals-by-concept', ontologyId, conceptIri, dataset],
-    queryFn: () => listIndividuals(ontologyId, { typeIri: conceptIri, pageSize: 100, dataset }),
+    queryKey: ['individuals-by-concept', ontologyId, conceptIri, dataset, selectedGraphIris],
+    queryFn: () => listIndividuals(ontologyId, { typeIri: conceptIri, pageSize: 100, dataset, graphIris: selectedGraphIris }),
     enabled: !!conceptIri,
   })
 
