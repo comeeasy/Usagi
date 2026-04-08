@@ -2,8 +2,7 @@ import { NavLink, useParams } from 'react-router-dom'
 
 const tabs = [
   { path: 'graph', label: 'Graph' },
-  { path: 'entities', label: 'Entities' },
-  { path: 'relations', label: 'Relations' },
+  { path: 'schema', label: 'Schema' },
   { path: 'sparql', label: 'SPARQL' },
   { path: 'sources', label: 'Sources' },
   { path: 'merge', label: 'Merge' },

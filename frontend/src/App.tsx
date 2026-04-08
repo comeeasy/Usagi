@@ -4,8 +4,7 @@ import { DatasetProvider } from '@/contexts/DatasetContext'
 import HomePage from '@/pages/HomePage'
 import MCPDebugPage from '@/pages/MCPDebugPage'
 import GraphPage from '@/pages/ontology/GraphPage'
-import EntitiesPage from '@/pages/ontology/EntitiesPage'
-import RelationsPage from '@/pages/ontology/RelationsPage'
+import SchemaPage from '@/pages/ontology/SchemaPage'
 import SPARQLPage from '@/pages/ontology/SPARQLPage'
 import ImportPage from '@/pages/ontology/ImportPage'
 import MergePage from '@/pages/ontology/MergePage'
@@ -30,8 +29,7 @@ export default function App() {
             <AppShell>
               <Routes>
                 <Route path="graph" element={<GraphPage />} />
-                <Route path="entities" element={<EntitiesPage />} />
-                <Route path="relations" element={<RelationsPage />} />
+                <Route path="schema" element={<SchemaPage />} />
                 <Route path="sparql" element={<SPARQLPage />} />
                 <Route path="import" element={<ImportPage />} />
                 <Route path="merge" element={<MergePage />} />

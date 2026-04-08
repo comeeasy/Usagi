@@ -134,6 +134,17 @@ export const handlers = [
     HttpResponse.json({ merged: true, triple_count: 12 }),
   ),
 
+  // Search — relations (used by SchemaDetailPanel Relations tab)
+  http.get(`${BASE}/ontologies/:id/search/relations`, ({ request }) => {
+    const url = new URL(request.url)
+    const domainIri = url.searchParams.get('domain_iri')
+    const rangeIri = url.searchParams.get('range_iri')
+    if (domainIri === mockConcept.iri || rangeIri === mockConcept.iri) {
+      return HttpResponse.json([mockObjectProperty])
+    }
+    return HttpResponse.json([])
+  }),
+
   // SPARQL
   http.post(`${BASE}/ontologies/:id/sparql`, async ({ request }) => {
     const body = await request.json() as { query?: string }
