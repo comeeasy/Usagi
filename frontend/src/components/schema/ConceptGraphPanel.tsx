@@ -20,7 +20,8 @@ import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import type { Concept } from '@/types/concept'
 import type { ObjectProperty } from '@/types/property'
 
-const PAGE_SIZE = 200
+// Backend concepts/properties endpoints validate page_size <= 100.
+const PAGE_SIZE = 100
 
 interface Props {
   ontologyId: string

@@ -432,7 +432,8 @@ WHERE  {{ GRAPH ?_g {{ <{iri}> {pred} ?o }} }}""", dataset=dataset)
                 triples = "\n".join([f"    <{iri}> {pred} <{v}> ." for v in vals])
                 await store.sparql_update(f"{_P}\nINSERT DATA {{ GRAPH <{manual}> {{\n{triples}\n}} }}", dataset=dataset)
 
-    return await get_individual(request, ontology_id, iri, dataset=dataset)
+    # Internal call: pass a concrete list instead of FastAPI Query default.
+    return await get_individual(request, ontology_id, iri, dataset=dataset, graph_iris=[])
 
 
 # ── 삭제 ──────────────────────────────────────────────────────────────────

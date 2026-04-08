@@ -1,16 +1,19 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { screen, waitFor, fireEvent } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../tests/mocks/server'
 import { mockNamedGraph } from '../../../tests/mocks/handlers'
 import { renderWithProviders } from '../../../tests/utils'
 import NamedGraphList from '../NamedGraphList'
+import { NamedGraphsProvider } from '@/contexts/NamedGraphsContext'
 
 const ONTOLOGY_ID = 'test-ont-uuid'
 
 function renderList({ onImportClick = () => {} } = {}) {
   return renderWithProviders(
-    <NamedGraphList ontologyId={ONTOLOGY_ID} onImportClick={onImportClick} />,
+    <NamedGraphsProvider>
+      <NamedGraphList ontologyId={ONTOLOGY_ID} onImportClick={onImportClick} />
+    </NamedGraphsProvider>,
     { initialEntries: [`/${ONTOLOGY_ID}/graph`], path: '/:ontologyId/graph' },
   )
 }
@@ -84,5 +87,32 @@ describe('NamedGraphList', () => {
     await waitFor(() => {
       expect(screen.getByText(/manual/i)).toBeInTheDocument()
     })
+  })
+
+  it('loads with all graphs selected by default', async () => {
+    renderList()
+    await waitFor(() => {
+      expect(screen.getByText('1/1 selected')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('checkbox')).toBeChecked()
+    expect(screen.getByRole('button', { name: /deselect all/i })).toBeInTheDocument()
+  })
+
+  it('toggles graph checkbox and updates selected counter', async () => {
+    renderList()
+    fireEvent.click(await screen.findByRole('checkbox'))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /select all/i })).toBeInTheDocument()
+    })
+  })
+
+  it('deselect all button clears graph selections', async () => {
+    renderList()
+    fireEvent.click(await screen.findByRole('button', { name: /deselect all/i }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /select all/i })).toBeInTheDocument()
+    })
+    expect(screen.getByRole('checkbox')).not.toBeChecked()
   })
 })

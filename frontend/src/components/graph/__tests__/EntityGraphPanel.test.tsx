@@ -7,8 +7,12 @@ import EntityGraphPanel from '../EntityGraphPanel'
 
 // GraphCanvas uses cytoscape which doesn't work in jsdom — mock the whole component
 vi.mock('../GraphCanvas', () => ({
-  default: ({ elements }: { elements: unknown[] }) => (
-    <div data-testid="graph-canvas" data-elements={elements.length} />
+  default: ({ elements }: { elements: Array<{ data: { label?: string } }> }) => (
+    <div
+      data-testid="graph-canvas"
+      data-elements={elements.length}
+      data-labels={elements.map((e) => e.data.label ?? '').join('|')}
+    />
   ),
 }))
 
@@ -88,5 +92,117 @@ describe('EntityGraphPanel', () => {
     await waitFor(() => {
       expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
     })
+  })
+
+  it('does not include blank-node entities in graph elements', async () => {
+    server.use(
+      http.post('/api/v1/ontologies/:id/subgraph', () =>
+        HttpResponse.json({
+          nodes: [
+            { iri: 'https://test.example.org/onto#Person', label: 'Person', kind: 'concept' },
+            { iri: '_:b1', label: '_:b1', kind: 'individual' },
+          ],
+          edges: [],
+        }),
+      ),
+    )
+
+    renderPanel([CONCEPT_IRI])
+    await waitFor(() => expect(screen.getByTestId('graph-canvas')).toBeInTheDocument())
+
+    // desired behavior: blank-node visual artifacts must be excluded
+    expect(screen.getByTestId('graph-canvas').getAttribute('data-elements')).toBe('1')
+  })
+
+  it('uses compact labels instead of raw IRI strings for node labels', async () => {
+    server.use(
+      http.post('/api/v1/ontologies/:id/subgraph', () =>
+        HttpResponse.json({
+          nodes: [
+            {
+              iri: 'https://test.example.org/onto#VeryLongEntity',
+              label: 'https://test.example.org/onto#VeryLongEntity',
+              kind: 'concept',
+            },
+          ],
+          edges: [],
+        }),
+      ),
+    )
+
+    renderPanel([CONCEPT_IRI])
+    await waitFor(() => expect(screen.getByTestId('graph-canvas')).toBeInTheDocument())
+
+    const labels = screen.getByTestId('graph-canvas').getAttribute('data-labels') ?? ''
+    // desired behavior: raw full IRI should not be used as display label
+    expect(labels).not.toContain('https://test.example.org/onto#VeryLongEntity')
+    expect(labels).toContain('VeryLongEntity')
+  })
+
+  it('excludes OWL restriction edges from graph rendering', async () => {
+    server.use(
+      http.post('/api/v1/ontologies/:id/subgraph', () =>
+        HttpResponse.json({
+          nodes: [
+            { iri: 'https://test.example.org/onto#Person', label: 'Person', kind: 'concept' },
+            { iri: 'https://test.example.org/onto#Department', label: 'Department', kind: 'concept' },
+          ],
+          edges: [
+            {
+              source: 'https://test.example.org/onto#Person',
+              target: 'https://test.example.org/onto#Department',
+              propertyIri: 'http://www.w3.org/2002/07/owl#someValuesFrom',
+              propertyLabel: 'someValuesFrom',
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderPanel([CONCEPT_IRI])
+    await waitFor(() => expect(screen.getByTestId('graph-canvas')).toBeInTheDocument())
+
+    // only two concept nodes should remain; restriction edge must be hidden
+    expect(screen.getByTestId('graph-canvas').getAttribute('data-elements')).toBe('2')
+  })
+
+  it('handles large subgraph payload without including filtered noise', async () => {
+    const conceptNodes = Array.from({ length: 400 }).map((_, i) => ({
+      iri: `https://test.example.org/onto#C${i}`,
+      label: `https://test.example.org/onto#C${i}`,
+      kind: 'concept',
+    }))
+    const blankNodes = Array.from({ length: 100 }).map((_, i) => ({
+      iri: `_:b${i}`,
+      label: `_:b${i}`,
+      kind: 'individual',
+    }))
+    const restrictionEdges = Array.from({ length: 100 }).map((_, i) => ({
+      source: `https://test.example.org/onto#C${i}`,
+      target: `https://test.example.org/onto#C${i + 1}`,
+      propertyIri: 'http://www.w3.org/2002/07/owl#someValuesFrom',
+      propertyLabel: 'someValuesFrom',
+    }))
+    const validEdges = Array.from({ length: 200 }).map((_, i) => ({
+      source: `https://test.example.org/onto#C${i}`,
+      target: `https://test.example.org/onto#C${i + 1}`,
+      propertyIri: 'SUBCLASS_OF',
+      propertyLabel: 'SUBCLASS_OF',
+    }))
+
+    server.use(
+      http.post('/api/v1/ontologies/:id/subgraph', () =>
+        HttpResponse.json({
+          nodes: [...conceptNodes, ...blankNodes],
+          edges: [...validEdges, ...restrictionEdges],
+        }),
+      ),
+    )
+
+    renderPanel([CONCEPT_IRI])
+    await waitFor(() => expect(screen.getByTestId('graph-canvas')).toBeInTheDocument())
+
+    // 400 concept nodes + 200 valid edges; bnodes/restriction edges are filtered out.
+    expect(screen.getByTestId('graph-canvas').getAttribute('data-elements')).toBe('600')
   })
 })

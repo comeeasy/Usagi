@@ -5,6 +5,7 @@ import { server } from '../../tests/mocks/server'
 import { mockConcept, mockObjectProperty, mockDataProperty, mockIndividual } from '../../tests/mocks/handlers'
 import { renderWithProviders } from '../../tests/utils'
 import SchemaPage from '../ontology/SchemaPage'
+import { NamedGraphsProvider } from '@/contexts/NamedGraphsContext'
 
 // GraphCanvas uses cytoscape — mock to avoid jsdom issues
 vi.mock('@/components/graph/GraphCanvas', () => ({
@@ -27,10 +28,15 @@ const ROUTE_PATH = '/:ontologyId/schema'
 const INITIAL_ENTRY = '/test-ont-uuid/schema'
 
 function renderSchemaPage() {
-  return renderWithProviders(<SchemaPage />, {
+  return renderWithProviders(
+    <NamedGraphsProvider>
+      <SchemaPage />
+    </NamedGraphsProvider>,
+    {
     initialEntries: [INITIAL_ENTRY],
     path: ROUTE_PATH,
-  })
+    },
+  )
 }
 
 /** concepts 섹션 내에서 개념을 클릭 (domain/range span과 중복 방지) */

@@ -44,6 +44,11 @@ def _esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
+def _looks_like_iri(value: str) -> bool:
+    v = value.strip()
+    return v.startswith("http://") or v.startswith("https://") or v.startswith("urn:")
+
+
 # 임포트·LOD 호환: owl:Class, rdfs:Class, SKOS Concept, 암묵적 클래스(rdf:type 대상), subClassOf 참여 클래스
 # RDFS 의미론상 rdf:type 대상 또는 rdfs:subClassOf 참여 IRI는 모두 클래스임 (ABox-only KG 포함)
 _CLASS_FILTER = """
@@ -106,7 +111,10 @@ def _restriction_triples(iri: str, restrictions: list[PropertyRestriction], pref
         elif r.type == "allValuesFrom":
             lines.append(f"        owl:allValuesFrom <{r.value}> .")
         elif r.type == "hasValue":
-            lines.append(f"        owl:hasValue <{r.value}> .")
+            if _looks_like_iri(r.value):
+                lines.append(f"        owl:hasValue <{r.value}> .")
+            else:
+                lines.append(f'        owl:hasValue "{_esc(r.value)}" .')
         elif r.type == "minCardinality":
             lines.append(f"        owl:minCardinality {r.cardinality or 1} .")
         elif r.type == "maxCardinality":

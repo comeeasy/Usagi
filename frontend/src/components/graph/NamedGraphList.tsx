@@ -144,8 +144,11 @@ function GraphCard({
         <input
           type="checkbox"
           checked={checked}
-          onChange={onToggle}
-          onClick={(e) => e.stopPropagation()}
+          readOnly
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggle()
+          }}
           className="mt-0.5 w-3.5 h-3.5 flex-shrink-0"
           style={{ accentColor: 'var(--color-primary)' }}
         />

@@ -10,13 +10,13 @@ class DataPropertyValue(BaseModel):
     property_iri: str
     value: str
     datatype: str          # xsd:string, xsd:integer, xsd:dateTime 등
-    graph_iri: str
+    graph_iri: str | None = None
 
 
 class ObjectPropertyValue(BaseModel):
     property_iri: str
     target_iri: str
-    graph_iri: str
+    graph_iri: str | None = None
 
 
 class ProvenanceRecord(BaseModel):

@@ -16,6 +16,23 @@ function shortLabel(iri: string) {
   return iri.split('/').at(-1) ?? iri
 }
 
+function isBlankNodeIri(iri: string): boolean {
+  return iri.startsWith('_:')
+}
+
+function isRestrictionEdgeId(edgeId: string): boolean {
+  return (
+    edgeId.includes('owl#someValuesFrom') ||
+    edgeId.includes('owl#allValuesFrom') ||
+    edgeId.includes('owl#hasValue') ||
+    edgeId.includes('owl#onProperty') ||
+    edgeId.includes('owl#minCardinality') ||
+    edgeId.includes('owl#maxCardinality') ||
+    edgeId.includes('owl#qualifiedCardinality') ||
+    edgeId.includes('owl#cardinality')
+  )
+}
+
 export default function EntityGraphPanel({ ontologyId, entityIris, onRemoveIri }: EntityGraphPanelProps) {
   const { dataset } = useDataset()
   const [elements, setElements] = useState<CyElement[]>([])
@@ -35,7 +52,31 @@ export default function EntityGraphPanel({ ontologyId, entityIris, onRemoveIri }
     setError(null)
     getSubgraph(ontologyId, { rootIris: entityIris, depth: 1, dataset })
       .then((data) => {
-        setElements([...data.nodes, ...data.edges])
+        const allowedNodeIds = new Set(
+          data.nodes
+            .map((n) => n.data.id)
+            .filter((id) => !isBlankNodeIri(id)),
+        )
+
+        const normalizedNodes = data.nodes
+          .filter((n) => allowedNodeIds.has(n.data.id))
+          .map((n) => ({
+            ...n,
+            data: {
+              ...n.data,
+              // Avoid raw full IRI labels in graph UI.
+              label: n.data.label.includes('://') ? shortLabel(n.data.iri) : n.data.label,
+            },
+          }))
+
+        const normalizedEdges = data.edges.filter(
+          (e) =>
+            allowedNodeIds.has(e.data.source) &&
+            allowedNodeIds.has(e.data.target) &&
+            !isRestrictionEdgeId(e.data.id),
+        )
+
+        setElements([...normalizedNodes, ...normalizedEdges])
         setExpandedIris(new Set())
       })
       .catch(() => setError('Failed to load graph'))
@@ -48,7 +89,28 @@ export default function EntityGraphPanel({ ontologyId, entityIris, onRemoveIri }
     setExpandedIris((prev) => new Set([...prev, iri]))
     try {
       const data = await getSubgraph(ontologyId, { rootIris: [iri], depth: 1, dataset })
-      const newElems = [...data.nodes, ...data.edges]
+      const allowedNodeIds = new Set(
+        data.nodes
+          .map((n) => n.data.id)
+          .filter((id) => !isBlankNodeIri(id)),
+      )
+      const newElems = [
+        ...data.nodes
+          .filter((n) => allowedNodeIds.has(n.data.id))
+          .map((n) => ({
+            ...n,
+            data: {
+              ...n.data,
+              label: n.data.label.includes('://') ? shortLabel(n.data.iri) : n.data.label,
+            },
+          })),
+        ...data.edges.filter(
+          (e) =>
+            allowedNodeIds.has(e.data.source) &&
+            allowedNodeIds.has(e.data.target) &&
+            !isRestrictionEdgeId(e.data.id),
+        ),
+      ]
       setElements((prev) => {
         const existingIds = new Set(prev.map((e) => e.data.id))
         const toAdd = newElems.filter((e) => !existingIds.has(e.data.id))

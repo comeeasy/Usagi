@@ -18,6 +18,7 @@ XSDDatatype = Literal[
     "xsd:dateTime",
     "xsd:anyURI",
     "xsd:langString",
+    "rdfs:Literal",
 ]
 
 ObjectPropertyCharacteristic = Literal[
@@ -49,7 +50,7 @@ class DataProperty(BaseModel):
     label: str
     comment: str | None = None
     domain: list[str] = []             # Concept IRI 목록
-    range: list[XSDDatatype] = []      # xsd:* 타입 목록
+    range: list[XSDDatatype] = []      # xsd:* + rdfs:Literal
     super_properties: list[str] = []
     is_functional: bool = False
 

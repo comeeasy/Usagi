@@ -39,6 +39,7 @@ PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
 """
 
 _XSD_BASE = "http://www.w3.org/2001/XMLSchema#"
+_RDFS_LITERAL_FULL = "http://www.w3.org/2000/01/rdf-schema#Literal"
 
 _CHAR_MAP = {
     "Functional": "owl:FunctionalProperty",
@@ -78,12 +79,16 @@ def _v(term: dict | None, default: str = "") -> str:
 
 
 def _xsd_full(xsd: str) -> str:
+    if xsd == "rdfs:Literal":
+        return _RDFS_LITERAL_FULL
     if xsd.startswith("xsd:"):
         return _XSD_BASE + xsd[4:]
     return xsd if xsd.startswith("http") else _XSD_BASE + xsd
 
 
 def _xsd_short(full: str) -> str:
+    if full == _RDFS_LITERAL_FULL:
+        return "rdfs:Literal"
     if full.startswith(_XSD_BASE):
         return "xsd:" + full[len(_XSD_BASE):]
     return full
