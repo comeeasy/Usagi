@@ -24,7 +24,7 @@ function filterConceptsOnly(elements: CyElement[]): CyElement[] {
   )
   return elements.filter((e) => {
     if (individualIds.has(e.data.id)) return false
-    if (e.data.source && (individualIds.has(e.data.source) || individualIds.has(e.data.target))) return false
+    if (e.data.source && (individualIds.has(e.data.source) || (e.data.target != null && individualIds.has(e.data.target)))) return false
     return true
   })
 }
@@ -42,7 +42,7 @@ export default function ConceptGraphPanel({ ontologyId, conceptIris }: Props) {
       return
     }
     setLoading(true)
-    getSubgraph(ontologyId, { rootIris: conceptIris, depth: 1, dataset })
+    getSubgraph(ontologyId, { rootIris: conceptIris, depth: 2, dataset })
       .then((data) => {
         setElements(filterConceptsOnly([...data.nodes, ...data.edges]))
         setExpandedIris(new Set())
@@ -69,12 +69,24 @@ export default function ConceptGraphPanel({ ontologyId, conceptIris }: Props) {
 
   return (
     <div className="relative w-full h-full overflow-hidden">
+      {/* Placeholder when no concept selected */}
+      {conceptIris.length === 0 && (
+        <div
+          className="absolute inset-0 flex items-center justify-center text-sm"
+          style={{ color: 'var(--color-text-muted)', zIndex: 1 }}
+        >
+          Select a concept to visualize class hierarchy
+        </div>
+      )}
+
+      {/* Loading overlay */}
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center z-10"
-          style={{ backgroundColor: 'rgba(0,0,0,0.1)' }}>
+          style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}>
           <LoadingSpinner size="sm" />
         </div>
       )}
+
       <GraphCanvas
         elements={elements}
         onNodeDoubleClick={handleNodeDoubleClick}
