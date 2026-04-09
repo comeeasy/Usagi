@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../tests/mocks/server'
-import { mockConcept, mockObjectProperty, mockDataProperty, mockIndividual } from '../../tests/mocks/handlers'
+import { mockConcept, mockObjectProperty, mockDataProperty } from '../../tests/mocks/handlers'
 import { renderWithProviders } from '../../tests/utils'
 import SchemaPage from '../ontology/SchemaPage'
 import { NamedGraphsProvider } from '@/contexts/NamedGraphsContext'
@@ -15,20 +15,12 @@ vi.mock('react-resizable-panels', () => ({
   PanelResizeHandle: () => <div data-panel-resize-handle-id="mock" />,
 }))
 
-// GraphCanvas uses cytoscape — mock to avoid jsdom issues
-vi.mock('@/components/graph/GraphCanvas', () => ({
-  default: ({ elements }: { elements: unknown[] }) => (
-    <div data-testid="graph-canvas" data-elements={elements.length} />
-  ),
-}))
-
-// getConcept / getIndividual — mock so detail panel doesn't need real fetch
+// getConcept — mock so detail panel doesn't need real fetch
 vi.mock('@/api/entities', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/entities')>()
   return {
     ...actual,
     getConcept: vi.fn().mockResolvedValue(mockConcept),
-    getIndividual: vi.fn().mockResolvedValue(mockIndividual),
   }
 })
 
@@ -117,20 +109,6 @@ describe('SchemaPage — 초기 렌더링', () => {
     })
   })
 
-  it('Graph canvas가 항상 표시된다', async () => {
-    renderSchemaPage()
-    await waitFor(() => {
-      expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
-    })
-  })
-
-  it('Reasoner 패널이 항상 표시된다 (Run Reasoner 버튼)', async () => {
-    renderSchemaPage()
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Run Reasoner/i })).toBeInTheDocument()
-    })
-  })
-
   it('초기 상태에서 우측 Detail 서브탭은 없다', async () => {
     renderSchemaPage()
     // concepts 섹션 로드 대기
@@ -170,13 +148,6 @@ describe('SchemaPage — Concept 선택', () => {
     expect(screen.queryByRole('button', { name: /^Instances$/i })).not.toBeInTheDocument()
   })
 
-  it('Concept 선택 시 3열 Individuals 패널이 표시된다', async () => {
-    renderSchemaPage()
-    await clickConcept()
-    await waitFor(() => {
-      expect(screen.getByTestId('schema-individuals-panel')).toBeInTheDocument()
-    })
-  })
 })
 
 // ─────────────────────────────────────────────
@@ -214,52 +185,6 @@ describe('SchemaPage — Concept Relations 탭', () => {
   })
 })
 
-// ─────────────────────────────────────────────
-// 4. Individuals 패널 (3열)
-// ─────────────────────────────────────────────
-describe('SchemaPage — Individuals 패널', () => {
-  it('Concept 선택 시 Individuals 패널에 Individual이 표시된다', async () => {
-    renderSchemaPage()
-    await clickConcept()
-    const panel = await screen.findByTestId('schema-individuals-panel')
-    await waitFor(() => {
-      expect(within(panel).getByText(mockIndividual.label)).toBeInTheDocument()
-    })
-  })
-
-  it('Individuals 패널에 총 개수가 표시된다', async () => {
-    renderSchemaPage()
-    await clickConcept()
-    const panel = await screen.findByTestId('schema-individuals-panel')
-    await waitFor(() => {
-      // total: 1
-      expect(within(panel).getByText('1')).toBeInTheDocument()
-    })
-  })
-
-  it('Individual 클릭 시 4열 Individual Detail 패널이 표시된다', async () => {
-    renderSchemaPage()
-    await clickConcept()
-    const panel = await screen.findByTestId('schema-individuals-panel')
-    const indItem = await within(panel).findByText(mockIndividual.label)
-    fireEvent.click(indItem)
-    await waitFor(() => {
-      expect(screen.getByTestId('schema-individual-detail-panel')).toBeInTheDocument()
-    })
-  })
-
-  it('Individual Detail 패널에 label이 표시된다', async () => {
-    renderSchemaPage()
-    await clickConcept()
-    const panel = await screen.findByTestId('schema-individuals-panel')
-    const indItem = await within(panel).findByText(mockIndividual.label)
-    fireEvent.click(indItem)
-    const detailPanel = await screen.findByTestId('schema-individual-detail-panel')
-    await waitFor(() => {
-      expect(within(detailPanel).getByText(mockIndividual.label)).toBeInTheDocument()
-    })
-  })
-})
 
 // ─────────────────────────────────────────────
 // 5. Property 선택
@@ -384,36 +309,19 @@ describe('SchemaPage — 빈 상태', () => {
 // 9. Resizable Panels
 // ─────────────────────────────────────────────
 describe('SchemaPage — Resizable Panels', () => {
-  it('ResizeHandle이 수평 방향으로 렌더된다', async () => {
+  it('ResizeHandle이 렌더된다', async () => {
     renderSchemaPage()
-    // react-resizable-panels은 data-panel-resize-handle-id 속성을 가진 div를 렌더함
     await waitFor(() => {
       const handles = document.querySelectorAll('[data-panel-resize-handle-id]')
-      expect(handles.length).toBeGreaterThanOrEqual(2) // 상하 + 하단 좌우 최소 2개
+      expect(handles.length).toBeGreaterThanOrEqual(1)
     })
   })
 
-  it('Concept 클릭 후 추가 ResizeHandle이 렌더된다 (Col3 패널 표시)', async () => {
-    renderSchemaPage()
-    await clickConcept()
-    await waitFor(() => {
-      const handles = document.querySelectorAll('[data-panel-resize-handle-id]')
-      expect(handles.length).toBeGreaterThanOrEqual(3)
-    })
-  })
-
-  it('기존 Concepts / Properties 섹션이 여전히 렌더된다', async () => {
+  it('Concepts / Properties 섹션이 렌더된다', async () => {
     renderSchemaPage()
     await waitFor(() => {
       expect(screen.getByTestId('schema-concepts-section')).toBeInTheDocument()
       expect(screen.getByTestId('schema-properties-section')).toBeInTheDocument()
-    })
-  })
-
-  it('graph-canvas가 하단 패널에 렌더된다', async () => {
-    renderSchemaPage()
-    await waitFor(() => {
-      expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
     })
   })
 })
