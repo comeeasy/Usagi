@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../tests/mocks/server'
-import { mockConcept, mockObjectProperty, mockDataProperty } from '../../tests/mocks/handlers'
+import { mockConcept, mockObjectProperty, mockDataProperty, mockIndividual } from '../../tests/mocks/handlers'
 import { renderWithProviders } from '../../tests/utils'
 import SchemaPage from '../ontology/SchemaPage'
 import { NamedGraphsProvider } from '@/contexts/NamedGraphsContext'
@@ -46,8 +46,15 @@ async function clickConcept() {
   fireEvent.click(item)
 }
 
+/** Properties 서브탭으로 전환 */
+async function switchToPropertiesTab() {
+  const tab = await screen.findByRole('button', { name: /^Properties$/i })
+  fireEvent.click(tab)
+}
+
 /** properties 섹션 내에서 property를 클릭 */
 async function clickObjectProperty() {
+  await switchToPropertiesTab()
   const section = await screen.findByTestId('schema-properties-section')
   const item = await within(section).findByText(mockObjectProperty.label)
   fireEvent.click(item)
@@ -104,6 +111,7 @@ describe('SchemaPage — 초기 렌더링', () => {
 
   it('New Property 버튼이 있다', async () => {
     renderSchemaPage()
+    await switchToPropertiesTab()
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /New Property/i })).toBeInTheDocument()
     })
@@ -218,6 +226,7 @@ describe('SchemaPage — Property 선택', () => {
 
   it('Data Property 필터 적용 시 data property가 표시된다', async () => {
     renderSchemaPage()
+    await switchToPropertiesTab()
     await waitFor(() => screen.getByRole('button', { name: /^Data$/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Data$/i }))
     const section = await screen.findByTestId('schema-properties-section')
@@ -266,6 +275,7 @@ describe('SchemaPage — 생성 폼', () => {
 
   it('New Property 클릭 시 Property 생성 폼이 열린다', async () => {
     renderSchemaPage()
+    await switchToPropertiesTab()
     await waitFor(() => screen.getByRole('button', { name: /New Property/i }))
     fireEvent.click(screen.getByRole('button', { name: /New Property/i }))
     await waitFor(() => {
@@ -317,11 +327,217 @@ describe('SchemaPage — Resizable Panels', () => {
     })
   })
 
-  it('Concepts / Properties 섹션이 렌더된다', async () => {
+  it('Concepts / Properties / Individuals 섹션이 렌더된다', async () => {
     renderSchemaPage()
     await waitFor(() => {
       expect(screen.getByTestId('schema-concepts-section')).toBeInTheDocument()
       expect(screen.getByTestId('schema-properties-section')).toBeInTheDocument()
+      expect(screen.getByTestId('schema-individuals-section')).toBeInTheDocument()
+    })
+  })
+})
+
+// ─────────────────────────────────────────────
+// 10. Individuals 탭
+// ─────────────────────────────────────────────
+
+/** Individuals 서브탭으로 전환 */
+async function switchToIndividualsTab() {
+  const tab = await screen.findByRole('button', { name: /^Individuals$/i })
+  fireEvent.click(tab)
+}
+
+describe('SchemaPage — Individuals 탭', () => {
+  it('Individuals 서브탭 버튼이 표시된다', async () => {
+    renderSchemaPage()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Individuals$/i })).toBeInTheDocument()
+    })
+  })
+
+  it('Individuals 탭 클릭 시 Individual 목록이 로드된다', async () => {
+    renderSchemaPage()
+    await switchToIndividualsTab()
+    const section = await screen.findByTestId('schema-individuals-section')
+    await waitFor(() => {
+      expect(within(section).getByText(mockIndividual.label!)).toBeInTheDocument()
+    })
+  })
+
+  it('New Individual 버튼이 있다', async () => {
+    renderSchemaPage()
+    await switchToIndividualsTab()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /New Individual/i })).toBeInTheDocument()
+    })
+  })
+
+  it('Individual 클릭 시 우측 패널에 Individual 상세가 표시된다', async () => {
+    renderSchemaPage()
+    await switchToIndividualsTab()
+    const section = await screen.findByTestId('schema-individuals-section')
+    const item = await within(section).findByText(mockIndividual.label!)
+    fireEvent.click(item)
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-individual-detail-panel')).toBeInTheDocument()
+    })
+  })
+
+  it('New Individual 클릭 시 Individual 생성 폼이 열린다', async () => {
+    renderSchemaPage()
+    await switchToIndividualsTab()
+    await waitFor(() => screen.getByRole('button', { name: /New Individual/i }))
+    fireEvent.click(screen.getByRole('button', { name: /New Individual/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/Create Individual/i)).toBeInTheDocument()
+    })
+  })
+
+  it('Individual이 없으면 empty 메시지가 표시된다', async () => {
+    server.use(
+      http.get('/api/v1/ontologies/:id/individuals', () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+    )
+    renderSchemaPage()
+    await switchToIndividualsTab()
+    const section = await screen.findByTestId('schema-individuals-section')
+    await waitFor(() => {
+      expect(within(section).getByText(/No individuals/i)).toBeInTheDocument()
+    })
+  })
+})
+
+// ─────────────────────────────────────────────
+// 11. Concept Detail — 완전한 필드 표시
+// ─────────────────────────────────────────────
+describe('SchemaPage — Concept Detail 완전성', () => {
+  it('Concept Detail 탭에 Instances 레이블이 표시된다', async () => {
+    renderSchemaPage()
+    await clickConcept()
+    await waitFor(() => screen.getByRole('button', { name: /^Detail$/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/^Instances$/i)).toBeInTheDocument()
+    })
+  })
+
+  it('Concept Detail 탭에 Subclasses 레이블이 표시된다', async () => {
+    renderSchemaPage()
+    await clickConcept()
+    await waitFor(() => screen.getByRole('button', { name: /^Detail$/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/^Subclasses$/i)).toBeInTheDocument()
+    })
+  })
+
+  it('Concept Detail 탭에 Parent Class IRI가 표시된다', async () => {
+    renderSchemaPage()
+    await clickConcept()
+    await waitFor(() => screen.getByRole('button', { name: /^Detail$/i }))
+    await waitFor(() => {
+      // super_classes[0]의 localName이 표시되어야 함
+      expect(screen.getByText(/Agent/i)).toBeInTheDocument()
+    })
+  })
+
+  it('Concept에 Provenance 탭 버튼이 표시된다', async () => {
+    renderSchemaPage()
+    await clickConcept()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Provenance$/i })).toBeInTheDocument()
+    })
+  })
+})
+
+// ─────────────────────────────────────────────
+// 12. Property Detail — 완전한 필드 표시
+// ─────────────────────────────────────────────
+describe('SchemaPage — Property Detail 완전성', () => {
+  it('Property에 Provenance 탭 버튼이 표시된다', async () => {
+    renderSchemaPage()
+    await clickObjectProperty()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Provenance$/i })).toBeInTheDocument()
+    })
+  })
+
+  it('Object Property Detail에 Characteristics가 표시된다', async () => {
+    renderSchemaPage()
+    await clickObjectProperty()
+    await waitFor(() => {
+      expect(screen.getByText(/Asymmetric/i)).toBeInTheDocument()
+    })
+  })
+
+  it('Object Property Detail에 InverseOf가 표시된다', async () => {
+    renderSchemaPage()
+    await clickObjectProperty()
+    await waitFor(() => {
+      expect(screen.getByText(/hasChild/i)).toBeInTheDocument()
+    })
+  })
+
+  it('Object Property Detail에 Super Properties가 표시된다', async () => {
+    renderSchemaPage()
+    await clickObjectProperty()
+    await waitFor(() => {
+      expect(screen.getByText(/hasAncestor/i)).toBeInTheDocument()
+    })
+  })
+
+  it('Data Property Detail에 isFunctional이 표시된다', async () => {
+    renderSchemaPage()
+    await switchToPropertiesTab()
+    await waitFor(() => screen.getByRole('button', { name: /^Data$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Data$/i }))
+    const section = await screen.findByTestId('schema-properties-section')
+    const item = await within(section).findByText(mockDataProperty.label)
+    fireEvent.click(item)
+    await waitFor(() => {
+      // Functional 레이블과 값 배지 모두 존재 확인
+      const matches = screen.getAllByText(/functional/i)
+      expect(matches.length).toBeGreaterThanOrEqual(1)
+    })
+  })
+})
+
+// ─────────────────────────────────────────────
+// 13. Individual Detail — 완전한 필드 표시
+// ─────────────────────────────────────────────
+describe('SchemaPage — Individual Detail 완전성', () => {
+  it('Individual Detail에 Object Property value가 표시된다', async () => {
+    renderSchemaPage()
+    await switchToIndividualsTab()
+    const section = await screen.findByTestId('schema-individuals-section')
+    const item = await within(section).findByText(mockIndividual.label!)
+    fireEvent.click(item)
+    await waitFor(() => {
+      // object_property_values[0].property_iri의 localName
+      expect(screen.getByText(/hasParent/i)).toBeInTheDocument()
+    })
+  })
+
+  it('Individual에 Provenance 탭 버튼이 표시된다', async () => {
+    renderSchemaPage()
+    await switchToIndividualsTab()
+    const section = await screen.findByTestId('schema-individuals-section')
+    const item = await within(section).findByText(mockIndividual.label!)
+    fireEvent.click(item)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Provenance$/i })).toBeInTheDocument()
+    })
+  })
+
+  it('Individual Provenance 탭에 provenance 레코드가 표시된다', async () => {
+    renderSchemaPage()
+    await switchToIndividualsTab()
+    const section = await screen.findByTestId('schema-individuals-section')
+    const item = await within(section).findByText(mockIndividual.label!)
+    fireEvent.click(item)
+    await waitFor(() => screen.getByRole('button', { name: /^Provenance$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Provenance$/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/test-source-1/i)).toBeInTheDocument()
     })
   })
 })

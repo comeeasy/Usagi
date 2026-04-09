@@ -42,6 +42,7 @@ class Concept(BaseModel):
     restrictions: list[PropertyRestriction] = []
     individual_count: int = 0
     subclass_count: int = 0               # 직계 하위 클래스 수 (트리 toggle 여부 판단)
+    is_deprecated: bool = False           # owl:deprecated true 여부
     properties: list[PropertyValue] = []  # 위에 해당하지 않는 임의 트리플
 
 

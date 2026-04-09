@@ -1,23 +1,25 @@
 /**
  * SchemaLeftPanel — Schema 탭 좌측 패널
  *
- * 두 섹션:
- *   ▼ Concepts  [Tree|Flat] [+ New Concept]
- *   ▼ Properties  [All|Object|Data] [+ New Property]
- *      각 property 항목 아래 "domain → range" 인라인 표시
+ * 서브탭:
+ *   [Concepts] [Properties]
+ *
+ *   Concepts  탭: ConceptTreeView + New Concept 버튼
+ *   Properties 탭: [All|Object|Data] 필터 + property 목록 + New Property 버튼
  */
 import { useState } from 'react'
-import { List, GitBranch, Plus, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { listConcepts } from '@/api/entities'
-import { listObjectProperties, listDataProperties } from '@/api/relations'
+import { listObjectProperties, listDataProperties, } from '@/api/relations'
+import { listIndividuals } from '@/api/entities'
 import ConceptTreeView from '@/components/entities/ConceptTreeView'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 import type { ObjectProperty, DataProperty } from '@/types/property'
+import type { Individual } from '@/types/individual'
 
 type PropertyFilter = 'all' | 'object' | 'data'
-type ConceptViewMode = 'flat' | 'tree'
+type ActiveTab = 'concepts' | 'properties' | 'individuals'
 
 const PAGE_SIZE = 50
 
@@ -38,12 +40,12 @@ interface Props {
   selectedIri: string | null
   onSelectConcept: (iri: string) => void
   onSelectProperty: (iri: string, kind: 'object' | 'data', property: ObjectProperty | DataProperty) => void
-  conceptViewMode: ConceptViewMode
-  onConceptViewModeChange: (m: ConceptViewMode) => void
+  onSelectIndividual: (iri: string) => void
   propertyFilter: PropertyFilter
   onPropertyFilterChange: (f: PropertyFilter) => void
   onNewConcept: () => void
   onNewProperty: () => void
+  onNewIndividual: () => void
 }
 
 export default function SchemaLeftPanel({
@@ -52,23 +54,15 @@ export default function SchemaLeftPanel({
   selectedIri,
   onSelectConcept,
   onSelectProperty,
-  conceptViewMode,
-  onConceptViewModeChange,
+  onSelectIndividual,
   propertyFilter,
   onPropertyFilterChange,
   onNewConcept,
   onNewProperty,
+  onNewIndividual,
 }: Props) {
-  const [conceptsOpen, setConceptsOpen] = useState(true)
-  const [propertiesOpen, setPropertiesOpen] = useState(true)
+  const [activeTab, setActiveTab] = useState<ActiveTab>('concepts')
   const { selectedGraphIris } = useNamedGraphs()
-
-  // ── Concept queries (flat mode만) ──────────────────────────────
-  const conceptsQuery = useQuery({
-    queryKey: ['concepts', ontologyId, dataset, 1, selectedGraphIris],
-    queryFn: () => listConcepts(ontologyId, { page: 1, pageSize: PAGE_SIZE, dataset, graphIris: selectedGraphIris }),
-    enabled: !!ontologyId && conceptViewMode === 'flat',
-  })
 
   // ── Property queries ───────────────────────────────────────────
   const objectQuery = useQuery({
@@ -89,6 +83,13 @@ export default function SchemaLeftPanel({
     .map((p) => ({ ...p, _kind: 'data' as const }))
   const allProps: TaggedProp[] = [...objectProps, ...dataProps]
 
+  // ── Individual query ──────────────────────────────────────────
+  const individualsQuery = useQuery({
+    queryKey: ['individuals', ontologyId, dataset, 1, selectedGraphIris],
+    queryFn: () => listIndividuals(ontologyId, { page: 1, pageSize: PAGE_SIZE, dataset, graphIris: selectedGraphIris }),
+    enabled: !!ontologyId,
+  })
+
   const propLoading =
     (propertyFilter !== 'data' && objectQuery.isLoading) ||
     (propertyFilter !== 'object' && dataQuery.isLoading)
@@ -105,56 +106,44 @@ export default function SchemaLeftPanel({
       className="flex flex-col h-full overflow-hidden border-r"
       style={{ borderColor: 'var(--color-border)' }}
     >
-      <div className="flex-1 overflow-y-auto">
-
-        {/* ══ Concepts Section ══════════════════════════════════ */}
-        <div data-testid="schema-concepts-section">
-          {/* Header */}
-          <div
-            className="flex items-center gap-1 px-3 py-2 border-b sticky top-0 z-10"
+      {/* ── Sub-tab bar ────────────────────────────────────────── */}
+      <div
+        className="flex flex-shrink-0 border-b"
+        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-surface)' }}
+      >
+        {(['concepts', 'properties', 'individuals'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className="flex-1 py-2 text-xs font-semibold transition-colors"
             style={{
-              backgroundColor: 'var(--color-bg-surface)',
-              borderColor: 'var(--color-border)',
+              color: activeTab === tab ? 'var(--color-primary)' : 'var(--color-text-muted)',
+              borderBottom: activeTab === tab ? '2px solid var(--color-primary)' : '2px solid transparent',
+              marginBottom: '-1px',
             }}
           >
-            <button
-              onClick={() => setConceptsOpen((v) => !v)}
-              className="p-0.5 hover:opacity-60"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
-              {conceptsOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            </button>
+            {tab === 'concepts' ? 'Concepts' : tab === 'properties' ? 'Properties' : 'Individuals'}
+          </button>
+        ))}
+      </div>
 
-            <span className="text-xs font-semibold flex-1" style={{ color: 'var(--color-text-secondary)' }}>
+      {/* ── Tab content ───────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+
+        {/* ══ Concepts Tab ══════════════════════════════════════ */}
+        <div
+          data-testid="schema-concepts-section"
+          className="flex flex-col flex-1 min-h-0"
+          style={{ display: activeTab === 'concepts' ? 'flex' : 'none' }}
+        >
+          {/* Header */}
+          <div
+            className="flex items-center gap-1 px-3 py-2 border-b flex-shrink-0"
+            style={{ borderColor: 'var(--color-border)' }}
+          >
+            <span className="text-xs font-medium flex-1" style={{ color: 'var(--color-text-secondary)' }}>
               Concepts
-              {conceptsQuery.data && conceptViewMode === 'flat' && (
-                <span className="ml-1 font-normal" style={{ color: 'var(--color-text-muted)' }}>
-                  ({conceptsQuery.data.total})
-                </span>
-              )}
             </span>
-
-            {/* Tree / Flat toggle */}
-            <div
-              className="flex border rounded overflow-hidden mr-1"
-              style={{ borderColor: 'var(--color-border)' }}
-            >
-              {(['flat', 'tree'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => onConceptViewModeChange(mode)}
-                  title={mode === 'flat' ? 'Flat list' : 'Tree view'}
-                  className="px-1.5 py-1 flex items-center transition-colors"
-                  style={{
-                    backgroundColor: conceptViewMode === mode ? 'var(--color-primary)' : 'var(--color-bg-elevated)',
-                    color: conceptViewMode === mode ? '#fff' : 'var(--color-text-secondary)',
-                  }}
-                >
-                  {mode === 'flat' ? <List size={11} /> : <GitBranch size={11} />}
-                </button>
-              ))}
-            </div>
-
             <button
               onClick={onNewConcept}
               className="flex items-center gap-0.5 px-2 py-1 rounded text-xs font-medium hover:opacity-80"
@@ -165,82 +154,32 @@ export default function SchemaLeftPanel({
             </button>
           </div>
 
-          {/* Concept list */}
-          {conceptsOpen && (
-            conceptViewMode === 'tree' ? (
-              <div style={{ minHeight: '160px' }}>
-                <ConceptTreeView
-                  ontologyId={ontologyId}
-                  dataset={dataset}
-                  selectedIri={selectedIri}
-                  onSelect={onSelectConcept}
-                />
-              </div>
-            ) : (
-              <div>
-                {conceptsQuery.isLoading && (
-                  <div className="flex justify-center py-6">
-                    <LoadingSpinner size="sm" />
-                  </div>
-                )}
-                {!conceptsQuery.isLoading && (conceptsQuery.data?.items ?? []).length === 0 && (
-                  <div className="px-3 py-4 text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
-                    No concepts
-                  </div>
-                )}
-                {(conceptsQuery.data?.items ?? []).map((concept) => (
-                  <div
-                    key={concept.iri}
-                    onClick={() => onSelectConcept(concept.iri)}
-                    className="px-3 py-2 cursor-pointer border-b text-sm transition-colors"
-                    style={{
-                      borderColor: 'var(--color-border)',
-                      backgroundColor:
-                        selectedIri === concept.iri ? 'var(--color-bg-elevated)' : 'transparent',
-                      color:
-                        selectedIri === concept.iri
-                          ? 'var(--color-primary)'
-                          : 'var(--color-text-primary)',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (selectedIri !== concept.iri)
-                        e.currentTarget.style.backgroundColor = 'var(--color-bg-surface)'
-                    }}
-                    onMouseLeave={(e) => {
-                      if (selectedIri !== concept.iri)
-                        e.currentTarget.style.backgroundColor = 'transparent'
-                    }}
-                  >
-                    {concept.label || localName(concept.iri)}
-                  </div>
-                ))}
-              </div>
-            )
-          )}
+          {/* Concept tree */}
+          <div className="flex-1 min-h-0" style={{ minHeight: '160px' }}>
+            <ConceptTreeView
+              ontologyId={ontologyId}
+              dataset={dataset}
+              selectedIri={selectedIri}
+              onSelect={onSelectConcept}
+            />
+          </div>
         </div>
 
-        {/* ══ Properties Section ════════════════════════════════ */}
-        <div data-testid="schema-properties-section" className="border-t" style={{ borderColor: 'var(--color-border)' }}>
+        {/* ══ Properties Tab ════════════════════════════════════ */}
+        <div
+          data-testid="schema-properties-section"
+          className="flex flex-col flex-1 min-h-0"
+          style={{ display: activeTab === 'properties' ? 'flex' : 'none' }}
+        >
           {/* Header */}
           <div
-            className="flex items-center gap-1 px-3 py-2 border-b sticky top-0 z-10"
-            style={{
-              backgroundColor: 'var(--color-bg-surface)',
-              borderColor: 'var(--color-border)',
-            }}
+            className="flex items-center gap-1 px-3 py-2 border-b flex-shrink-0"
+            style={{ borderColor: 'var(--color-border)' }}
           >
-            <button
-              onClick={() => setPropertiesOpen((v) => !v)}
-              className="p-0.5 hover:opacity-60"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
-              {propertiesOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            </button>
-
-            <span className="text-xs font-semibold flex-1" style={{ color: 'var(--color-text-secondary)' }}>
+            <span className="text-xs font-medium flex-1" style={{ color: 'var(--color-text-secondary)' }}>
               Properties
               {propTotal > 0 && (
-                <span className="ml-1 font-normal" style={{ color: 'var(--color-text-muted)' }}>
+                <span className="ml-1" style={{ color: 'var(--color-text-muted)' }}>
                   ({propTotal})
                 </span>
               )}
@@ -277,68 +216,146 @@ export default function SchemaLeftPanel({
           </div>
 
           {/* Property list */}
-          {propertiesOpen && (
-            <div>
-              {propLoading && (
-                <div className="flex justify-center py-6">
-                  <LoadingSpinner size="sm" />
-                </div>
-              )}
-              {!propLoading && allProps.length === 0 && (
-                <div className="px-3 py-4 text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
-                  No properties
-                </div>
-              )}
-              {allProps.map((prop) => {
-                const isObject = prop._kind === 'object'
-                const domainLabel = prop.domain[0] ? localName(prop.domain[0]) : '—'
-                const rangeLabel = prop.range[0] ? localName(prop.range[0] as string) : '—'
-                const isSelected = selectedIri === prop.iri
+          <div className="flex-1 overflow-y-auto">
+            {propLoading && (
+              <div className="flex justify-center py-6">
+                <LoadingSpinner size="sm" />
+              </div>
+            )}
+            {!propLoading && allProps.length === 0 && (
+              <div className="px-3 py-4 text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
+                No properties
+              </div>
+            )}
+            {allProps.map((prop) => {
+              const isObject = prop._kind === 'object'
+              const domainLabel = prop.domain[0] ? localName(prop.domain[0]) : '—'
+              const rangeLabel = prop.range[0] ? localName(prop.range[0] as string) : '—'
+              const isSelected = selectedIri === prop.iri
 
-                return (
-                  <div
-                    key={prop.iri}
-                    onClick={() => onSelectProperty(prop.iri, prop._kind, prop)}
-                    className="px-3 py-2 cursor-pointer border-b transition-colors"
-                    style={{
-                      borderColor: 'var(--color-border)',
-                      backgroundColor: isSelected ? 'var(--color-bg-elevated)' : 'transparent',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--color-bg-surface)'
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent'
-                    }}
-                  >
-                    {/* Label row */}
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className="text-xs font-mono w-3 flex-shrink-0"
-                        style={{ color: isObject ? '#A371F7' : 'var(--color-warning)' }}
-                      >
-                        {isObject ? '≈' : '—'}
-                      </span>
-                      <span
-                        className="text-sm font-medium truncate"
-                        style={{
-                          color: isSelected ? 'var(--color-primary)' : 'var(--color-text-primary)',
-                        }}
-                      >
-                        {prop.label || localName(prop.iri)}
-                      </span>
-                    </div>
-                    {/* domain → range */}
-                    <div className="ml-4 mt-0.5 text-xs flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
-                      <span>{domainLabel}</span>
-                      <span style={{ color: 'var(--color-text-secondary)' }}>→</span>
-                      <span>{rangeLabel}</span>
-                    </div>
+              return (
+                <div
+                  key={prop.iri}
+                  onClick={() => onSelectProperty(prop.iri, prop._kind, prop)}
+                  className="px-3 py-2 cursor-pointer border-b transition-colors"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: isSelected ? 'var(--color-bg-elevated)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--color-bg-surface)'
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent'
+                  }}
+                >
+                  {/* Label row */}
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="text-xs font-mono w-3 flex-shrink-0"
+                      style={{ color: isObject ? '#A371F7' : 'var(--color-warning)' }}
+                    >
+                      {isObject ? '≈' : '—'}
+                    </span>
+                    <span
+                      className="text-sm font-medium truncate"
+                      style={{
+                        color: isSelected ? 'var(--color-primary)' : 'var(--color-text-primary)',
+                      }}
+                    >
+                      {prop.label || localName(prop.iri)}
+                    </span>
                   </div>
-                )
-              })}
-            </div>
-          )}
+                  {/* domain → range */}
+                  <div className="ml-4 mt-0.5 text-xs flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+                    <span>{domainLabel}</span>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>→</span>
+                    <span>{rangeLabel}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* ══ Individuals Tab ═══════════════════════════════════ */}
+        <div
+          data-testid="schema-individuals-section"
+          className="flex flex-col flex-1 min-h-0"
+          style={{ display: activeTab === 'individuals' ? 'flex' : 'none' }}
+        >
+          {/* Header */}
+          <div
+            className="flex items-center gap-1 px-3 py-2 border-b flex-shrink-0"
+            style={{ borderColor: 'var(--color-border)' }}
+          >
+            <span className="text-xs font-medium flex-1" style={{ color: 'var(--color-text-secondary)' }}>
+              Individuals
+              {individualsQuery.data && individualsQuery.data.total > 0 && (
+                <span className="ml-1" style={{ color: 'var(--color-text-muted)' }}>
+                  ({individualsQuery.data.total})
+                </span>
+              )}
+            </span>
+            <button
+              onClick={onNewIndividual}
+              className="flex items-center gap-0.5 px-2 py-1 rounded text-xs font-medium hover:opacity-80"
+              style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
+            >
+              <Plus size={11} />
+              New Individual
+            </button>
+          </div>
+
+          {/* Individual list */}
+          <div className="flex-1 overflow-y-auto">
+            {individualsQuery.isLoading && (
+              <div className="flex justify-center py-6">
+                <LoadingSpinner size="sm" />
+              </div>
+            )}
+            {!individualsQuery.isLoading && (individualsQuery.data?.items ?? []).length === 0 && (
+              <div className="px-3 py-4 text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
+                No individuals
+              </div>
+            )}
+            {(individualsQuery.data?.items ?? []).map((ind: Individual) => {
+              const label = ind.label || localName(ind.iri)
+              const isSelected = selectedIri === ind.iri
+              const typeName = ind.types[0] ? localName(ind.types[0]) : null
+
+              return (
+                <div
+                  key={ind.iri}
+                  onClick={() => onSelectIndividual(ind.iri)}
+                  className="px-3 py-2 cursor-pointer border-b transition-colors"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: isSelected ? 'var(--color-bg-elevated)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--color-bg-surface)'
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent'
+                  }}
+                  title={ind.iri}
+                >
+                  <div
+                    className="text-sm font-medium truncate"
+                    style={{ color: isSelected ? 'var(--color-primary)' : 'var(--color-text-primary)' }}
+                  >
+                    {label}
+                  </div>
+                  {typeName && (
+                    <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--color-text-muted)' }}>
+                      {typeName}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
 
       </div>

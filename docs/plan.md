@@ -1769,3 +1769,214 @@ async def paginated_class_query(store, class_pattern, extra, gf, page, page_size
 - [x] **PC-4** 테스트 통과 확인 — 26/26 pass
 
 
+
+---
+
+## Section 28 — Schema 탭 UI 개선
+
+### 28-1. Schema 탭 단순화 (ConceptGraphPanel 등 제거)
+
+**배경:** Schema 탭에 ConceptGraphPanel, SchemaReasonerPanel, IndividualsPanel, IndividualDetailPanel이 포함되어 레이아웃이 복잡하고 노이즈가 많았음. Entity/Relation 트리뷰만 남기는 방향으로 정리.
+
+**변경 내용:**
+- `SchemaPage.tsx`: 4열+2열 레이아웃 → 단순 2열 (좌: 트리 30% | 우: 상세/폼 70%)
+- 제거된 컴포넌트: `ConceptGraphPanel`, `SchemaReasonerPanel`, `IndividualsPanel`, `IndividualDetailPanel`
+- 제거된 state: `selectedIndividualIri`, `handleSelectIndividual`
+- `SchemaPage.test.tsx`: 제거된 컴포넌트 관련 10개 테스트 삭제, 나머지 25/25 통과
+
+#### 작업 체크리스트
+
+- [x] **S28-1** `SchemaPage.tsx` 4열 레이아웃 → 2열 단순화
+- [x] **S28-2** `SchemaPage.test.tsx` 테스트 정리 (25/25 pass)
+- [x] **S28-3** 커밋
+
+---
+
+### 28-2. Concept Flat view 제거 (Tree view만 유지)
+
+**배경:** Concept 목록에 Flat list와 Tree view 두 가지 모드가 있었으나, Tree view(Protégé 방식)만으로 충분. 토글 버튼 제거.
+
+**변경 내용:**
+- `SchemaLeftPanel.tsx`: `ConceptViewMode` type, flat용 `conceptsQuery`, Tree/Flat 토글 버튼, flat 렌더링 코드 제거
+- `SchemaPage.tsx`: `conceptViewMode` state, `setConceptViewMode` prop 제거
+- 불필요해진 `List`, `GitBranch` lucide import 제거
+
+#### 작업 체크리스트
+
+- [x] **S28-4** `SchemaLeftPanel.tsx` flat view 코드 제거
+- [x] **S28-5** `SchemaPage.tsx` 관련 state/prop 제거
+- [x] **S28-6** 테스트 통과 확인 (25/25 pass)
+
+---
+
+### 28-3. Concepts / Properties 서브탭 분리
+
+**배경:** Concepts 아래 Properties가 세로로 나열되어 스크롤이 길어지는 문제. 서브탭으로 분리하여 UX 개선.
+
+**변경 내용:**
+- `SchemaLeftPanel.tsx`: accordion 토글 제거 → 상단 서브탭 바(`Concepts | Properties`) 추가
+- 두 섹션 모두 DOM에 상시 존재, `display: none/flex`로 전환 (testid 유지)
+- `SchemaPage.test.tsx`: Properties 탭이 기본 숨김이므로 관련 3개 테스트에 `switchToPropertiesTab()` 헬퍼 추가
+
+#### 작업 체크리스트
+
+- [x] **S28-7** `SchemaLeftPanel.tsx` 서브탭 구현
+- [x] **S28-8** `SchemaPage.test.tsx` 테스트 수정 (25/25 pass)
+
+---
+
+### 28-4. Individuals 서브탭 추가
+
+**배경:** Individual 관련 컴포넌트(`IndividualsPanel`, `IndividualDetailPanel`, `IndividualForm`, `IndividualsSidebar`)가 존재하지만 진입점이 없는 상태. Schema 서브탭에 `Concepts | Properties | Individuals`로 추가하여 Protégé 구조 완성.
+
+**설계:**
+- `SchemaLeftPanel` 서브탭에 `Individuals` 추가 (3번째 탭)
+- Individuals 탭 내용: 전체 Individual 목록 (type 필터 선택 가능) + New Individual 버튼
+- 우측 상세 패널: Individual 선택 시 `IndividualDetailPanel` 표시
+- `IndividualForm`: create/edit 모드 (`SchemaPage`의 우측 패널에서 처리)
+- `IndividualsSidebar`: 현재 미사용 → Concept detail Relations 탭 등에서 재활용 검토
+
+**작업 범위:**
+- `SchemaLeftPanel.tsx`: Individuals 탭 추가, `listIndividuals` 쿼리, individual 아이템 렌더링
+- `SchemaPage.tsx`: `selectedKind`에 `'individual'` 추가, `handleSelectIndividual`, `IndividualDetailPanel` 우측 패널 연결, `IndividualForm` create/edit 연결
+- `SchemaPage.test.tsx`: 새 테스트 추가
+
+#### 작업 체크리스트
+
+- [x] **S28-9** `SchemaLeftPanel.tsx` — Individuals 탭 구현 (목록 + New 버튼 + type 필터)
+- [x] **S28-10** `SchemaPage.tsx` — individual 선택/상세/폼 연결
+- [x] **S28-11** `SchemaPage.test.tsx` — Individuals 탭 관련 테스트 추가
+- [x] **S28-12** 테스트 통과 확인
+
+---
+
+## Section 29 — Detail 패널 전면 개선
+
+### 배경
+
+현재 Concept/Property/Individual 각 detail 패널의 문제:
+
+| 항목 | 문제 |
+|------|------|
+| Concept | `individual_count`, `subclass_count`, `properties`(PropertyValue[]), `is_deprecated` 미표시. Provenance가 `EntityDetailPanel` 내부에 숨겨져 있고 "No provenance data for concepts" 텍스트만 표시. |
+| Property | 탭 구조 없음. `superProperties`, DataProperty의 `isFunctional` 미표시. Provenance 탭 없음. |
+| Individual | `IndividualDetailPanel`에 탭 구조 없음. Provenance가 별도 `EntityDetailPanel`에만 있어 Schema 탭 Individual 뷰에서 접근 불가. Object property 값의 target이 클릭 불가. |
+
+### 목표
+
+1. 각 detail 패널이 해당 타입의 **모든 필드**를 표시
+2. **세 타입 모두** `Detail` 탭 옆에 `Provenance` 탭 추가
+3. Concept: `Detail | Relations | Provenance` (3탭)
+4. Property: `Detail | Provenance` (2탭)
+5. Individual: `Detail | Provenance` (2탭)
+
+### 변경 대상 파일
+
+- `frontend/src/components/schema/SchemaDetailPanel.tsx` — Concept·Property 뷰 통합
+- `frontend/src/components/schema/IndividualDetailPanel.tsx` — Individual 뷰
+
+### 각 탭별 표시 내용
+
+#### Concept — Detail 탭
+- IRI (복사 버튼)
+- Label
+- Comment
+- individual_count (N instances)
+- subclass_count (N subclasses)
+- is_deprecated 배지
+- Parent Classes (super_classes) — IRI 배지
+- Equivalent Classes — IRI 배지
+- Disjoint With — IRI 배지
+- Restrictions (type, property_iri, value, cardinality)
+- Properties (PropertyValue[]) — predicate/value 테이블
+
+#### Concept — Relations 탭 (기존 유지)
+- as domain / as range property 목록
+
+#### Concept — Provenance 탭 (신규)
+- ProvenancePanel (records 없으면 "No provenance records")
+
+#### Property — Detail 탭
+- type 배지 (Object / Data)
+- IRI (복사 버튼)
+- Label
+- Comment
+- Domain (클릭 → Concept 포커스)
+- Range (Object: 클릭 가능, Data: xsd 타입 plain)
+- Super Properties — IRI 배지
+- Characteristics (Object only)
+- Inverse Of (Object only)
+- isFunctional (Data only)
+
+#### Property — Provenance 탭 (신규)
+- ProvenancePanel (항상 empty)
+
+#### Individual — Detail 탭
+- IRI (복사 버튼)
+- Label
+- Types — IRI 배지
+- Data Property values (property → value : datatype)
+- Object Property values (property → target, target 클릭 가능)
+
+#### Individual — Provenance 탭 (신규, 기존 `IndividualDetailPanel`에서 이관)
+- ProvenancePanel (individual.provenance 사용)
+
+### Mock 데이터 보강 (`handlers.ts`)
+
+`mockConcept`: `individual_count`, `subclass_count`, `properties` 필드 추가
+`mockObjectProperty`: `superProperties` 필드 추가
+`mockIndividual`: `provenance` 레코드 1개 이상 추가
+
+### 작업 체크리스트
+
+- [x] **D29-1** `handlers.ts` mock 데이터 보강 (Concept, Property, Individual)
+- [x] **D29-2** `SchemaDetailPanel.tsx` — Concept Detail 탭: 모든 필드 표시
+- [x] **D29-3** `SchemaDetailPanel.tsx` — Concept에 Provenance 탭 추가 (3탭)
+- [x] **D29-4** `SchemaDetailPanel.tsx` — Property 뷰: 탭 구조 추가 (`Detail | Provenance`)
+- [x] **D29-5** `SchemaDetailPanel.tsx` — Property Detail 탭: superProperties, isFunctional 추가
+- [x] **D29-6** `IndividualDetailPanel.tsx` — 탭 구조 추가 (`Detail | Provenance`)
+- [x] **D29-7** `IndividualDetailPanel.tsx` — Provenance 탭 연결 (individual.provenance)
+- [x] **D29-8** `IndividualDetailPanel.tsx` — Object property target 클릭 가능하게 (onNavigateToIndividual prop)
+- [x] **D29-9** `SchemaPage.test.tsx` — 추가된 필드·탭 관련 테스트 작성
+- [x] **D29-10** 테스트 통과 확인
+
+---
+
+## Section 30 — `get_concept` 누락 필드 수정
+
+### 배경
+
+`GET /concepts/{iri}` 엔드포인트에서 두 필드가 잘못 반환됨:
+
+| 필드 | 문제 |
+|---|---|
+| `subclass_count` | `list_concepts`에서는 계산하지만 `get_concept`에는 쿼리 없음 → 항상 0 반환 |
+| `is_deprecated` | `owl:deprecated true` triple이 존재해도 `properties[]`로 내려가고 boolean으로 추출 안 됨 |
+
+### 수정 계획
+
+**`backend/api/concepts.py` `get_concept` 함수:**
+
+1. `sub_q` 추가:
+   ```sparql
+   SELECT (COUNT(DISTINCT ?child) AS ?cnt)
+   WHERE { GRAPH ?_g { ?child rdfs:subClassOf <{iri}> } {gf} }
+   ```
+   `asyncio.gather`에 포함시켜 병렬 실행
+
+2. triples 분류 루프에 `owl:deprecated` predicate 처리 추가:
+   ```python
+   _DEPRECATED = "http://www.w3.org/2002/07/owl#deprecated"
+   ...
+   elif p == _DEPRECATED:
+       is_deprecated = (o_val.lower() == "true")
+   ```
+
+3. `return Concept(...)`에 `subclass_count=subclass_count, is_deprecated=is_deprecated` 포함
+
+### 작업 체크리스트
+
+- [x] **C30-1** `get_concept` — `sub_q` 추가, `asyncio.gather` 4-tuple로 확장
+- [x] **C30-2** `get_concept` — `_DEPRECATED` predicate 분류 추가
+- [x] **C30-3** `get_concept` — `return Concept(...)` 필드 보완
+- [x] **C30-4** 테스트 추가 (`tests/test_concept_detail_fields.py`, 4/4 통과)

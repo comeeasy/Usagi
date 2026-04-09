@@ -18,8 +18,16 @@ export const mockConcept = {
   ontology_id: 'test-ont-uuid',
   label: 'Person',
   comment: 'A human being',
-  super_classes: [],
-  individual_count: 1,
+  super_classes: ['https://test.example.org/onto#Agent'],
+  equivalent_classes: [],
+  disjoint_with: [],
+  restrictions: [],
+  individual_count: 3,
+  subclass_count: 2,
+  properties: [
+    { predicate: 'https://test.example.org/onto#age', value: 'xsd:integer', value_type: 'uri' as const },
+  ],
+  is_deprecated: false,
 }
 
 export const mockObjectProperty = {
@@ -29,8 +37,9 @@ export const mockObjectProperty = {
   comment: 'Relates a person to their parent',
   domain: ['https://test.example.org/onto#Person'],
   range: ['https://test.example.org/onto#Person'],
-  characteristics: [],
-  inverseOf: '',
+  superProperties: ['https://test.example.org/onto#hasAncestor'],
+  characteristics: ['Asymmetric'],
+  inverseOf: 'https://test.example.org/onto#hasChild',
 }
 
 export const mockDataProperty = {
@@ -40,7 +49,8 @@ export const mockDataProperty = {
   comment: 'The age of a person',
   domain: ['https://test.example.org/onto#Person'],
   range: ['xsd:integer'],
-  isFunctional: false,
+  superProperties: [],
+  isFunctional: true,
 }
 
 export const mockIndividual = {
@@ -51,8 +61,18 @@ export const mockIndividual = {
   data_property_values: [
     { property_iri: 'https://test.example.org/onto#age', value: '30', datatype: 'xsd:integer' },
   ],
-  object_property_values: [],
-  provenance: [],
+  object_property_values: [
+    { property_iri: 'https://test.example.org/onto#hasParent', target_iri: 'https://test.example.org/onto#jane' },
+  ],
+  provenance: [
+    {
+      source_id: 'test-source-1',
+      source_type: 'file',
+      generated_at: '2026-03-25T00:00:00Z',
+      record_id: 'rec-001',
+      named_graph_iri: 'https://test.example.org/graphs/schema',
+    },
+  ],
 }
 
 export const mockNamedGraph = {
@@ -96,11 +116,16 @@ export const handlers = [
     return HttpResponse.json({ ...mockConcept, ...body }, { status: 201 })
   }),
 
+  // Individual detail
+  http.get(`${BASE}/ontologies/:id/individuals/:iri`, () =>
+    HttpResponse.json(mockIndividual),
+  ),
+
   // Individuals (with optional type filter)
   http.get(`${BASE}/ontologies/:id/individuals`, ({ request }) => {
     const url = new URL(request.url)
     const typeIri = url.searchParams.get('type')
-    if (typeIri === mockConcept.iri) {
+    if (!typeIri || typeIri === mockConcept.iri) {
       return HttpResponse.json({ items: [mockIndividual], total: 1, page: 1, page_size: 20 })
     }
     return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 })

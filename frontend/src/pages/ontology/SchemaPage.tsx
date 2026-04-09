@@ -14,13 +14,19 @@ import ErrorBoundary from '@/components/shared/ErrorBoundary'
 import ResizeHandle from '@/components/shared/ResizeHandle'
 import SchemaLeftPanel from '@/components/schema/SchemaLeftPanel'
 import SchemaDetailPanel from '@/components/schema/SchemaDetailPanel'
+import IndividualDetailPanel from '@/components/schema/IndividualDetailPanel'
 import ConceptForm from '@/components/entities/ConceptForm'
 import PropertyForm from '@/components/relations/PropertyForm'
+import IndividualForm from '@/components/entities/IndividualForm'
 import {
   createConcept,
   updateConcept,
   deleteConcept,
   getConcept,
+  createIndividual,
+  updateIndividual,
+  deleteIndividual,
+  getIndividual,
 } from '@/api/entities'
 import {
   createObjectProperty,
@@ -33,16 +39,16 @@ import { getOntology } from '@/api/ontologies'
 import { useDataset } from '@/contexts/DatasetContext'
 import type { Concept, ConceptUpdate } from '@/types/concept'
 import type { ObjectProperty, DataProperty, ObjectPropertyCreate, DataPropertyCreate } from '@/types/property'
+import type { Individual, IndividualUpdate } from '@/types/individual'
 
-type SelectionKind = 'concept' | 'property' | null
+type SelectionKind = 'concept' | 'property' | 'individual' | null
 type PropertyFilter = 'all' | 'object' | 'data'
-type ConceptViewMode = 'flat' | 'tree'
-
 
 type EditingItem =
   | { kind: 'concept'; data: Concept }
   | { kind: 'object-property'; data: ObjectProperty }
   | { kind: 'data-property'; data: DataProperty }
+  | { kind: 'individual'; data: Individual }
 
 export default function SchemaPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
@@ -56,12 +62,12 @@ export default function SchemaPage() {
   const [selectedProperty, setSelectedProperty] = useState<ObjectProperty | DataProperty | null>(null)
 
   // ── Left panel controls ──────────────────────────────────────
-  const [conceptViewMode, setConceptViewMode] = useState<ConceptViewMode>('flat')
   const [propertyFilter, setPropertyFilter] = useState<PropertyFilter>('all')
 
   // ── Forms ────────────────────────────────────────────────────
   const [showConceptForm, setShowConceptForm] = useState(false)
   const [showPropertyForm, setShowPropertyForm] = useState(false)
+  const [showIndividualForm, setShowIndividualForm] = useState(false)
   const [editingItem, setEditingItem] = useState<EditingItem | null>(null)
 
   // ── Feedback ─────────────────────────────────────────────────
@@ -182,6 +188,37 @@ export default function SchemaPage() {
     onError: showFeedbackErr,
   })
 
+  const createIndividualMutation = useMutation({
+    mutationFn: (d: Parameters<typeof createIndividual>[1]) => createIndividual(ontologyId!, d, dataset),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
+      setShowIndividualForm(false)
+      showFeedbackOk()
+    },
+    onError: showFeedbackErr,
+  })
+
+  const updateIndividualMutation = useMutation({
+    mutationFn: ({ iri, data }: { iri: string; data: IndividualUpdate }) =>
+      updateIndividual(ontologyId!, iri, data, dataset),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
+      queryClient.invalidateQueries({ queryKey: ['individual', ontologyId] })
+      setEditingItem(null)
+      showFeedbackOk()
+    },
+    onError: showFeedbackErr,
+  })
+
+  const deleteIndividualMutation = useMutation({
+    mutationFn: (iri: string) => deleteIndividual(ontologyId!, iri, dataset),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['individuals', ontologyId] })
+      clearSelection()
+    },
+    onError: showFeedbackErr,
+  })
+
   // ── Handlers ─────────────────────────────────────────────────
   const clearSelection = () => {
     setSelectedIri(null)
@@ -205,6 +242,17 @@ export default function SchemaPage() {
     setSelectedProperty(property)
     setShowConceptForm(false)
     setShowPropertyForm(false)
+    setShowIndividualForm(false)
+    setEditingItem(null)
+  }
+
+  const handleSelectIndividual = (iri: string) => {
+    setSelectedIri(iri)
+    setSelectedKind('individual')
+    setSelectedProperty(null)
+    setShowConceptForm(false)
+    setShowPropertyForm(false)
+    setShowIndividualForm(false)
     setEditingItem(null)
   }
 
@@ -232,13 +280,22 @@ export default function SchemaPage() {
     }
   }
 
+  const handleEditIndividual = () => {
+    if (selectedIri && selectedKind === 'individual') {
+      getIndividual(ontologyId!, selectedIri, dataset)
+        .then((ind) => setEditingItem({ kind: 'individual', data: ind as Individual }))
+        .catch(() => {})
+    }
+  }
+
   const handleDelete = () => {
     if (!selectedIri) return
     if (selectedKind === 'concept') deleteConceptMutation.mutate(selectedIri)
     else if (selectedKind === 'property') deletePropertyMutation.mutate(selectedIri)
+    else if (selectedKind === 'individual') deleteIndividualMutation.mutate(selectedIri)
   }
 
-  const isShowingForm = showConceptForm || showPropertyForm || !!editingItem
+  const isShowingForm = showConceptForm || showPropertyForm || showIndividualForm || !!editingItem
 
   return (
     <ErrorBoundary>
@@ -271,12 +328,12 @@ export default function SchemaPage() {
               selectedIri={selectedIri}
               onSelectConcept={handleSelectConcept}
               onSelectProperty={handleSelectProperty}
-              conceptViewMode={conceptViewMode}
-              onConceptViewModeChange={setConceptViewMode}
+              onSelectIndividual={handleSelectIndividual}
               propertyFilter={propertyFilter}
               onPropertyFilterChange={setPropertyFilter}
-              onNewConcept={() => { setShowConceptForm(true); setShowPropertyForm(false); setEditingItem(null) }}
-              onNewProperty={() => { setShowPropertyForm(true); setShowConceptForm(false); setEditingItem(null) }}
+              onNewConcept={() => { setShowConceptForm(true); setShowPropertyForm(false); setShowIndividualForm(false); setEditingItem(null) }}
+              onNewProperty={() => { setShowPropertyForm(true); setShowConceptForm(false); setShowIndividualForm(false); setEditingItem(null) }}
+              onNewIndividual={() => { setShowIndividualForm(true); setShowConceptForm(false); setShowPropertyForm(false); setEditingItem(null) }}
             />
           </Panel>
 
@@ -423,8 +480,69 @@ export default function SchemaPage() {
                 </div>
               )}
 
-              {/* Detail panel */}
-              {!isShowingForm && (
+              {/* Individual create */}
+              {showIndividualForm && (
+                <div className="flex flex-col h-full overflow-y-auto p-4">
+                  <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
+                    Create Individual
+                  </h3>
+                  <IndividualForm
+                    mode="create"
+                    iriPrefix={iriPrefix}
+                    onSubmit={(v) => createIndividualMutation.mutate({
+                      iri: v.iri, label: v.label,
+                      types: v.typeIris,
+                      data_property_values: v.dataProperties,
+                      object_property_values: v.objectProperties,
+                    })}
+                    onCancel={() => setShowIndividualForm(false)}
+                  />
+                </div>
+              )}
+
+              {/* Individual edit */}
+              {editingItem?.kind === 'individual' && (
+                <div className="flex flex-col h-full overflow-y-auto p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Edit Individual</h3>
+                    <button onClick={() => setEditingItem(null)} className="p-1 hover:opacity-60" style={{ color: 'var(--color-text-secondary)' }}>×</button>
+                  </div>
+                  <IndividualForm
+                    mode="edit"
+                    initialValues={{
+                      iri: editingItem.data.iri,
+                      label: editingItem.data.label,
+                      typeIris: editingItem.data.types,
+                      dataProperties: editingItem.data.data_property_values as { property_iri: string; value: string; datatype?: string }[],
+                      objectProperties: editingItem.data.object_property_values,
+                    }}
+                    onSubmit={(v) => updateIndividualMutation.mutate({
+                      iri: editingItem.data.iri,
+                      data: {
+                        label: v.label,
+                        types: v.typeIris,
+                        data_property_values: v.dataProperties,
+                        object_property_values: v.objectProperties,
+                      } as IndividualUpdate,
+                    })}
+                    onCancel={() => setEditingItem(null)}
+                  />
+                </div>
+              )}
+
+              {/* Individual detail */}
+              {!isShowingForm && selectedKind === 'individual' && selectedIri && (
+                <IndividualDetailPanel
+                  ontologyId={ontologyId!}
+                  dataset={dataset}
+                  individualIri={selectedIri}
+                  onEdit={handleEditIndividual}
+                  onDelete={handleDelete}
+                />
+              )}
+
+              {/* Concept / Property detail panel */}
+              {!isShowingForm && selectedKind !== 'individual' && (
                 <SchemaDetailPanel
                   ontologyId={ontologyId!}
                   dataset={dataset}

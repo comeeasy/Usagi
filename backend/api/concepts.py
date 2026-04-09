@@ -267,11 +267,17 @@ SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE {{
     GRAPH ?_g {{ ?ind rdf:type <{iri}> }}
     {gf}
 }}"""
+    sub_q = f"""{_P}
+SELECT (COUNT(DISTINCT ?sub) AS ?cnt) WHERE {{
+    GRAPH ?_g {{ ?sub rdfs:subClassOf <{iri}> . FILTER(isIRI(?sub)) }}
+    {gf}
+}}"""
 
-    triples_rows, rest_rows, cnt_rows = await asyncio.gather(
+    triples_rows, rest_rows, cnt_rows, sub_rows = await asyncio.gather(
         store.sparql_select(triples_q, dataset=dataset),
         store.sparql_select(rest_q,    dataset=dataset),
         store.sparql_select(cnt_q,     dataset=dataset),
+        store.sparql_select(sub_q,     dataset=dataset),
     )
 
     # predicate URI 기반 분류 — 어휘 추가 시 여기만 수정
@@ -287,15 +293,17 @@ SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE {{
     _SUBCLASSOF  = "http://www.w3.org/2000/01/rdf-schema#subClassOf"
     _EQUIVALENT  = "http://www.w3.org/2002/07/owl#equivalentClass"
     _DISJOINT    = "http://www.w3.org/2002/07/owl#disjointWith"
+    _DEPRECATED  = "http://www.w3.org/2002/07/owl#deprecated"
 
     label: str = iri
     comment: str | None = None
     super_classes: list[str] = []
     equivalent_classes: list[str] = []
     disjoint_with: list[str] = []
+    is_deprecated: bool = False
     properties: list[PropertyValue] = []
 
-    _KNOWN_PREDS = _LABEL_PREDS | _COMMENT_PREDS | {_SUBCLASSOF, _EQUIVALENT, _DISJOINT}
+    _KNOWN_PREDS = _LABEL_PREDS | _COMMENT_PREDS | {_SUBCLASSOF, _EQUIVALENT, _DISJOINT, _DEPRECATED}
 
     for row in triples_rows:
         p = _v(row.get("p"))
@@ -316,6 +324,8 @@ SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE {{
             equivalent_classes.append(o_val)
         elif p == _DISJOINT and o_is_iri:
             disjoint_with.append(o_val)
+        elif p == _DEPRECATED and o_val.lower() in ("true", "1"):
+            is_deprecated = True
         elif p not in _KNOWN_PREDS:
             properties.append(PropertyValue(
                 predicate=p,
@@ -345,12 +355,14 @@ SELECT (COUNT(DISTINCT ?ind) AS ?cnt) WHERE {{
             restrictions.append(PropertyRestriction(property_iri=prop, type="exactCardinality", value=str(c), cardinality=c))
 
     individual_count = int(_v(cnt_rows[0].get("cnt"), "0")) if cnt_rows else 0
+    subclass_count = int(_v(sub_rows[0].get("cnt"), "0")) if sub_rows else 0
 
     return Concept(
         iri=iri, ontology_id=ontology_id, label=label or iri, comment=comment,
         super_classes=super_classes, equivalent_classes=equivalent_classes,
         disjoint_with=disjoint_with, restrictions=restrictions,
-        individual_count=individual_count, properties=properties,
+        individual_count=individual_count, subclass_count=subclass_count,
+        is_deprecated=is_deprecated, properties=properties,
     )
 
 
