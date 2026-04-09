@@ -3,8 +3,8 @@ Tests for SearchService — SPARQL 키워드 검색.
 """
 import pytest
 import pytest_asyncio
-from services.ontology_store import OntologyStore
-from services.search_service import search_entities, search_relations, vector_search
+from tests.conftest import MemoryOntologyStore
+from api.search import search_entities, search_relations, vector_search
 
 ONT_IRI = "https://test.example.org/onto"
 KG = f"{ONT_IRI}/kg"
@@ -18,7 +18,7 @@ PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 
 @pytest_asyncio.fixture
 async def store_with_data():
-    store = OntologyStore(path=None)
+    store = MemoryOntologyStore()
     await store.sparql_update(f"""{_PREFIXES}
 INSERT DATA {{
     GRAPH <{KG}> {{

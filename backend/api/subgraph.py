@@ -15,40 +15,24 @@ Neo4j Cypher BFS 대신 SPARQL iterative BFS 로 구현한다.
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
-from services.ontology_graph import graphs_filter_clause
+from services.ontology_graph import graphs_filter_clause, resolve_ontology_iri
+from services.sparql_utils import v as _v
 
 router = APIRouter(prefix="/ontologies/{ontology_id}", tags=["subgraph"])
 
 _NODE_LIMIT = 500
 _EDGE_CHUNK = 30
 
-_PREFIXES = """
+_PREFIXES = """\
 PREFIX owl:  <http://www.w3.org/2002/07/owl#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX dc:   <http://purl.org/dc/terms/>
 """
 
 
-def _v(term, default: str = "") -> str:
-    if term is None:
-        return default
-    if isinstance(term, dict):
-        return term.get("value", default)
-    return str(term)
-
-
 async def _resolve_ont_iri(store, ontology_id: str, dataset: str | None = None) -> str | None:
     """UUID(dc:identifier)로 온톨로지 IRI 조회."""
-    rows = await store.sparql_select(f"""
-        {_PREFIXES}
-        SELECT ?iri WHERE {{
-            GRAPH ?g {{
-                ?iri a owl:Ontology ;
-                     dc:identifier "{ontology_id}" .
-            }}
-        }} LIMIT 1
-    """, dataset=dataset)
-    return _v(rows[0].get("iri")) if rows else None
+    return await resolve_ontology_iri(store, ontology_id, dataset=dataset)
 
 
 def _values_clause(iris: set[str]) -> str:

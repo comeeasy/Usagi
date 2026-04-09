@@ -115,4 +115,32 @@ describe('NamedGraphList', () => {
     })
     expect(screen.getByRole('checkbox')).not.toBeChecked()
   })
+
+  it('shows edit (pencil) button for each graph', async () => {
+    renderList()
+    await waitFor(() => screen.getByText(mockNamedGraph.iri))
+    expect(screen.getByTitle('Edit TTL')).toBeInTheDocument()
+  })
+
+  it('clicking edit button opens TTL editor panel', async () => {
+    renderList()
+    await waitFor(() => screen.getByTitle('Edit TTL'))
+    fireEvent.click(screen.getByTitle('Edit TTL'))
+    await waitFor(() => {
+      expect(screen.getByText(/edit ttl/i)).toBeInTheDocument()
+    })
+  })
+
+  it('clicking edit button again (toggle) closes the TTL editor panel', async () => {
+    renderList()
+    await waitFor(() => screen.getByTitle('Edit TTL'))
+    fireEvent.click(screen.getByTitle('Edit TTL'))
+    await waitFor(() => screen.getByText(/edit ttl/i))
+
+    // Clicking the edit button again toggles the panel closed
+    fireEvent.click(screen.getByTitle('Edit TTL'))
+    await waitFor(() => {
+      expect(screen.queryByText(/edit ttl/i)).not.toBeInTheDocument()
+    })
+  })
 })

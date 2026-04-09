@@ -161,4 +161,12 @@ export const handlers = [
       bindings: [{ c: { type: 'uri', value: 'https://test.example.org/onto#Person' } }],
     })
   }),
+
+  // TTL editor
+  http.get(`${BASE}/ontologies/:id/graphs/ttl`, () =>
+    new HttpResponse('@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<https://ex.org/A> a owl:Class .\n', {
+      headers: { 'Content-Type': 'text/turtle; charset=utf-8' },
+    }),
+  ),
+  http.put(`${BASE}/ontologies/:id/graphs/ttl`, () => new HttpResponse(null, { status: 204 })),
 ]

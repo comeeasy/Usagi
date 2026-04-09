@@ -19,6 +19,7 @@ from collections import defaultdict
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from services.ontology_graph import resolve_ontology_iri, manual_graph_iri, graphs_filter_clause
+from services.sparql_utils import v as _v, esc as _esc, xsd_full as _xsd_full, xsd_short as _xsd_short, COMMON_PREFIXES
 from models.individual import (
     DataPropertyValue,
     Individual,
@@ -31,19 +32,9 @@ from models.ontology import PaginatedResponse
 
 router = APIRouter(prefix="/ontologies/{ontology_id}/individuals", tags=["individuals"])
 
-_P = """
-PREFIX owl:  <http://www.w3.org/2002/07/owl#>
-PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
-PREFIX prov: <http://www.w3.org/ns/prov#>
-"""
+_P = COMMON_PREFIXES
 
 _XSD_BASE = "http://www.w3.org/2001/XMLSchema#"
-
-
-def _esc(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 _INDIVIDUAL_PATTERN = """
@@ -72,26 +63,6 @@ def _individual_keyword_filter(q: str | None) -> str:
       CONTAINS(LCASE(STR(?iri)), "{ql}") ||
       (bound(?label) && CONTAINS(LCASE(STR(?label)), "{ql}"))
     )"""
-
-
-def _v(term: dict | None, default: str = "") -> str:
-    if term is None:
-        return default
-    if isinstance(term, dict):
-        return term.get("value", default)
-    return str(term)
-
-
-def _xsd_full(xsd: str) -> str:
-    if xsd.startswith("xsd:"):
-        return _XSD_BASE + xsd[4:]
-    return xsd if xsd.startswith("http") else _XSD_BASE + xsd
-
-
-def _xsd_short(full: str) -> str:
-    if full.startswith(_XSD_BASE):
-        return "xsd:" + full[len(_XSD_BASE):]
-    return full
 
 
 # ── 목록 ──────────────────────────────────────────────────────────────────
@@ -244,22 +215,21 @@ async def get_provenance(
     store = request.app.state.ontology_store
     iri = unquote(iri)
 
-    graph_rows = await store.sparql_select(f"""{_P}
-SELECT DISTINCT ?g WHERE {{ GRAPH ?g {{ <{iri}> ?p ?o }} }}""", dataset=dataset)
-
-    records = []
-    for row in graph_rows:
-        g = _v(row.get("g"))
-        prov_rows = await store.sparql_select(f"""{_P}
-SELECT ?ingestedAt ?attr (COUNT(*) AS ?cnt) WHERE {{
-    GRAPH <{g}> {{
+    # 단일 배치 쿼리: 모든 Named Graph의 provenance 메타를 한 번에 조회
+    prov_rows = await store.sparql_select(f"""{_P}
+SELECT ?g ?ingestedAt ?attr (COUNT(*) AS ?cnt) WHERE {{
+    GRAPH ?g {{
         <{iri}> ?p ?o .
         OPTIONAL {{ <{iri}> prov:generatedAtTime ?ingestedAt }}
         OPTIONAL {{ <{iri}> prov:wasAttributedTo ?attr }}
     }}
-}} GROUP BY ?ingestedAt ?attr""", dataset=dataset)
+}} GROUP BY ?g ?ingestedAt ?attr""", dataset=dataset)
 
-        pr = prov_rows[0] if prov_rows else {}
+    records = []
+    for pr in prov_rows:
+        g = _v(pr.get("g"))
+        if not g:
+            continue
         ingested_at = _v(pr.get("ingestedAt")) or datetime.now(timezone.utc).isoformat()
         source_id = _v(pr.get("attr")) or "unknown"
         triple_count = int(_v(pr.get("cnt"), "0"))
@@ -267,7 +237,6 @@ SELECT ?ingestedAt ?attr (COUNT(*) AS ?cnt) WHERE {{
         source_type = (
             "manual" if src == "manual" else ("api-stream" if "kafka" in src else ("api-rest" if "api" in src else "unknown"))
         )
-
         records.append(ProvenanceRecord(
             graph_iri=g, source_id=source_id, source_type=source_type,
             ingested_at=ingested_at, triple_count=triple_count,

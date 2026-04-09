@@ -25,6 +25,87 @@ from services.merge_service import MergeService
 from services.ingestion.kafka_producer import KafkaProducer
 
 
+# ── In-Memory OntologyStore (rdflib 기반) ─────────────────────────────────────
+
+class MemoryOntologyStore:
+    """
+    rdflib.ConjunctiveGraph 기반 인메모리 OntologyStore.
+    Fuseki 없이 SPARQL SELECT / ASK / UPDATE를 지원하는 테스트 전용 구현.
+    """
+
+    def __init__(self):
+        import rdflib
+        self._graph = rdflib.ConjunctiveGraph()
+
+    @staticmethod
+    def _term_to_dict(term) -> dict:
+        import rdflib
+        if isinstance(term, rdflib.URIRef):
+            return {"type": "uri", "value": str(term)}
+        if isinstance(term, rdflib.BNode):
+            return {"type": "bnode", "value": str(term)}
+        if isinstance(term, rdflib.Literal):
+            result: dict = {"type": "literal", "value": str(term)}
+            if term.datatype:
+                result["datatype"] = str(term.datatype)
+            if term.language:
+                result["xml:lang"] = term.language
+            return result
+        return {"type": "literal", "value": str(term)}
+
+    async def sparql_select(self, query: str, dataset=None) -> list[dict]:
+        results = self._graph.query(query)
+        rows = []
+        for row in results:
+            d = {}
+            for var in results.vars:
+                val = row[var]
+                if val is not None:
+                    d[str(var)] = self._term_to_dict(val)
+            rows.append(d)
+        return rows
+
+    async def sparql_ask(self, query: str, dataset=None) -> bool:
+        result = self._graph.query(query)
+        return bool(result.askAnswer)
+
+    async def sparql_update(self, update: str, dataset=None) -> None:
+        self._graph.update(update)
+
+    async def sparql_construct(self, query: str, dataset=None):
+        from services.ontology_store import Triple
+        import rdflib
+        result = self._graph.query(query)
+        return [Triple(subject=s, predicate=p, object_=o) for s, p, o in result]
+
+    async def insert_triples(self, graph_iri: str, triples, dataset=None) -> None:
+        from services.ontology_store import _term_to_sparql
+        import rdflib
+        lines = [
+            f"{_term_to_sparql(t.subject)} {_term_to_sparql(t.predicate)} {_term_to_sparql(t.object_)} ."
+            for t in triples
+        ]
+        update = f"INSERT DATA {{ GRAPH <{graph_iri}> {{\n" + "\n".join(lines) + "\n} }"
+        self._graph.update(update)
+
+    async def delete_graph(self, graph_iri: str, dataset=None) -> None:
+        self._graph.update(f"DROP SILENT GRAPH <{graph_iri}>")
+
+    async def export_turtle(self, graph_iri: str, dataset=None) -> str:
+        import rdflib
+        g = self._graph.get_context(rdflib.URIRef(graph_iri))
+        return g.serialize(format="turtle")
+
+    async def put_graph_turtle(self, graph_iri: str, turtle, dataset=None) -> None:
+        import rdflib
+        await self.delete_graph(graph_iri)
+        body = turtle if isinstance(turtle, str) else turtle.decode("utf-8")
+        self._graph.parse(data=body, format="turtle", publicID=rdflib.URIRef(graph_iri))
+
+    async def close(self) -> None:
+        pass
+
+
 # ── 서비스 Fixtures ────────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -80,7 +161,7 @@ def app(ontology_store, mock_kafka_producer):
     test_app.state.kafka_producer = mock_kafka_producer
 
     from api import ontologies, concepts, individuals, properties, search, subgraph
-    from api import sparql, import_, merge, reasoner, sources
+    from api import sparql, import_, merge, reasoner, sources, graphs
 
     API = "/api/v1"
     test_app.include_router(ontologies.router, prefix=API)
@@ -94,6 +175,7 @@ def app(ontology_store, mock_kafka_producer):
     test_app.include_router(merge.router, prefix=API)
     test_app.include_router(reasoner.router, prefix=API)
     test_app.include_router(sources.router, prefix=API)
+    test_app.include_router(graphs.router, prefix=API)
 
     return test_app
 

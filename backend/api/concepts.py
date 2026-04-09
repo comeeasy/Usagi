@@ -22,62 +22,17 @@ from services.ontology_graph import (
     manual_graph_iri,
     graphs_filter_clause,
 )
+from services.sparql_utils import v as _v, esc as _esc, COMMON_PREFIXES, CLASS_PATTERN as _CLASS_PATTERN, paginated_class_query as _paginated_class_query
 
 router = APIRouter(prefix="/ontologies/{ontology_id}/concepts", tags=["concepts"])
 
-_P = """
-PREFIX owl:  <http://www.w3.org/2002/07/owl#>
-PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
-PREFIX dc:   <http://purl.org/dc/terms/>
-PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-"""
-
-
-async def _resolve_ont(store, ontology_id: str, dataset: str | None = None) -> str | None:
-    """UUID(dc:identifier)로 온톨로지 IRI 반환. 없으면 None."""
-    return await resolve_ontology_iri(store, ontology_id, dataset=dataset)
-
-
-def _esc(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+_P = COMMON_PREFIXES
 
 
 def _looks_like_iri(value: str) -> bool:
     v = value.strip()
     return v.startswith("http://") or v.startswith("https://") or v.startswith("urn:")
 
-
-# Protege 방식: TBox axiom에 명시적으로 등장하는 named class만 포함
-# (ABox [] rdf:type ?iri 패턴 제거 — 노이즈 클래스 오염 방지)
-_CLASS_FILTER = """
-    FILTER(isIRI(?iri))
-    FILTER(?iri NOT IN (
-        owl:Class, owl:NamedIndividual, owl:Ontology,
-        owl:ObjectProperty, owl:DatatypeProperty, owl:AnnotationProperty,
-        rdfs:Class, rdfs:Datatype, rdf:Property,
-        owl:Thing, rdfs:Resource
-    ))
-"""
-
-_CLASS_PATTERN = f"""
-    {{ ?iri a owl:Class . {_CLASS_FILTER} }}
-    UNION
-    {{ ?iri a rdfs:Class . FILTER NOT EXISTS {{ ?iri a owl:Ontology }} {_CLASS_FILTER} }}
-    UNION
-    {{ ?iri a skos:Concept . {_CLASS_FILTER} }}
-    UNION
-    {{
-        {{ ?iri rdfs:subClassOf ?_sc }} UNION {{ ?_sc rdfs:subClassOf ?iri }}
-        {_CLASS_FILTER}
-    }}
-    UNION
-    {{
-        {{ ?_p rdfs:domain ?iri }} UNION {{ ?_p rdfs:range ?iri }}
-        {_CLASS_FILTER}
-    }}
-"""
 
 
 def _concept_keyword_filter(q: str | None) -> str:
@@ -90,15 +45,6 @@ def _concept_keyword_filter(q: str | None) -> str:
       CONTAINS(LCASE(STR(?iri)), "{ql}") ||
       (bound(?label) && CONTAINS(LCASE(STR(?label)), "{ql}"))
     )"""
-
-
-def _v(term: dict | None, default: str = "") -> str:
-    """SPARQL result term → string value."""
-    if term is None:
-        return default
-    if isinstance(term, dict):
-        return term.get("value", default)
-    return str(term)
 
 
 def _restriction_triples(iri: str, restrictions: list[PropertyRestriction], prefix: str = "r") -> str:
@@ -140,10 +86,9 @@ async def list_concepts(
     graph_iris: list[str] = Query(default=[]),
 ) -> dict:
     store = request.app.state.ontology_store
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
-    offset = (page - 1) * page_size
     gf = graphs_filter_clause(graph_iris, ont)
 
     extra = ""
@@ -160,37 +105,9 @@ async def list_concepts(
             f"\n    FILTER(!BOUND(?rootPar))"
         )
 
-    count_rows = await store.sparql_select(f"""{_P}
-SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
-    GRAPH ?_g {{
-        {_CLASS_PATTERN}
-        {extra}
-    }}
-    {gf}
-}}""", dataset=dataset)
-    total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
-
-    rows = await store.sparql_select(f"""{_P}
-SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment)
-       (COUNT(DISTINCT ?child) AS ?subclassCount)
-       (COUNT(DISTINCT ?ind) AS ?individualCount) WHERE {{
-    {{
-        SELECT DISTINCT ?iri WHERE {{
-            GRAPH ?_g {{
-                {_CLASS_PATTERN}
-                {extra}
-            }}
-            {gf}
-        }}
-    }}
-    OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:label ?_rdfsLbl }} }}
-    OPTIONAL {{ GRAPH ?_lg {{ ?iri skos:prefLabel ?_skosLbl }} }}
-    BIND(COALESCE(?_rdfsLbl, ?_skosLbl) AS ?lbl)
-    OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:comment ?cmt }} }}
-    OPTIONAL {{ GRAPH ?_lg {{ ?child rdfs:subClassOf ?iri }} }}
-    OPTIONAL {{ GRAPH ?_lg {{ ?ind rdf:type ?iri }} }}
-}} GROUP BY ?iri
-ORDER BY ?lbl LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
+    total, rows = await _paginated_class_query(
+        store, f"{_CLASS_PATTERN}\n{extra}", gf, page, page_size, dataset=dataset
+    )
 
     items = [
         Concept(
@@ -221,37 +138,15 @@ async def list_subclasses(
     """직계 하위 클래스 목록 (rdfs:subClassOf <iri>). 트리 뷰 toggle 시 호출."""
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
-    offset = (page - 1) * page_size
     gf = graphs_filter_clause(graph_iris, ont)
 
-    count_rows = await store.sparql_select(f"""{_P}
-SELECT (COUNT(DISTINCT ?iri) AS ?total) WHERE {{
-    GRAPH ?_g {{ ?iri rdfs:subClassOf <{iri}> . FILTER(isIRI(?iri)) }}
-    {gf}
-}}""", dataset=dataset)
-    total = int(_v(count_rows[0].get("total"), "0")) if count_rows else 0
-
-    rows = await store.sparql_select(f"""{_P}
-SELECT ?iri (MIN(?lbl) AS ?label) (MIN(?cmt) AS ?comment)
-       (COUNT(DISTINCT ?child) AS ?subclassCount)
-       (COUNT(DISTINCT ?ind) AS ?individualCount) WHERE {{
-    {{
-        SELECT DISTINCT ?iri WHERE {{
-            GRAPH ?_g {{ ?iri rdfs:subClassOf <{iri}> . FILTER(isIRI(?iri)) }}
-            {gf}
-        }}
-    }}
-    OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:label ?_rdfsLbl }} }}
-    OPTIONAL {{ GRAPH ?_lg {{ ?iri skos:prefLabel ?_skosLbl }} }}
-    BIND(COALESCE(?_rdfsLbl, ?_skosLbl) AS ?lbl)
-    OPTIONAL {{ GRAPH ?_lg {{ ?iri rdfs:comment ?cmt }} }}
-    OPTIONAL {{ GRAPH ?_lg {{ ?child rdfs:subClassOf ?iri }} }}
-    OPTIONAL {{ GRAPH ?_lg {{ ?ind rdf:type ?iri }} }}
-}} GROUP BY ?iri
-ORDER BY ?lbl LIMIT {page_size} OFFSET {offset}""", dataset=dataset)
+    subclass_pattern = f"?iri rdfs:subClassOf <{iri}> . FILTER(isIRI(?iri))"
+    total, rows = await _paginated_class_query(
+        store, subclass_pattern, gf, page, page_size, dataset=dataset
+    )
 
     items = [
         Concept(
@@ -277,7 +172,7 @@ async def create_concept(
     dataset: str | None = Query(None),
 ) -> Concept:
     store = request.app.state.ontology_store
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     manual = manual_graph_iri(ont)
@@ -324,7 +219,7 @@ async def get_concept(
 ) -> Concept:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     gf = graphs_filter_clause(graph_iris, ont)
@@ -471,7 +366,7 @@ async def update_concept(
 ) -> Concept:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     manual = manual_graph_iri(ont)
@@ -526,7 +421,7 @@ async def delete_concept(
 ) -> None:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 

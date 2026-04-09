@@ -1,10 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Upload } from 'lucide-react'
+import { Upload, Pencil } from 'lucide-react'
 import { listNamedGraphs } from '@/api/ontologies'
 import { useDataset } from '@/contexts/DatasetContext'
 import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
+import TtlEditorPanel from '@/components/graph/TtlEditorPanel'
 import type { NamedGraph } from '@/api/ontologies'
 
 const SOURCE_TYPE_LABEL: Record<string, string> = {
@@ -29,6 +30,7 @@ interface NamedGraphListProps {
 export default function NamedGraphList({ ontologyId, onImportClick }: NamedGraphListProps) {
   const { dataset } = useDataset()
   const { selectedGraphIris, setKnownGraphs, toggleGraph, selectAll, deselectAll } = useNamedGraphs()
+  const [editingIri, setEditingIri] = useState<string | null>(null)
 
   const query = useQuery({
     queryKey: ['named-graphs', ontologyId, dataset],
@@ -103,12 +105,22 @@ export default function NamedGraphList({ ontologyId, onImportClick }: NamedGraph
         {query.isSuccess && query.data.length > 0 && (
           <div className="flex flex-col gap-2">
             {query.data.map((g: NamedGraph) => (
-              <GraphCard
-                key={g.iri}
-                graph={g}
-                checked={selectedGraphIris.includes(g.iri)}
-                onToggle={() => toggleGraph(g.iri)}
-              />
+              <div key={g.iri} className="flex flex-col gap-1">
+                <GraphCard
+                  graph={g}
+                  checked={selectedGraphIris.includes(g.iri)}
+                  onToggle={() => toggleGraph(g.iri)}
+                  onEdit={() => setEditingIri(editingIri === g.iri ? null : g.iri)}
+                  editing={editingIri === g.iri}
+                />
+                {editingIri === g.iri && (
+                  <TtlEditorPanel
+                    ontologyId={ontologyId}
+                    graphIri={g.iri}
+                    onClose={() => setEditingIri(null)}
+                  />
+                )}
+              </div>
             ))}
           </div>
         )}
@@ -121,10 +133,14 @@ function GraphCard({
   graph,
   checked,
   onToggle,
+  onEdit,
+  editing,
 }: {
   graph: NamedGraph
   checked: boolean
   onToggle: () => void
+  onEdit: () => void
+  editing: boolean
 }) {
   const sourceType = graph.source_type ?? 'manual'
   const typeLabel = SOURCE_TYPE_LABEL[sourceType] ?? sourceType
@@ -161,6 +177,17 @@ function GraphCard({
         >
           {typeLabel}
         </span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onEdit() }}
+          className="shrink-0 p-1 rounded hover:opacity-80"
+          title="Edit TTL"
+          style={{
+            color: editing ? 'var(--color-primary)' : 'var(--color-text-muted)',
+            background: editing ? 'var(--color-primary)18' : 'transparent',
+          }}
+        >
+          <Pencil size={12} />
+        </button>
       </div>
 
       <div className="flex items-center gap-4 text-xs pl-5" style={{ color: 'var(--color-text-muted)' }}>

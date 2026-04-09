@@ -1205,6 +1205,292 @@ BIND(COALESCE(?lbl, ?skosLbl) AS ?label)
 
 ---
 
+## Section 26 — Backend SPARQL 쿼리 리팩토링
+
+**날짜:** 2026-04-09
+
+### 목적
+
+백엔드와 Fuseki 서버 간 SPARQL 상호작용을 시각화·분석하고, 중복 구현을 제거한다.
+
+---
+
+### 1. Backend ↔ Fuseki 상호작용 맵
+
+```
+FastAPI 엔드포인트
+        │
+        ▼
+api/*.py  (concepts / individuals / properties / subgraph / ontologies / graphs / sparql)
+        │
+        │  SPARQL queries (SELECT / ASK / UPDATE / CONSTRUCT)
+        │  GSP (GET / POST / PUT)
+        ▼
+services/ontology_store.py  ← OntologyStore (httpx.AsyncClient 래퍼)
+        │
+        │  HTTP POST /sparql       (SELECT / ASK / CONSTRUCT)
+        │  HTTP POST /update       (INSERT DATA / DELETE / DROP)
+        │  HTTP GET|POST|PUT /data (GSP — Turtle/RDF/XML 직렬화)
+        ▼
+Apache Jena Fuseki  {dataset}/sparql | {dataset}/update | {dataset}/data
+```
+
+**Named Graph IRI 규칙**
+
+| 용도 | IRI 패턴 |
+|------|---------|
+| UI 수동 생성 | `{ont_iri}/manual` |
+| 파일 import | `{ont_iri}/imports/{filename}` |
+| URL import | `{ont_iri}/imports/url/{slug}` |
+| 표준 import | `{ont_iri}/imports/standard/{name}` |
+| 레거시 단일 KG | `{ont_iri}/kg` (backward-compat) |
+| 추론 결과 | `{ont_iri}/inferred` |
+| Import Provenance | `urn:system:import-provenance` |
+
+---
+
+### 2. SPARQL 쿼리 목록 및 위치
+
+#### ontology_store.py
+
+| 쿼리 | 종류 | 설명 |
+|------|------|------|
+| `count_graph_triples` | SELECT COUNT | Named Graph 트리플 수 |
+| `list_ontologies` (count_q) | SELECT COUNT DISTINCT | 온톨로지 총 수 |
+| `list_ontologies` (select_q) | SELECT DISTINCT | 온톨로지 목록 페이지네이션 |
+| `get_ontology_stats` (×5) | SELECT COUNT ×5 | Class/Individual/ObjectProperty/DataProperty/NamedGraph 수 |
+| `insert_triples` | INSERT DATA | Named Graph에 트리플 배치 삽입 |
+| `delete_graph` | DROP SILENT GRAPH | Named Graph 삭제 |
+
+#### ontology_graph.py
+
+| 쿼리 | 종류 | 설명 |
+|------|------|------|
+| `resolve_ontology_iri` | SELECT | UUID(dc:identifier) → 온톨로지 IRI |
+
+#### api/ontologies.py
+
+| 쿼리 | 종류 | 설명 |
+|------|------|------|
+| `_fetch_ontology` | SELECT | UUID로 온톨로지 메타데이터 조회 |
+| `create_ontology` (ASK) | ASK | IRI 중복 확인 |
+| `create_ontology` (INSERT) | INSERT DATA | 온톨로지 메타 삽입 |
+| `update_ontology` (×N) | DELETE+INSERT WHERE | 필드별 수정 |
+| `delete_ontology` (SELECT) | SELECT DISTINCT | 관련 Named Graph 목록 조회 |
+
+#### api/concepts.py
+
+| 쿼리 | 종류 | 설명 |
+|------|------|------|
+| `list_concepts` (count) | SELECT COUNT | 총 Concept 수 |
+| `list_concepts` (select) | SELECT (subquery 포함) | Concept 목록 + 레이블/comment/count |
+| `list_subclasses` (count) | SELECT COUNT | 직계 하위 클래스 수 |
+| `list_subclasses` (select) | SELECT (subquery 포함) | 하위 클래스 목록 |
+| `create_concept` (ASK) | ASK | IRI 중복 확인 |
+| `create_concept` (INSERT) | INSERT DATA | Concept 생성 |
+| `get_concept` (ASK) | ASK | 존재 확인 |
+| `get_concept` (triples_q) | SELECT | 모든 outgoing 트리플 조회 |
+| `get_concept` (rest_q) | SELECT | blank node Restriction 조회 |
+| `get_concept` (cnt_q) | SELECT COUNT | Individual 수 |
+| `update_concept` (ASK) | ASK | 존재 확인 |
+| `update_concept` (label/comment) | DELETE+INSERT WHERE | 레이블/comment 수정 |
+| `update_concept` (relations) | DELETE+INSERT DATA | subClassOf/equivalentClass/disjointWith 수정 |
+| `update_concept` (restrictions) | DELETE+INSERT DATA | Restriction 수정 |
+| `delete_concept` (ASK) | ASK | 존재 확인 |
+| `delete_concept` (restrictions) | DELETE WHERE | Restriction blank node 삭제 |
+| `delete_concept` (subject) | DELETE WHERE | subject 트리플 삭제 |
+| `delete_concept` (object) | DELETE WHERE | object 트리플 삭제 |
+
+#### api/individuals.py
+
+| 쿼리 | 종류 | 설명 |
+|------|------|------|
+| `list_individuals` (count) | SELECT COUNT | 총 Individual 수 |
+| `list_individuals` (select) | SELECT (subquery 포함) | Individual 목록 |
+| `list_individuals` (types) | SELECT | 페이지 내 Individual 타입 배치 조회 |
+| `create_individual` (ASK) | ASK | IRI 중복 확인 |
+| `create_individual` (INSERT) | INSERT DATA | Individual + provenance 생성 |
+| `get_provenance` (SELECT graphs) | SELECT DISTINCT | Individual이 존재하는 Named Graph 목록 |
+| `get_provenance` (per-graph) | SELECT | 그래프별 provenance 메타데이터 |
+| `get_individual` (ASK) | ASK | 존재 확인 |
+| `get_individual` (SELECT) | SELECT | 모든 outgoing 트리플 조회 |
+| `update_individual` (ASK) | ASK | 존재 확인 |
+| `update_individual` (label/types/dpv/opv/sameAs/diffFrom) | DELETE+INSERT × N | 각 필드 수정 |
+| `delete_individual` (ASK) | ASK | 존재 확인 |
+| `delete_individual` (DELETE) | DELETE WHERE | 모든 트리플 삭제 |
+
+#### api/properties.py
+
+| 쿼리 | 종류 | 설명 |
+|------|------|------|
+| `list_properties` (count ×2) | SELECT COUNT | Object/Data Property 총 수 |
+| `list_properties` (select ×2) | SELECT DISTINCT | Property IRI 목록 |
+| `_fetch_object_property` (basic) | SELECT | label/comment/inverseOf |
+| `_fetch_object_property` (domain/range/super/char) | SELECT ×4 | 도메인/레인지/상위/특성 |
+| `_fetch_data_property` (basic) | SELECT | label/comment |
+| `_fetch_data_property` (domain/range/super) | SELECT ×3 | 도메인/레인지/상위 |
+| `_fetch_data_property` (functional) | ASK | Functional 여부 |
+| `create_property` (ASK) | ASK | IRI 중복 확인 |
+| `create_property` (INSERT) | INSERT DATA | Property 생성 |
+| `get_property` (ASK ×2) | ASK | Object/Data 구분 |
+| `update_property` (ASK ×2) | ASK | 존재 확인 |
+| `update_property` (label/comment/domain/range/super/inv/char) | DELETE+INSERT × N | 각 필드 수정 |
+| `delete_property` (ASK) | ASK | 존재 확인 |
+| `delete_property` (subject/object) | DELETE WHERE ×2 | 트리플 삭제 |
+
+#### api/subgraph.py
+
+| 쿼리 | 종류 | 설명 |
+|------|------|------|
+| `_resolve_ont_iri` | SELECT | UUID → 온톨로지 IRI (**중복 구현**) |
+| `_bfs_expand` | SELECT DISTINCT | BFS 이웃 IRI 수집 |
+| (seed 없음 fallback) | SELECT DISTINCT | 그래프 내 리소스 시작점 |
+| `_get_subgraph_sparql` (detail) | SELECT | 노드 타입·레이블 조회 |
+| (edges) | SELECT DISTINCT (chunked) | 엣지 수집 (30개씩 청크) |
+
+#### api/graphs.py
+
+| 쿼리 | 종류 | 설명 |
+|------|------|------|
+| `list_graphs` (graphs) | SELECT COUNT GROUP BY | Named Graph 목록 + 트리플 수 |
+| `list_graphs` (prov) | SELECT | provenance 소스 정보 조회 |
+| `record_import_provenance` | INSERT DATA | import 소스 정보 기록 |
+
+#### services/search_service.py
+
+| 쿼리 | 종류 | 설명 |
+|------|------|------|
+| `search_entities` (concepts) | SELECT DISTINCT | Concept 키워드 검색 |
+| `search_entities` (individuals) | SELECT DISTINCT | Individual 키워드 검색 |
+| `search_relations` | SELECT DISTINCT | Property 키워드 검색 |
+
+---
+
+### 3. 쿼리 품질 평가 (Pros / Cons)
+
+#### 잘 된 점 (Pros)
+
+| 항목 | 설명 |
+|------|------|
+| 비동기 병렬 실행 | `asyncio.gather`로 독립 쿼리 병렬 실행 (`get_concept`, `get_ontology_stats`) |
+| Named Graph 격리 | 쓰기는 항상 특정 Named Graph에 격리 (`/manual`, `/imports/...`) |
+| Graph 선택 필터 | `graphs_filter_clause`로 읽기 범위 동적 제한 (IN 필터 vs STRSTARTS) |
+| BFS 청크 처리 | subgraph 엣지 수집을 30개씩 청크하여 쿼리 크기 제한 |
+| Protege 방식 Class 패턴 | ABox 노이즈 없이 TBox axiom 기반 클래스만 수집 (`_CLASS_PATTERN`) |
+| XSS/Injection 방어 | `_esc()`로 SPARQL 리터럴 이스케이프, INSERT/DELETE 시 파라미터 바인딩 |
+
+#### 문제점 (Cons)
+
+| ID | 위치 | 문제 |
+|----|------|------|
+| **C-1** | 모든 api/*.py | `_v(term, default)` 함수가 6개 파일에 동일하게 중복 |
+| **C-2** | concepts/individuals/properties/search | `_esc(s)` 함수가 4개 파일에 동일하게 중복 |
+| **C-3** | 모든 api/*.py | `_P = """PREFIX owl:..."""` PREFIX 블록이 파일마다 각자 정의 (내용 거의 동일, 일부 미세 차이) |
+| **C-4** | concepts/individuals/properties | `_xsd_full` / `_xsd_short` 변환 함수가 individuals.py와 properties.py에 중복 |
+| **C-5** | subgraph.py | `_resolve_ont_iri()` 가 `ontology_graph.resolve_ontology_iri()`를 재구현 (SPARQL 인라인) |
+| **C-6** | concepts.py / subgraph.py | `_resolve_ont()` local wrapper가 concepts.py·properties.py에 각각 존재 (단순 위임) |
+| **C-7** | search_service.py | `{ontology_id}/kg` 하드코딩 — 다중 Named Graph 미지원, 레거시 패턴 잔존 |
+| **C-8** | concepts.py | `list_concepts`·`list_subclasses` 가 완전히 동일한 패턴의 쿼리 2벌을 각자 구성 (count + paginated fetch 패턴 중복) |
+| **C-9** | properties.py | `_fetch_object_property` 가 domain/range/super/characteristics를 4개의 순차 SELECT로 실행 — `asyncio.gather` 미사용 |
+| **C-10** | get_provenance | N+1 문제: Named Graph 수만큼 순차적으로 SPARQL 실행 |
+| **C-11** | 모든 api/*.py | PREFIX 블록이 각 쿼리 문자열 안에 f-string으로 인라인 → 재사용·유지보수 어려움 |
+
+---
+
+### 4. 중복 구현 목록
+
+```
+중복 함수:
+  _v(term, default)     → concepts / individuals / properties / subgraph / ontologies / search (6중)
+  _esc(s)               → concepts / individuals / properties / search (4중)
+  _xsd_full(xsd)        → individuals / properties (2중)
+  _xsd_short(full)      → individuals / properties (2중)
+  _resolve_ont(...)     → concepts / properties (2중 wrapper)
+  _resolve_ont_iri(...)  → subgraph.py (ontology_graph.resolve_ontology_iri 재구현)
+
+PREFIX 블록 (_P):
+  각 api 파일마다 독립 선언 (owl/rdfs/rdf/xsd 공통, 일부 dc/prov/skos 추가)
+
+쿼리 패턴:
+  count + paginated fetch (subquery) → concepts.list_concepts / list_subclasses
+  IRI existence ASK → concepts/individuals/properties 각각 동일 구조
+  subject DELETE WHERE + object DELETE WHERE → concepts.delete / properties.delete
+```
+
+---
+
+### 5. 리팩토링 계획
+
+#### 목표
+
+1. 공통 유틸 함수를 `backend/services/sparql_utils.py` 로 추출
+2. `subgraph.py`의 `_resolve_ont_iri` 를 `ontology_graph.resolve_ontology_iri` 로 교체
+3. `search_service.py`의 하드코딩 `/kg` 를 동적 Named Graph 방식으로 교체
+4. `properties.py`의 `_fetch_object_property` 를 `asyncio.gather` 병렬화
+5. `get_provenance`의 N+1 쿼리를 단일 배치 쿼리로 개선
+6. `list_concepts` / `list_subclasses` 공통 페이지네이션 헬퍼 추출
+
+#### 신규 파일: `backend/services/sparql_utils.py`
+
+추출 대상:
+- `v(term, default)` — SPARQL result term → str 변환
+- `esc(s)` — SPARQL 리터럴 이스케이프
+- `xsd_full(xsd)` / `xsd_short(full)` — XSD 타입 변환
+- `COMMON_PREFIXES` — 공통 PREFIX 블록 (owl/rdfs/rdf/xsd/dc/skos/prov)
+- `paginated_concept_query(store, pattern, extra, gf, page, page_size, ontology_id, dataset)` — count + fetch 헬퍼
+
+#### 수정 파일
+
+| 파일 | 변경 내용 |
+|------|---------|
+| `backend/services/sparql_utils.py` | **신규** — 공통 유틸 함수 모음 |
+| `backend/api/concepts.py` | `_v`, `_esc` → sparql_utils 임포트; `list_subclasses` 헬퍼화 |
+| `backend/api/individuals.py` | `_v`, `_esc`, `_xsd_full`, `_xsd_short` → sparql_utils; `get_provenance` N+1 개선 |
+| `backend/api/properties.py` | `_v`, `_esc`, `_xsd_full`, `_xsd_short` → sparql_utils; `_fetch_object_property` asyncio.gather 병렬화 |
+| `backend/api/subgraph.py` | `_resolve_ont_iri` → `ontology_graph.resolve_ontology_iri` 교체; `_v` → sparql_utils |
+| `backend/api/ontologies.py` | `_v` → sparql_utils |
+| `backend/services/search_service.py` | 하드코딩 `/kg` → `graphs_filter_clause` + `resolve_ontology_iri` 방식으로 교체 |
+
+---
+
+### 6. 작업 체크리스트
+
+#### Phase A — 공통 유틸 추출
+
+- [x] **SQ-A1** `backend/services/sparql_utils.py` 작성 (`v`, `esc`, `xsd_full`, `xsd_short`, `COMMON_PREFIXES`)
+- [x] **SQ-A2** `api/concepts.py` — `_v`, `_esc` → sparql_utils import로 교체
+- [x] **SQ-A3** `api/individuals.py` — `_v`, `_esc`, `_xsd_full`, `_xsd_short` → sparql_utils 교체
+- [x] **SQ-A4** `api/properties.py` — `_v`, `_esc`, `_xsd_full`, `_xsd_short` → sparql_utils 교체
+- [x] **SQ-A5** `api/subgraph.py` — `_v` → sparql_utils 교체
+- [x] **SQ-A6** `api/ontologies.py` — `_v` → sparql_utils 교체
+- [x] **SQ-A7** `services/search_service.py` + `api/search.py` — `_v`, `_esc`, `_P` → sparql_utils 교체
+- [x] **SQ-A8** 기존 테스트 전체 통과 확인 (회귀 없음) — 45/45 passed
+
+#### Phase B — 중복 resolve_ont 제거
+
+- [x] **SQ-B1** `api/subgraph.py` — `_resolve_ont_iri` 인라인 SPARQL 제거 → `ontology_graph.resolve_ontology_iri` 교체
+- [x] **SQ-B2** `api/concepts.py` / `api/properties.py` — local `_resolve_ont` wrapper 제거, 직접 `resolve_ontology_iri` 호출
+- [x] **SQ-B3** 테스트 통과 확인 — 42/42 passed
+
+#### Phase C — search_service 다중 Named Graph 지원
+
+- [x] **SQ-C1** `search_service.py` — `ontology_id/kg` 하드코딩 → `graphs_filter_clause` + `GRAPH ?_g` 방식으로 변경
+- [x] **SQ-C2** 함수 시그니처에 `graph_iris: list[str] | None = None` 파라미터 추가
+- [x] **SQ-C3** `api/search.py` 호출부는 이미 독립 구현이므로 해당 없음
+- [x] **SQ-C4** 테스트 통과 확인 — 45/45 passed
+
+#### Phase D — 성능 개선
+
+- [x] **SQ-D1** `api/properties.py` `_fetch_object_property` + `_fetch_data_property` — domain/range/super/char → `asyncio.gather` 병렬화
+- [x] **SQ-D2** `api/individuals.py` `get_provenance` — N+1 쿼리 → 단일 배치 SPARQL(`GROUP BY ?g`)로 개선
+- [x] **SQ-D3** 테스트 통과 확인 — 45/45 passed
+
+#### Phase E — 문서화
+
+- [x] **SQ-E1** `docs/plan.md` 최종 업데이트 (완료 체크)
+
+---
+
 ## Appendix — Protege 클래스 로딩 방식 분석
 
 > 참고: https://github.com/protegeproject/protege
@@ -1302,4 +1588,184 @@ OntologyLoader (비동기, EDT 외)
 | 레이블 | `getAnnotationAssertionAxioms()` + Visitor | SPARQL `OPTIONAL { ?iri rdfs:label ?label }` |
 | 계층 | `getAxioms(cls)` + Visitor 역방향 탐색 | SPARQL `rdfs:subClassOf` |
 | Import | imports closure 자동 포함 | Named Graph 필터로 선택적 조회 |
+
+---
+
+## Section 27 — 후속 리팩토링·개선 작업
+
+**날짜:** 2026-04-09
+
+### 작업 목록 (우선순위 순)
+
+---
+
+### 27-1. TTL 편집기 (§17 Part E 완성)
+
+**목표:** Named Graph 내용을 Turtle로 직접 조회·수정할 수 있는 API + UI
+
+#### Backend (api/graphs.py 추가)
+
+| 엔드포인트 | 메서드 | 설명 |
+|-----------|--------|------|
+| `/ontologies/{id}/graphs/ttl` | GET | `?graph_iri=<IRI>` → GSP GET으로 Turtle 반환 |
+| `/ontologies/{id}/graphs/ttl` | PUT | `?graph_iri=<IRI>` + body(Turtle) → GSP PUT으로 교체 |
+
+- graph_iri는 query parameter로 받아 URL 인코딩 문제 회피
+- PUT은 온톨로지 메타(`owl:Ontology`)가 포함된 그래프 교체 시 경고 (헤더 `X-Overwrites-Ontology-Meta: true` 반환)
+
+#### Frontend (NamedGraphList 확장)
+
+- 각 Named Graph 행에 "편집" 버튼 추가
+- 클릭 시 CodeMirror 6 패널(Turtle 문법 강조) 인라인 표시
+- Save → PUT 요청 → 성공 시 패널 닫기 + 목록 갱신
+
+#### 작업 체크리스트
+
+- [x] **E1** Backend: `GET /ontologies/{id}/graphs/ttl` 구현 + 테스트
+- [x] **E2** Backend: `PUT /ontologies/{id}/graphs/ttl` 구현 + 테스트
+- [x] **E3** Frontend: `NamedGraphList` 편집 버튼 + CodeMirror 패널 구현 + 테스트 (15/15 pass)
+
+---
+
+### 27-2. 테스트 인프라 정비
+
+**목표:** `OntologyStore(path=None)` TypeError로 깨진 테스트들을 복구하여 실질 커버리지 확보
+
+#### 현황
+
+- `test_service_search.py`, `test_service_reasoner.py` 등 — `OntologyStore.__init__(path=None)` TypeError로 에러
+- `test_concepts.py`, `test_ontologies.py` 등 — 실제 Fuseki 연결 필요 → CI 없이는 404/연결 실패
+
+#### 계획
+
+1. `OntologyStore`에 in-memory 모드(`fuseki_url=None`) 또는 테스트 전용 Mock 클래스 작성
+2. `conftest.py`에 `mock_store` fixture 추가 (단위 테스트용)
+3. 깨진 단위 테스트(`test_service_search`, `test_service_reasoner`)를 mock_store 기반으로 복구
+
+#### 작업 체크리스트
+
+- [x] **TI-1** `MemoryOntologyStore` in-memory fixture 작성 (`tests/conftest.py`)
+- [x] **TI-2** `test_service_search.py` 복구 (9개 테스트)
+- [x] **TI-3** `test_service_reasoner.py` 복구 (9개 테스트)
+- [x] **TI-4** 전체 단위 테스트 통과 확인 — 26/26 pass
+
+---
+
+### 27-3. BUG-001 — IRI auto-fill 미수정
+
+**목표:** Concept/Individual/Property 생성 폼에서 IRI 자동완성 로직 수정
+
+#### 현황
+
+- 사용자가 label 입력 시 IRI 필드가 자동으로 채워지는데, 현재 로직에 버그 있음 (구체 증상은 BUG-001 기록 참고)
+
+#### 작업 체크리스트
+
+- [x] **BUG001-1** 증상 재현 테스트 작성 (pre-existing tests verify behavior)
+- [x] **BUG001-2** IRI auto-fill 로직 수정 — useEffect로 iriPrefix 변화 감지, create 모드에서 iri 빈 경우만 sync
+- [x] **BUG001-3** 테스트 통과 확인 — 기존 실패 2건은 NamedGraphsProvider 무관 pre-existing, 나머지 122건 통과
+
+---
+
+### 27-4. `api/search.py` CLASS 패턴 통합
+
+**목표:** `api/search.py`의 Concept 검색 패턴이 §25에서 교체된 Protégé 방식과 불일치
+
+#### 현황
+
+`api/search.py`의 `_class_pat`:
+```sparql
+UNION { [] rdf:type ?iri }   ← 구버전 ABox 노이즈 패턴, 아직 제거 안 됨
+```
+
+`api/concepts.py`의 `_CLASS_PATTERN`:
+```sparql
+← [] rdf:type ?iri 없음, domain/range 패턴 추가된 Protégé 방식
+```
+
+#### 계획
+
+- `_CLASS_PATTERN`, `_CLASS_FILTER`, `_INDIVIDUAL_PATTERN` 상수를 `sparql_utils.py`로 이동
+- `api/concepts.py`, `api/search.py` 양쪽에서 공통 상수 사용
+
+#### 작업 체크리스트
+
+- [x] **SP-1** `sparql_utils.py`에 `CLASS_PATTERN`, `CLASS_FILTER`, `INDIVIDUAL_PATTERN` 추출
+- [x] **SP-2** `api/concepts.py` → sparql_utils 상수 사용
+- [x] **SP-3** `api/search.py` → Protégé 방식 패턴으로 교체 (ABox [] rdf:type ?iri 패턴 제거)
+- [x] **SP-4** 테스트 통과 확인 — 26/26 pass
+
+---
+
+### 27-5. `search_service.py` 정리
+
+**목표:** production 코드에서 아무도 import 안 하는 dead module 제거
+
+#### 현황
+
+- `search_service.py`를 import 하는 파일: `tests/test_service_search.py` 뿐
+- MCP tools, API router 모두 자체 SPARQL 구현 보유
+
+#### 계획
+
+- `search_service.py` 삭제
+- `test_service_search.py` → `api/search.py`의 `search_entities`/`search_relations` 함수 직접 테스트로 전환
+
+#### 작업 체크리스트
+
+- [x] **SS-1** `test_service_search.py`를 `api/search.py` 함수 단위 테스트로 전환 — 독립형 함수 추출 후 import 변경
+- [x] **SS-2** `search_service.py` 삭제
+- [x] **SS-3** 테스트 통과 확인 — 26/26 pass
+
+---
+
+### 27-6. `list_ontologies` N+1 개선
+
+**목표:** 온톨로지 목록 조회 시 온톨로지마다 5개 COUNT 쿼리 실행 → 병렬화
+
+#### 현황
+
+`api/ontologies.py` `list_ontologies`:
+```python
+for raw in items_raw:
+    stats_dict = await store.get_ontology_stats(kg_iri, ...)  # 5개 쿼리 × N개 온톨로지
+```
+
+#### 계획
+
+- `asyncio.gather(*[store.get_ontology_stats(...) for ...])` 로 모든 온톨로지 통계 병렬 조회
+
+#### 작업 체크리스트
+
+- [x] **NO-1** `list_ontologies` stats 조회 `asyncio.gather` 병렬화
+- [x] **NO-2** 테스트 통과 확인 — 26/26 pass
+
+---
+
+### 27-7. `list_concepts` / `list_subclasses` 공통 헬퍼 추출
+
+**목표:** 동일한 count + paginated fetch(subquery) 패턴 중복 제거
+
+#### 현황
+
+`api/concepts.py`:
+- `list_concepts`: count query + SELECT(subquery) 패턴
+- `list_subclasses`: 동일 패턴, graph pattern만 다름
+
+#### 계획
+
+`sparql_utils.py`에 추가:
+```python
+async def paginated_class_query(store, class_pattern, extra, gf, page, page_size, ontology_id, dataset) -> dict
+```
+- count + paginated fetch 두 쿼리를 `asyncio.gather`로 실행
+- `list_concepts`, `list_subclasses` 양쪽에서 호출
+
+#### 작업 체크리스트
+
+- [x] **PC-1** `sparql_utils.py`에 `paginated_class_query` 헬퍼 추가 — asyncio.gather로 count+fetch 병렬
+- [x] **PC-2** `list_concepts` 리팩토링
+- [x] **PC-3** `list_subclasses` 리팩토링
+- [x] **PC-4** 테스트 통과 확인 — 26/26 pass
+
 

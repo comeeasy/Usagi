@@ -9,6 +9,7 @@ api/ontologies.py — 온톨로지 CRUD REST 라우터
   DELETE /ontologies/{id}           온톨로지 삭제
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated
@@ -23,17 +24,9 @@ from models.ontology import (
     PaginatedResponse,
 )
 from services.ontology_graph import kg_graph_iri
+from services.sparql_utils import v as _v
 
 router = APIRouter(prefix="/ontologies", tags=["ontologies"])
-
-
-def _v(term: dict | None, default: str = "") -> str:
-    """SPARQL 결과 term → str 변환 헬퍼."""
-    if term is None:
-        return default
-    if isinstance(term, dict):
-        return term.get("value", default)
-    return str(term)
 
 
 # OWL/DC 프리픽스
@@ -84,12 +77,15 @@ async def list_ontologies(
     store = _store(request)
     items_raw, total = await store.list_ontologies(page, page_size, dataset=dataset)
 
+    kg_iris = [kg_graph_iri(raw["iri"]) for raw in items_raw]
+    stats_list = await asyncio.gather(
+        *[store.get_ontology_stats(kg_iri, dataset=dataset) for kg_iri in kg_iris]
+    )
+
     items = []
-    for raw in items_raw:
+    for raw, stats_dict in zip(items_raw, stats_list):
         iri = raw["iri"]
         ont_id = raw.get("id", "")  # UUID (dc:identifier)
-        kg_iri = kg_graph_iri(iri)
-        stats_dict = await store.get_ontology_stats(kg_iri, dataset=dataset)
         items.append(Ontology(
             id=ont_id,
             iri=iri,

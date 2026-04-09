@@ -71,7 +71,7 @@ def graphs_filter_clause(graph_iris: list[str], ont_prefix: str) -> str:
     없으면 ont_prefix 기반 STRSTARTS 전체 조회.
     """
     if graph_iris:
-        iris_str = " ".join(f"<{iri}>" for iri in graph_iris)
+        iris_str = ", ".join(f"<{iri}>" for iri in graph_iris)
         return f"FILTER(?_g IN ({iris_str}))"
     else:
         o = ont_prefix.rstrip("/")

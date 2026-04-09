@@ -15,23 +15,11 @@ from pydantic import BaseModel
 
 from services.ontology_graph import resolve_ontology_iri, graphs_filter_clause
 from services.ontology_scope import ontology_iri_from_tbox
+from services.sparql_utils import v as _v, esc as _esc, COMMON_PREFIXES, CLASS_PATTERN as _CLASS_PATTERN, INDIVIDUAL_PATTERN as _INDIVIDUAL_PATTERN
 
 router = APIRouter(prefix="/ontologies/{ontology_id}/search", tags=["search"])
 
-_P = """
-PREFIX owl:  <http://www.w3.org/2002/07/owl#>
-PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-"""
-
-
-def _v(term: dict | None, default: str = "") -> str:
-    if term is None:
-        return default
-    if isinstance(term, dict):
-        return term.get("value", default)
-    return str(term)
+_P = COMMON_PREFIXES
 
 
 async def _resolve_ont(store, ontology_id: str, dataset: str | None = None) -> str | None:
@@ -39,36 +27,31 @@ async def _resolve_ont(store, ontology_id: str, dataset: str | None = None) -> s
     return await resolve_ontology_iri(store, ontology_id, dataset=dataset)
 
 
-def _esc(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"')
-
-
 class VectorSearchRequest(BaseModel):
     text: str
     k: int = 10
 
 
-# ── Entity 검색 ───────────────────────────────────────────────────────────
+# ── 독립형 검색 함수 (store 직접 전달, 라우터·테스트 공용) ─────────────────────
 
-@router.get("/entities")
 async def search_entities(
-    request: Request,
     ontology_id: str,
-    q: str = Query("", description="키워드"),
-    kind: Literal["concept", "individual", "all"] = Query("all"),
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    dataset: str | None = Query(None),
-    graph_iris: list[str] = Query(default=[]),
+    q: str,
+    kind: str = "all",
+    limit: int = 20,
+    store=None,
+    graph_iris: list[str] | None = None,
+    dataset: str | None = None,
 ) -> list[dict]:
     """
-    rdfs:label 기반 키워드 검색.
-    kind: concept(owl:Class) / individual(owl:NamedIndividual) / all
+    rdfs:label 기반 키워드 검색 (독립형).
+    ontology_id: 온톨로지 IRI (STRSTARTS 그래프 필터에 사용)
+    store=None이면 빈 리스트 반환.
     """
-    store = request.app.state.ontology_store
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
-    if ont is None:
+    if store is None:
         return []
-    gf = graphs_filter_clause(graph_iris, ont)
+
+    gf = graphs_filter_clause(graph_iris or [], ontology_id)
 
     ql = _esc(q.lower()) if q else ""
     q_filter = ""
@@ -78,33 +61,6 @@ async def search_entities(
       (bound(?label) && CONTAINS(LCASE(STR(?label)), "{ql}"))
     )"""
 
-    _cls_filter = """
-        FILTER(isIRI(?iri))
-        FILTER(?iri NOT IN (
-            owl:Class, owl:NamedIndividual, owl:Ontology,
-            owl:ObjectProperty, owl:DatatypeProperty, owl:AnnotationProperty,
-            rdfs:Class, rdfs:Datatype, rdf:Property,
-            owl:Thing, rdfs:Resource
-        ))
-    """
-    _class_pat = f"""
-        {{ ?iri a owl:Class }}
-        UNION
-        {{ ?iri a rdfs:Class . FILTER NOT EXISTS {{ ?iri a owl:Ontology }} }}
-        UNION
-        {{ ?iri a skos:Concept }}
-        UNION
-        {{
-            [] rdf:type ?iri .
-            {_cls_filter}
-        }}
-        UNION
-        {{
-            {{ ?iri rdfs:subClassOf [] }} UNION {{ [] rdfs:subClassOf ?iri }}
-            {_cls_filter}
-        }}
-    """
-
     results = []
 
     # Concept 검색
@@ -112,7 +68,7 @@ async def search_entities(
         rows = await store.sparql_select(f"""{_P}
 SELECT DISTINCT ?iri ?label WHERE {{
     GRAPH ?_g {{
-        {_class_pat}
+        {_CLASS_PATTERN}
         OPTIONAL {{ ?iri rdfs:label ?label }}
         {q_filter}
     }}
@@ -125,22 +81,6 @@ SELECT DISTINCT ?iri ?label WHERE {{
                 "kind": "concept",
             })
 
-    _ind_pat = """
-        {
-          ?iri a owl:NamedIndividual
-        } UNION {
-          ?iri rdf:type ?ctype .
-          FILTER(isIRI(?ctype))
-          FILTER(?ctype NOT IN (
-              owl:Class, owl:NamedIndividual, owl:Ontology,
-              owl:ObjectProperty, owl:DatatypeProperty, owl:AnnotationProperty,
-              rdfs:Class, rdfs:Datatype, rdf:Property
-          ))
-          FILTER NOT EXISTS { GRAPH ?_any { ?iri a owl:Class } }
-          FILTER NOT EXISTS { GRAPH ?_any { ?iri a rdfs:Class } }
-        }
-    """
-
     # Individual 검색
     if kind in ("individual", "all"):
         remaining = limit - len(results)
@@ -150,7 +90,7 @@ SELECT ?iri (MIN(?lbl) AS ?label) WHERE {{
     {{
         SELECT DISTINCT ?iri WHERE {{
             GRAPH ?_g {{
-                {_ind_pat}
+                {_INDIVIDUAL_PATTERN}
                 {q_filter}
             }}
             {gf}
@@ -185,25 +125,21 @@ SELECT ?iri ?t WHERE {{
     return results
 
 
-# ── Relation 검색 ─────────────────────────────────────────────────────────
-
-@router.get("/relations")
 async def search_relations(
-    request: Request,
     ontology_id: str,
-    q: str = Query("", description="키워드"),
-    domain_iri: str | None = Query(None, alias="domain"),
-    range_iri: str | None = Query(None, alias="range"),
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    dataset: str | None = Query(None),
-    graph_iris: list[str] = Query(default=[]),
+    q: str,
+    domain_iri: str | None = None,
+    range_iri: str | None = None,
+    limit: int = 20,
+    store=None,
+    graph_iris: list[str] | None = None,
+    dataset: str | None = None,
 ) -> list[dict]:
-    """ObjectProperty + DataProperty 키워드 검색."""
-    store = request.app.state.ontology_store
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
-    if ont is None:
+    """ObjectProperty + DataProperty 키워드 검색 (독립형). store=None이면 빈 리스트."""
+    if store is None:
         return []
-    gf = graphs_filter_clause(graph_iris, ont)
+
+    gf = graphs_filter_clause(graph_iris or [], ontology_id)
 
     q_filter = f'FILTER(CONTAINS(LCASE(STR(?label)), "{_esc(q.lower())}"))' if q else ""
     domain_filter = f"?iri rdfs:domain <{domain_iri}> ." if domain_iri else ""
@@ -249,10 +185,66 @@ ORDER BY ?label LIMIT {limit}""", dataset=dataset)
     return results
 
 
+async def vector_search(
+    ontology_id: str,
+    text: str,
+    k: int = 10,
+    store=None,
+    graph_iris: list[str] | None = None,
+    dataset: str | None = None,
+) -> list[dict]:
+    """벡터 DB 미구축 시 키워드 검색 폴백 (독립형)."""
+    return await search_entities(ontology_id, text, limit=k, store=store,
+                                  graph_iris=graph_iris, dataset=dataset)
+
+
+# ── Entity 검색 ───────────────────────────────────────────────────────────
+
+@router.get("/entities")
+async def _route_search_entities(
+    request: Request,
+    ontology_id: str,
+    q: str = Query("", description="키워드"),
+    kind: Literal["concept", "individual", "all"] = Query("all"),
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    dataset: str | None = Query(None),
+    graph_iris: list[str] = Query(default=[]),
+) -> list[dict]:
+    """rdfs:label 기반 키워드 검색."""
+    store = request.app.state.ontology_store
+    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    if ont is None:
+        return []
+    return await search_entities(ont, q, kind=kind, limit=limit, store=store,
+                                  graph_iris=graph_iris, dataset=dataset)
+
+
+# ── Relation 검색 ─────────────────────────────────────────────────────────
+
+@router.get("/relations")
+async def _route_search_relations(
+    request: Request,
+    ontology_id: str,
+    q: str = Query("", description="키워드"),
+    domain_iri: str | None = Query(None, alias="domain"),
+    range_iri: str | None = Query(None, alias="range"),
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    dataset: str | None = Query(None),
+    graph_iris: list[str] = Query(default=[]),
+) -> list[dict]:
+    """ObjectProperty + DataProperty 키워드 검색."""
+    store = request.app.state.ontology_store
+    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    if ont is None:
+        return []
+    return await search_relations(ont, q, domain_iri=domain_iri, range_iri=range_iri,
+                                   limit=limit, store=store, graph_iris=graph_iris, dataset=dataset)
+
+
 # ── 벡터 검색 ─────────────────────────────────────────────────────────────
 
 @router.post("/vector")
-async def vector_search(
+async def _route_vector_search(
     request: Request,
     ontology_id: str,
     body: VectorSearchRequest,
@@ -269,15 +261,14 @@ async def vector_search(
     if ont is None:
         return []
 
-    ontology_iri = ont  # already the ontology IRI (no /kg suffix)
-
     if manager is not None:
         try:
-            results = await manager.search(ontology_iri, body.text, body.k, store)
+            results = await manager.search(ont, body.text, body.k, store)
             if results:
                 return results
         except Exception:
             pass  # 임베딩 모델 로드 실패 등 → 폴백
 
     # 폴백: 키워드 검색
-    return await search_entities(request, ontology_id, q=body.text, kind="all", limit=body.k, dataset=dataset)
+    return await search_entities(ont, body.text, kind="all", limit=body.k,
+                                  store=store, dataset=dataset)

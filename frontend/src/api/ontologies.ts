@@ -285,6 +285,34 @@ export function listNamedGraphs(ontologyId: string, dataset?: string): Promise<N
   return apiGet(`/ontologies/${ontologyId}/graphs${qs}`)
 }
 
+export async function getGraphTtl(
+  ontologyId: string,
+  graphIri: string,
+  dataset?: string,
+): Promise<string> {
+  const qs = new URLSearchParams({ graph_iri: graphIri })
+  if (dataset) qs.set('dataset', dataset)
+  const response = await fetch(`${API_BASE_URL}/ontologies/${ontologyId}/graphs/ttl?${qs}`)
+  if (!response.ok) throw new Error(`Failed to load TTL: ${response.status}`)
+  return response.text()
+}
+
+export async function putGraphTtl(
+  ontologyId: string,
+  graphIri: string,
+  turtle: string,
+  dataset?: string,
+): Promise<void> {
+  const qs = new URLSearchParams({ graph_iri: graphIri })
+  if (dataset) qs.set('dataset', dataset)
+  const response = await fetch(`${API_BASE_URL}/ontologies/${ontologyId}/graphs/ttl?${qs}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'text/turtle' },
+    body: turtle,
+  })
+  if (!response.ok) throw new Error(`Failed to save TTL: ${response.status}`)
+}
+
 // ── Datasets API ────────────────────────────────────────────────────────────
 
 export interface DatasetInfo {

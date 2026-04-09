@@ -7,7 +7,7 @@ _detect_cardinality_violations / _detect_domain_range_violations 만 검증한�
 from __future__ import annotations
 
 import pytest
-from services.ontology_store import OntologyStore
+from tests.conftest import MemoryOntologyStore
 from services.reasoner_service import ReasonerService
 
 BASE = "https://test-reasoner.example.org"
@@ -23,7 +23,7 @@ PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
 @pytest.fixture
 async def store_svc():
     """인메모리 OntologyStore + ReasonerService 쌍."""
-    store = OntologyStore(path=None)
+    store = MemoryOntologyStore()
     svc = ReasonerService(store)
     return store, svc
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, X } from 'lucide-react'
 import IRIListSearchInput from '@/components/shared/IRIListSearchInput'
 import IRISearchInput from '@/components/shared/IRISearchInput'
@@ -45,6 +45,12 @@ export default function IndividualForm({
 }: IndividualFormProps) {
   const [iri, setIri] = useState(initialValues?.iri ?? (mode === 'create' ? (iriPrefix ?? '') : ''))
   const [label, setLabel] = useState(initialValues?.label ?? '')
+
+  useEffect(() => {
+    if (mode === 'create' && iriPrefix && !iri) {
+      setIri(iriPrefix)
+    }
+  }, [iriPrefix])
   const [typeIris, setTypeIris] = useState<string[]>(initialValues?.typeIris ?? [])
   const [dataProperties, setDataProperties] = useState<DataProp[]>(initialValues?.dataProperties ?? [])
   const [objectProperties, setObjectProperties] = useState<ObjectProp[]>(initialValues?.objectProperties ?? [])

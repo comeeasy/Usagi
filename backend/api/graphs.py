@@ -1,14 +1,19 @@
 """
-api/graphs.py — Named Graph 목록 라우터
+api/graphs.py — Named Graph 목록·TTL 편집 라우터
 
 엔드포인트:
-  GET  /ontologies/{id}/graphs   온톨로지에 속한 Named Graph 목록 + 소스 정보
+  GET  /ontologies/{id}/graphs              온톨로지에 속한 Named Graph 목록 + 소스 정보
+  GET  /ontologies/{id}/graphs/ttl          Named Graph Turtle 조회
+  PUT  /ontologies/{id}/graphs/ttl          Named Graph Turtle 교체
 """
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from services.ontology_graph import resolve_ontology_iri
+
+_TURTLE_MEDIA_TYPES = {"text/turtle", "application/x-turtle"}
 
 router = APIRouter(prefix="/ontologies/{ontology_id}/graphs", tags=["graphs"])
 
@@ -49,6 +54,74 @@ async def record_import_provenance(
         """,
         dataset=dataset,
     )
+
+
+def _check_graph_ownership(graph_iri: str, ont_iri: str) -> None:
+    """graph_iri가 ont_iri 하위에 속하는지 검증. 아니면 403."""
+    if not graph_iri.startswith(ont_iri.rstrip("/") + "/"):
+        raise HTTPException(
+            403,
+            detail={
+                "code": "GRAPH_NOT_IN_ONTOLOGY",
+                "message": f"Graph '{graph_iri}' does not belong to ontology '{ont_iri}'",
+            },
+        )
+
+
+# ── TTL 조회 ──────────────────────────────────────────────────────────────────
+
+@router.get("/ttl", response_class=PlainTextResponse)
+async def get_graph_ttl(
+    request: Request,
+    ontology_id: str,
+    graph_iri: str = Query(..., description="조회할 Named Graph IRI"),
+    dataset: str | None = Query(None),
+) -> str:
+    """Named Graph 내용을 Turtle 형식으로 반환한다 (GSP GET)."""
+    store = request.app.state.ontology_store
+    ont_iri = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
+    if ont_iri is None:
+        raise HTTPException(
+            404,
+            detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"},
+        )
+    _check_graph_ownership(graph_iri, ont_iri)
+
+    turtle = await store.export_turtle(graph_iri, dataset=dataset)
+    return Response(content=turtle, media_type="text/turtle; charset=utf-8")
+
+
+# ── TTL 교체 ──────────────────────────────────────────────────────────────────
+
+@router.put("/ttl", status_code=204)
+async def put_graph_ttl(
+    request: Request,
+    ontology_id: str,
+    graph_iri: str = Query(..., description="교체할 Named Graph IRI"),
+    dataset: str | None = Query(None),
+) -> None:
+    """Named Graph 내용을 Turtle 본문으로 전부 교체한다 (GSP PUT)."""
+    content_type = request.headers.get("content-type", "").split(";")[0].strip()
+    if content_type not in _TURTLE_MEDIA_TYPES:
+        raise HTTPException(
+            415,
+            detail={
+                "code": "UNSUPPORTED_MEDIA_TYPE",
+                "message": f"Content-Type must be text/turtle, got '{content_type}'",
+            },
+        )
+
+    store = request.app.state.ontology_store
+    ont_iri = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
+    if ont_iri is None:
+        raise HTTPException(
+            404,
+            detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"},
+        )
+    _check_graph_ownership(graph_iri, ont_iri)
+
+    body = await request.body()
+    await store.put_graph_turtle(graph_iri, body, dataset=dataset)
 
 
 @router.get("", response_model=list[NamedGraph])

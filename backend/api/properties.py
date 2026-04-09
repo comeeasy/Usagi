@@ -9,6 +9,7 @@ api/properties.py — ObjectProperty / DataProperty CRUD 라우터
   DELETE /ontologies/{id}/properties/{iri}     Property 삭제
 """
 
+import asyncio
 from typing import Annotated, Literal, Union
 from urllib.parse import unquote
 
@@ -28,18 +29,11 @@ from services.ontology_graph import (
     manual_graph_iri,
     graphs_filter_clause,
 )
+from services.sparql_utils import v as _v, esc as _esc, xsd_full as _xsd_full, xsd_short as _xsd_short, COMMON_PREFIXES
 
 router = APIRouter(prefix="/ontologies/{ontology_id}/properties", tags=["properties"])
 
-_P = """
-PREFIX owl:  <http://www.w3.org/2002/07/owl#>
-PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
-"""
-
-_XSD_BASE = "http://www.w3.org/2001/XMLSchema#"
-_RDFS_LITERAL_FULL = "http://www.w3.org/2000/01/rdf-schema#Literal"
+_P = COMMON_PREFIXES
 
 _CHAR_MAP = {
     "Functional": "owl:FunctionalProperty",
@@ -59,39 +53,6 @@ _CHAR_FULL = {
     "http://www.w3.org/2002/07/owl#ReflexiveProperty": "Reflexive",
     "http://www.w3.org/2002/07/owl#IrreflexiveProperty": "Irreflexive",
 }
-
-
-async def _resolve_ont(store, ontology_id: str, dataset: str | None = None) -> str | None:
-    """UUID(dc:identifier)로 온톨로지 IRI 반환. 없으면 None."""
-    return await resolve_ontology_iri(store, ontology_id, dataset=dataset)
-
-
-def _esc(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-
-
-def _v(term: dict | None, default: str = "") -> str:
-    if term is None:
-        return default
-    if isinstance(term, dict):
-        return term.get("value", default)
-    return str(term)
-
-
-def _xsd_full(xsd: str) -> str:
-    if xsd == "rdfs:Literal":
-        return _RDFS_LITERAL_FULL
-    if xsd.startswith("xsd:"):
-        return _XSD_BASE + xsd[4:]
-    return xsd if xsd.startswith("http") else _XSD_BASE + xsd
-
-
-def _xsd_short(full: str) -> str:
-    if full == _RDFS_LITERAL_FULL:
-        return "rdfs:Literal"
-    if full.startswith(_XSD_BASE):
-        return "xsd:" + full[len(_XSD_BASE):]
-    return full
 
 
 # ── 내부 fetch 헬퍼 ──────────────────────────────────────────────────────
@@ -116,14 +77,14 @@ SELECT ?label ?comment ?inv WHERE {{
     comment = _v(b.get("comment")) or None
     inverse_of = _v(b.get("inv")) or None
 
-    domain = [_v(r.get("d")) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?d WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} {gf} }}", dataset=dataset)]
-    range_ = [_v(r.get("r")) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?r WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:range ?r . FILTER(isIRI(?r)) }} {gf} }}", dataset=dataset)]
-    super_props = [_v(r.get("sp")) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?sp WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:subPropertyOf ?sp . FILTER(isIRI(?sp)) }} {gf} }}", dataset=dataset)]
-
-    char_rows = await store.sparql_select(f"""{_P}
+    domain_rows, range_rows, super_rows, char_rows = await asyncio.gather(
+        store.sparql_select(
+            f"{_P}\nSELECT ?d WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} {gf} }}", dataset=dataset),
+        store.sparql_select(
+            f"{_P}\nSELECT ?r WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:range ?r . FILTER(isIRI(?r)) }} {gf} }}", dataset=dataset),
+        store.sparql_select(
+            f"{_P}\nSELECT ?sp WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:subPropertyOf ?sp . FILTER(isIRI(?sp)) }} {gf} }}", dataset=dataset),
+        store.sparql_select(f"""{_P}
 SELECT ?t WHERE {{
     GRAPH ?_g {{
         <{iri}> a ?t .
@@ -132,7 +93,11 @@ SELECT ?t WHERE {{
                       owl:AsymmetricProperty, owl:ReflexiveProperty, owl:IrreflexiveProperty))
     }}
     {gf}
-}}""", dataset=dataset)
+}}""", dataset=dataset),
+    )
+    domain = [_v(r.get("d")) for r in domain_rows]
+    range_ = [_v(r.get("r")) for r in range_rows]
+    super_props = [_v(r.get("sp")) for r in super_rows]
     characteristics = [_CHAR_FULL[_v(r.get("t"))] for r in char_rows if _v(r.get("t")) in _CHAR_FULL]
 
     return ObjectProperty(
@@ -158,15 +123,19 @@ SELECT ?label ?comment WHERE {{
 }} LIMIT 1""", dataset=dataset)
     b = basic[0] if basic else {}
 
-    domain = [_v(r.get("d")) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?d WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} {gf} }}", dataset=dataset)]
-    range_ = [_xsd_short(_v(r.get("r"))) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?r WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:range ?r }} {gf} }}", dataset=dataset)
-               if r.get("r")]
-    super_props = [_v(r.get("sp")) for r in await store.sparql_select(
-        f"{_P}\nSELECT ?sp WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:subPropertyOf ?sp . FILTER(isIRI(?sp)) }} {gf} }}", dataset=dataset)]
-    is_functional = await store.sparql_ask(
-        f"{_P}\nASK {{ GRAPH ?_g {{ <{iri}> a owl:FunctionalProperty }} {gf} }}", dataset=dataset)
+    domain_rows, range_rows, super_rows, is_functional = await asyncio.gather(
+        store.sparql_select(
+            f"{_P}\nSELECT ?d WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:domain ?d . FILTER(isIRI(?d)) }} {gf} }}", dataset=dataset),
+        store.sparql_select(
+            f"{_P}\nSELECT ?r WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:range ?r }} {gf} }}", dataset=dataset),
+        store.sparql_select(
+            f"{_P}\nSELECT ?sp WHERE {{ GRAPH ?_g {{ <{iri}> rdfs:subPropertyOf ?sp . FILTER(isIRI(?sp)) }} {gf} }}", dataset=dataset),
+        store.sparql_ask(
+            f"{_P}\nASK {{ GRAPH ?_g {{ <{iri}> a owl:FunctionalProperty }} {gf} }}", dataset=dataset),
+    )
+    domain = [_v(r.get("d")) for r in domain_rows]
+    range_ = [_xsd_short(_v(r.get("r"))) for r in range_rows if r.get("r")]
+    super_props = [_v(r.get("sp")) for r in super_rows]
 
     return DataProperty(
         iri=iri, ontology_id=ontology_id,
@@ -192,7 +161,7 @@ async def list_properties(
     graph_iris: list[str] = Query(default=[]),
 ) -> dict:
     store = request.app.state.ontology_store
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     offset = (page - 1) * page_size
@@ -272,7 +241,7 @@ async def create_property(
     dataset: str | None = Query(None),
 ):
     store = request.app.state.ontology_store
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     manual = manual_graph_iri(ont)
@@ -334,7 +303,7 @@ async def get_property(
 ):
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     gf = graphs_filter_clause(graph_iris, ont)
@@ -362,7 +331,7 @@ async def update_property(
 ):
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
     manual = manual_graph_iri(ont)
@@ -452,7 +421,7 @@ async def delete_property(
 ) -> None:
     store = request.app.state.ontology_store
     iri = unquote(iri)
-    ont = await _resolve_ont(store, ontology_id, dataset=dataset)
+    ont = await resolve_ontology_iri(store, ontology_id, dataset=dataset)
     if ont is None:
         raise HTTPException(404, detail={"code": "ONTOLOGY_NOT_FOUND", "message": f"Ontology not found: {ontology_id}"})
 
