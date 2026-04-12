@@ -2,12 +2,13 @@
 services/reasoner_service.py — owlready2 + HermiT OWL 2 추론 서비스
 
 추론 실행 흐름:
-  1. Oxigraph에서 대상 그래프 CONSTRUCT → Turtle 임시 파일
-  2. owlready2.get_ontology().load() → in-memory OWL 그래프
-  3. sync_reasoner_hermit(infer_property_values=True, infer_data_property_values=True)
-  4. 추론 결과(inferred triples) → Oxigraph inferred Named Graph에 저장
-  5. 위반/추론 사실 → ReasonerResult 직렬화
-  6. SPARQL 기반 위반 검출 (CardinalityViolation, DomainRangeViolation)
+  1. Oxigraph에서 온톨로지 소속 Named Graph 목록 조회 (H2: 다중 그래프 통합)
+  2. SPARQL CONSTRUCT → rdflib Graph → RDF/XML 임시 파일
+  3. owlready2.get_ontology().load() → in-memory OWL 그래프
+  4. sync_reasoner_hermit(infer_property_values=False)
+  5. 추론 결과(inferred triples) → Oxigraph inferred Named Graph에 저장
+  6. SPARQL 기반 위반 검출 (Cardinality, DomainRange, Disjoint)
+  7. entity_iris 지정 시 해당 엔티티 관련 위반/추론만 응답에 포함 (H1)
 
 전제 조건: JVM 설치 필요 (Dockerfile에서 default-jre-headless 설치)
 """
@@ -24,6 +25,7 @@ from typing import Any
 from uuid import uuid4
 
 from models.reasoner import InferredAxiom, ReasonerResult, ReasonerViolation
+from services.job_store import JobStore
 
 logger = logging.getLogger(__name__)
 
@@ -37,17 +39,13 @@ class ReasonerService:
 
     def __init__(self, ontology_store: Any):
         self._store = ontology_store
-        self._job_store: dict[str, dict] = {}
+        self._job_store = JobStore()   # H3: SQLite 영속 저장
         self._lock = asyncio.Lock()
 
     async def run(self, ontology_id: str, entity_iris: list[str] | None = None, dataset: str | None = None) -> str:
         """추론 실행 (비동기) → job_id 즉시 반환."""
         job_id = str(uuid4())
-        self._job_store[job_id] = {
-            "status": "pending",
-            "ontology_id": ontology_id,
-            "created_at": _now_iso(),
-        }
+        await self._job_store.create(job_id, ontology_id)
         asyncio.create_task(self._execute(job_id, ontology_id, entity_iris, dataset))
         return job_id
 
@@ -59,7 +57,7 @@ class ReasonerService:
         dataset: str | None = None,
     ) -> None:
         """실제 추론 실행 (백그라운드 태스크)."""
-        self._job_store[job_id]["status"] = "running"
+        await self._job_store.update(job_id, status="running")
         tmp_path: str | None = None
 
         try:
@@ -76,9 +74,13 @@ class ReasonerService:
                 if not rows:
                     raise ValueError(f"Ontology not found: {ontology_id}")
                 ont_iri = rows[0]['iri']['value']
-            kg_iri = f"{ont_iri}/kg"
 
-            rdfxml_bytes = await self._store.export_rdfxml(kg_iri, dataset=dataset)
+            # H2: 온톨로지 소속 Named Graph 전체 목록 조회 (/inferred 제외)
+            ont_graphs = await self._get_ont_graphs(ont_iri, dataset)
+            logger.info("Reasoner job %s: found %d named graph(s) for %s", job_id, len(ont_graphs), ont_iri)
+
+            # H2: 모든 그래프 트리플 합산 → RDF/XML 임시 파일
+            rdfxml_bytes = await self._build_combined_rdfxml(ont_graphs, dataset)
 
             with tempfile.NamedTemporaryFile(suffix=".owl", delete=False) as f:
                 f.write(rdfxml_bytes)
@@ -111,10 +113,10 @@ class ReasonerService:
                         f"{ont_iri}/inferred", triples, dataset=dataset
                     )
 
-            # SPARQL 기반 추가 위반 검출 (owlready2 불필요)
-            cardinality_violations = await self._detect_cardinality_violations(kg_iri, dataset=dataset)
-            domain_range_violations = await self._detect_domain_range_violations(kg_iri, dataset=dataset)
-            disjoint_violations = await self._detect_disjoint_violations(kg_iri, dataset=dataset)
+            # SPARQL 기반 추가 위반 검출 (H2: ont_iri로 전체 그래프 검색)
+            cardinality_violations = await self._detect_cardinality_violations(ont_iri, dataset=dataset)
+            domain_range_violations = await self._detect_domain_range_violations(ont_iri, dataset=dataset)
+            disjoint_violations = await self._detect_disjoint_violations(ont_iri, dataset=dataset)
             extra = cardinality_violations + domain_range_violations + disjoint_violations
 
             if extra:
@@ -124,22 +126,24 @@ class ReasonerService:
                     update={"violations": all_violations, "consistent": consistent}
                 )
 
-            self._job_store[job_id].update(
-                {
-                    "status": "completed",
-                    "result": result,
-                    "completed_at": _now_iso(),
-                }
+            # H1: entity_iris 지정 시 해당 엔티티 관련 결과만 필터링
+            if entity_iris:
+                result = self._filter_by_entities(result, entity_iris)
+
+            await self._job_store.update(
+                job_id,
+                status="completed",
+                result=result.model_dump(),
+                completed_at=_now_iso(),
             )
 
         except Exception as exc:
             logger.exception("Reasoner job %s failed", job_id)
-            self._job_store[job_id].update(
-                {
-                    "status": "failed",
-                    "error": str(exc),
-                    "completed_at": _now_iso(),
-                }
+            await self._job_store.update(
+                job_id,
+                status="failed",
+                error=str(exc),
+                completed_at=_now_iso(),
             )
         finally:
             if tmp_path and os.path.exists(tmp_path):
@@ -147,6 +151,59 @@ class ReasonerService:
                     os.unlink(tmp_path)
                 except OSError:
                     pass
+
+    # ── H2 헬퍼: Named Graph 목록 조회 ────────────────────────────────────────
+
+    async def _get_ont_graphs(self, ont_iri: str, dataset: str | None) -> list[str]:
+        """온톨로지 소속 Named Graph 목록 조회 (/inferred 제외)."""
+        rows = await self._store.sparql_select(f"""
+            SELECT DISTINCT ?g WHERE {{
+                GRAPH ?g {{ ?s ?p ?o }}
+                FILTER(STRSTARTS(STR(?g), "{ont_iri}"))
+                FILTER(!STRENDS(STR(?g), "/inferred"))
+            }}
+        """, dataset=dataset)
+        graphs = [r["g"]["value"] for r in rows]
+        return graphs or [f"{ont_iri}/kg"]  # 아무것도 없으면 기본 /kg fallback
+
+    # ── H2 헬퍼: 다중 그래프 합산 → RDF/XML ─────────────────────────────────
+
+    async def _build_combined_rdfxml(self, ont_graphs: list[str], dataset: str | None) -> bytes:
+        """여러 Named Graph 트리플을 rdflib로 합산 후 RDF/XML 직렬화."""
+        import rdflib
+
+        combined = rdflib.Graph()
+        for graph_iri in ont_graphs:
+            try:
+                ttl = await self._store.export_turtle(graph_iri, dataset=dataset)
+                combined.parse(data=ttl, format="turtle")
+            except Exception as e:
+                logger.warning("Failed to export graph <%s>: %s", graph_iri, e)
+
+        xml_str = combined.serialize(format="xml")
+        return xml_str.encode("utf-8") if isinstance(xml_str, str) else xml_str
+
+    # ── H1 헬퍼: entity_iris 기준 결과 필터링 ───────────────────────────────
+
+    @staticmethod
+    def _filter_by_entities(result: ReasonerResult, entity_iris: list[str]) -> ReasonerResult:
+        """violations/inferred_axioms를 entity_iris에 포함된 IRI 기준으로 필터링."""
+        iri_set = set(entity_iris)
+        filtered_violations = [v for v in result.violations if v.subject_iri in iri_set]
+        filtered_inferred = [
+            a for a in result.inferred_axioms
+            if a.subject in iri_set or a.object in iri_set
+        ]
+        consistent = not any(
+            v.type in ("UnsatisfiableClass", "DisjointViolation") for v in filtered_violations
+        )
+        return result.model_copy(update={
+            "violations": filtered_violations,
+            "inferred_axioms": filtered_inferred,
+            "consistent": consistent,
+        })
+
+    # ── HermiT 추론기 ─────────────────────────────────────────────────────────
 
     def _run_hermit(self, owl_path: str) -> ReasonerResult:
         """HermiT 추론기 동기 실행 (run_in_executor에서 호출)."""
@@ -259,15 +316,16 @@ PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
 """
 
     async def _detect_cardinality_violations(
-        self, kg_iri: str, dataset: str | None = None
+        self, ont_iri: str, dataset: str | None = None
     ) -> list[ReasonerViolation]:
-        """owl:maxCardinality / owl:exactCardinality 위반 검출 (SPARQL)."""
+        """owl:maxCardinality / owl:exactCardinality 위반 검출 (SPARQL).
+        H2: GRAPH ?g_tbox로 ont_iri 소속 전체 그래프에서 TBox 검색."""
         violations: list[ReasonerViolation] = []
 
-        # 1) TBox에서 카디널리티 제약 수집
+        # 1) TBox에서 카디널리티 제약 수집 (ont_iri 소속 모든 그래프)
         restriction_rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
 SELECT DISTINCT ?cls ?prop ?n ?rtype WHERE {{
-    GRAPH <{kg_iri}> {{
+    GRAPH ?_tbox {{
         ?cls rdfs:subClassOf ?restr .
         ?restr a owl:Restriction ; owl:onProperty ?prop .
         {{
@@ -280,6 +338,8 @@ SELECT DISTINCT ?cls ?prop ?n ?rtype WHERE {{
             BIND("exact" AS ?rtype)
         }}
     }}
+    FILTER(STRSTARTS(STR(?_tbox), "{ont_iri}"))
+    FILTER(!STRENDS(STR(?_tbox), "/inferred"))
 }}""", dataset=dataset)
 
         for r in restriction_rows:
@@ -332,15 +392,18 @@ GROUP BY ?ind""", dataset=dataset)
         return violations
 
     async def _detect_domain_range_violations(
-        self, kg_iri: str, dataset: str | None = None
+        self, ont_iri: str, dataset: str | None = None
     ) -> list[ReasonerViolation]:
-        """rdfs:domain / rdfs:range 위반 검출 (SPARQL)."""
+        """rdfs:domain / rdfs:range 위반 검출 (SPARQL).
+        H2: GRAPH ?g_tbox로 ont_iri 소속 전체 그래프에서 TBox 검색."""
         violations: list[ReasonerViolation] = []
 
         # Domain 위반: 프로퍼티 주어가 선언된 domain 클래스에 속하지 않음
         domain_rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
 SELECT DISTINCT ?ind ?prop ?domain WHERE {{
-    GRAPH <{kg_iri}> {{ ?prop rdfs:domain ?domain . }}
+    GRAPH ?_tbox {{ ?prop rdfs:domain ?domain . }}
+    FILTER(STRSTARTS(STR(?_tbox), "{ont_iri}"))
+    FILTER(!STRENDS(STR(?_tbox), "/inferred"))
     GRAPH ?g {{ ?ind ?prop ?val . FILTER(isIRI(?ind)) }}
     FILTER NOT EXISTS {{ GRAPH ?ga {{ ?ind a ?domain }} }}
     FILTER NOT EXISTS {{ GRAPH ?gt1 {{ ?ind a ?t }} GRAPH ?gt2 {{ ?t rdfs:subClassOf* ?domain }} }}
@@ -361,7 +424,9 @@ SELECT DISTINCT ?ind ?prop ?domain WHERE {{
         # Range 위반: 객체 프로퍼티의 목적어가 선언된 range 클래스에 속하지 않음
         range_rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
 SELECT DISTINCT ?ind ?prop ?range ?val WHERE {{
-    GRAPH <{kg_iri}> {{ ?prop rdfs:range ?range . }}
+    GRAPH ?_tbox {{ ?prop rdfs:range ?range . }}
+    FILTER(STRSTARTS(STR(?_tbox), "{ont_iri}"))
+    FILTER(!STRENDS(STR(?_tbox), "/inferred"))
     GRAPH ?g {{ ?ind ?prop ?val . FILTER(isIRI(?val)) }}
     FILTER NOT EXISTS {{ GRAPH ?ga {{ ?val a ?range }} }}
     FILTER NOT EXISTS {{ GRAPH ?gt1 {{ ?val a ?t }} GRAPH ?gt2 {{ ?t rdfs:subClassOf* ?range }} }}
@@ -382,28 +447,23 @@ SELECT DISTINCT ?ind ?prop ?range ?val WHERE {{
         return violations
 
     async def _detect_disjoint_violations(
-        self, kg_iri: str, dataset: str | None = None
+        self, ont_iri: str, dataset: str | None = None
     ) -> list[ReasonerViolation]:
-        """owl:disjointWith 위반 검출 (SPARQL) — 개체가 서로 disjoint 클래스에 동시에 속하는 경우."""
+        """owl:disjointWith 위반 검출 (SPARQL).
+        H2: GRAPH ?_tbox로 ont_iri 소속 전체 그래프에서 TBox 검색."""
         violations: list[ReasonerViolation] = []
-
-        # 먼저 TBox에 disjointWith 트리플이 있는지 확인
-        dw_check = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
-SELECT ?c1 ?c2 WHERE {{ GRAPH <{kg_iri}> {{ ?c1 owl:disjointWith ?c2 . }} }}""", dataset=dataset)
-        logger.info("_detect_disjoint_violations: TBox disjointWith triples=%s", dw_check)
-
-        # 개체 타입 확인
-        ind_types = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
-SELECT ?ind ?type WHERE {{ GRAPH ?g {{ ?ind a ?type . FILTER(isIRI(?ind)) FILTER(?type != owl:NamedIndividual) }} }}""", dataset=dataset)
-        logger.info("_detect_disjoint_violations: all individual types=%s", ind_types)
 
         # UNION으로 양방향(A disjointWith B, B disjointWith A) 모두 처리
         rows = await self._store.sparql_select(f"""{self._SPARQL_PREFIX}
 SELECT DISTINCT ?ind ?c1 ?c2 WHERE {{
     {{
-        GRAPH <{kg_iri}> {{ ?c1 owl:disjointWith ?c2 . }}
+        GRAPH ?_tbox1 {{ ?c1 owl:disjointWith ?c2 . }}
+        FILTER(STRSTARTS(STR(?_tbox1), "{ont_iri}"))
+        FILTER(!STRENDS(STR(?_tbox1), "/inferred"))
     }} UNION {{
-        GRAPH <{kg_iri}> {{ ?c2 owl:disjointWith ?c1 . }}
+        GRAPH ?_tbox2 {{ ?c2 owl:disjointWith ?c1 . }}
+        FILTER(STRSTARTS(STR(?_tbox2), "{ont_iri}"))
+        FILTER(!STRENDS(STR(?_tbox2), "/inferred"))
     }}
     GRAPH ?g1 {{ ?ind a ?c1 . FILTER(isIRI(?ind)) }}
     GRAPH ?g2 {{ ?ind a ?c2 . }}
@@ -411,7 +471,7 @@ SELECT DISTINCT ?ind ?c1 ?c2 WHERE {{
     FILTER(STR(?c1) < STR(?c2))
 }}""", dataset=dataset)
 
-        logger.info("_detect_disjoint_violations: tbox=%s rows=%d result=%s", kg_iri, len(rows), rows)
+        logger.debug("_detect_disjoint_violations: ont=%s rows=%d", ont_iri, len(rows))
 
         seen: set[tuple] = set()
         for r in rows:
@@ -437,11 +497,11 @@ SELECT DISTINCT ?ind ?c1 ?c2 WHERE {{
 
     async def get_result(self, job_id: str) -> dict:
         """추론 Job 상태 및 결과 조회."""
-        job = self._job_store.get(job_id)
+        job = await self._job_store.get(job_id)
         if job is None:
             raise KeyError(f"Job {job_id} not found")
 
-        base = {
+        base: dict = {
             "job_id": job_id,
             "ontology_id": job.get("ontology_id"),
             "status": job["status"],
@@ -454,9 +514,16 @@ SELECT DISTINCT ?ind ?c1 ?c2 WHERE {{
         base["completed_at"] = job.get("completed_at")
 
         if job["status"] == "completed":
-            result = job.get("result")
-            base["result"] = result.model_dump() if result else None
+            base["result"] = job.get("result")
         else:
             base["error"] = job.get("error")
 
         return base
+
+    async def list_jobs(self, ontology_id: str) -> list[dict]:
+        """온톨로지 소속 Job 목록 조회."""
+        return await self._job_store.list_by_ontology(ontology_id)
+
+    async def cleanup_expired_jobs(self) -> int:
+        """7일 이상 된 완료/실패 Job 삭제."""
+        return await self._job_store.cleanup_expired()

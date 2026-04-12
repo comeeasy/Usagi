@@ -3,12 +3,12 @@ api/reasoner.py — Reasoner 실행/결과 조회 라우터
 
 엔드포인트:
   POST /ontologies/{id}/reasoner/run             추론 실행 (비동기 Job)
+  GET  /ontologies/{id}/reasoner/jobs            온톨로지 Job 목록 조회
   GET  /ontologies/{id}/reasoner/jobs/{job_id}   추론 작업 상태 + 결과 조회
 """
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from models.ontology import JobResponse
 from models.reasoner import ReasonerRunRequest
 
 router = APIRouter(
@@ -25,9 +25,18 @@ async def run_reasoner(
     dataset: str | None = Query(None),
 ) -> dict:
     """OWL 2 추론 실행 (비동기). 202 Accepted + jobId 즉시 반환."""
-    reasoner: "ReasonerService" = request.app.state.reasoner_service  # type: ignore
+    reasoner = request.app.state.reasoner_service
     job_id = await reasoner.run(ontology_id, body.subgraph_entity_iris, dataset=dataset)
     return {"job_id": job_id, "status": "pending"}
+
+
+@router.get("/jobs")
+async def list_reasoner_jobs(
+    request: Request, ontology_id: str
+) -> list[dict]:
+    """온톨로지 소속 Reasoner Job 목록 조회 (최근 50건)."""
+    reasoner = request.app.state.reasoner_service
+    return await reasoner.list_jobs(ontology_id)
 
 
 @router.get("/jobs/{job_id}")
