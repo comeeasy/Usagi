@@ -1,19 +1,20 @@
 import { describe, it, expect, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { renderWithProviders } from '@/tests/utils'
-import { server } from '@/tests/mocks/server'
-import { DatasetProvider } from '@/contexts/DatasetContext'
-import { NamedGraphsProvider } from '@/contexts/NamedGraphsContext'
+import { renderWithProviders } from '../../../tests/utils'
+import { server } from '../../../tests/mocks/server'
+import { DatasetProvider } from '../../../contexts/DatasetContext'
+import { NamedGraphsProvider } from '../../../contexts/NamedGraphsContext'
 import ConceptGraphPanel from '../ConceptGraphPanel'
 
-const ONTOLOGY_ID = 'test-ont-uuid'
-
+// Cytoscape는 jsdom에서 동작하지 않으므로 GraphCanvas만 mock
 vi.mock('@/components/graph/GraphCanvas', () => ({
   default: ({ elements }: { elements: unknown[] }) => (
     <div data-testid="graph-canvas" data-elements={elements.length} />
   ),
 }))
+
+const ONTOLOGY_ID = 'test-ont-uuid'
 
 function renderPanel() {
   return renderWithProviders(

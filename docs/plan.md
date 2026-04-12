@@ -863,9 +863,9 @@ const [conceptGraphIris, setConceptGraphIris] = useState<string[]>([])
 
 ### 단계별 작업
 
-- [ ] **G1** 테스트: `ConceptGraphPanel`이 `page_size=100`으로 호출되는지 검증 테스트 작성
-- [ ] **G2** 구현: `ConceptGraphPanel`의 page size 상수 조정 (`200 → 100`)
-- [ ] **G3** 검증: `ConceptGraphPanel` 테스트 통과 + SchemaPage 회귀 테스트 재실행
+- [x] **G1** 테스트: `ConceptGraphPanel`이 `page_size=100`으로 호출되는지 검증 테스트 작성
+- [x] **G2** 구현: `ConceptGraphPanel`의 page size 상수 조정 (`200 → 100`)
+- [x] **G3** 검증: `ConceptGraphPanel` 테스트 통과 + SchemaPage 회귀 테스트 재실행
 - [x] **G1** 테스트: `ConceptGraphPanel`이 `page_size=100`으로 호출되는지 검증 테스트 작성
 - [x] **G2** 구현: `ConceptGraphPanel`의 page size 상수 조정 (`200 → 100`)
 - [x] **G3** 검증: `ConceptGraphPanel` 테스트 통과 + SchemaPage 회귀 테스트 재실행
