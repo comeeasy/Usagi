@@ -832,18 +832,18 @@ const [conceptGraphIris, setConceptGraphIris] = useState<string[]>([])
 
 #### Part E — 후속: TTL 편집기
 
-- [ ] **E1** `GET /ontologies/{id}/graphs/{graph_iri_encoded}/ttl` — GSP GET으로 TTL 반환
-- [ ] **E2** `PUT /ontologies/{id}/graphs/{graph_iri_encoded}/ttl` — TTL 교체 (GSP PUT)
-- [ ] **E3** Frontend `NamedGraphList` — 편집 버튼 + CodeMirror TTL 편집기 패널
+- [x] **E1** `GET /ontologies/{id}/graphs/ttl?graph_iri=...` — GSP GET으로 TTL 반환 (기구현)
+- [x] **E2** `PUT /ontologies/{id}/graphs/ttl?graph_iri=...` — TTL 교체 (기구현)
+- [x] **E3** Frontend `NamedGraphList` — 편집 버튼 + `TtlEditorPanel`(CodeMirror) (기구현)
 
 ### 다음 작업 순서 (고정)
 
 - [x] **S1** Section 16 / Step 8 — Schema 레이아웃 관련 테스트 재실행 및 통과 확인
 - [x] **S2** Section 17 / Part D3 — `NamedGraphList` 체크박스 토글 프론트 테스트 작성/통과
 - [x] **S3** Section 17 / Part D4 — 선택 graph 필터 반영 프론트 테스트 작성/통과
-- [ ] **S4** Section 17 / Part E1 — TTL 조회 API 구현 + 테스트
-- [ ] **S5** Section 17 / Part E2 — TTL 교체 API 구현 + 테스트
-- [ ] **S6** Section 17 / Part E3 — TTL 편집기 UI(CodeMirror) 구현 + 테스트
+- [x] **S4** Section 17 / Part E1 — TTL 조회 API 구현 (기구현, 테스트 Section 31에서 작성)
+- [x] **S5** Section 17 / Part E2 — TTL 교체 API 구현 (기구현, 테스트 Section 31에서 작성)
+- [x] **S6** Section 17 / Part E3 — TTL 편집기 UI(CodeMirror) 구현 (기구현, 테스트 Section 31에서 작성)
 
 ---
 
@@ -1980,3 +1980,53 @@ async def paginated_class_query(store, class_pattern, extra, gf, page, page_size
 - [x] **C30-2** `get_concept` — `_DEPRECATED` predicate 분류 추가
 - [x] **C30-3** `get_concept` — `return Concept(...)` 필드 보완
 - [x] **C30-4** 테스트 추가 (`tests/test_concept_detail_fields.py`, 4/4 통과)
+
+---
+
+## Section 31 — TTL 편집기 테스트
+
+**날짜:** 2026-04-12
+
+### 배경
+
+Section 17 Part E 구현(E1~E3)은 이미 완료돼 있으나 테스트가 없음.
+
+- `backend/api/graphs.py`: `GET /graphs/ttl`, `PUT /graphs/ttl` 구현됨
+- `frontend/src/components/graph/TtlEditorPanel.tsx`: CodeMirror 편집기 구현됨
+- `frontend/src/components/graph/NamedGraphList.tsx`: 편집 버튼 + 패널 토글 구현됨
+
+### 작업 범위
+
+#### Backend — `tests/test_graphs_ttl.py` 신규 작성
+
+| 테스트 ID | 검증 내용 |
+|-----------|-----------|
+| T1 | `GET /graphs/ttl?graph_iri=...` → 200, `text/turtle` 응답 |
+| T2 | `PUT /graphs/ttl?graph_iri=...` (text/turtle) → 204 |
+| T3 | `PUT /graphs/ttl?graph_iri=...` (잘못된 Content-Type) → 415 |
+| T4 | graph_iri가 ontology IRI 소속이 아닌 경우 → 403 |
+
+패턴: `patch("api.graphs.resolve_ontology_iri")` + store mock
+
+#### Frontend — `TtlEditorPanel.test.tsx` 신규 작성
+
+| 테스트 ID | 검증 내용 |
+|-----------|-----------|
+| F1 | 마운트 시 `GET /graphs/ttl` 호출 → 에디터에 TTL 내용 표시 |
+| F2 | Save 버튼 클릭 → `PUT /graphs/ttl` 호출 후 패널 닫힘 |
+| F3 | Close(X) 버튼 클릭 → `onClose` 호출 |
+| F4 | TTL 로드 실패 시 에러 메시지 표시 |
+
+### 기술 메모
+
+- Backend: `store.export_turtle` / `store.put_graph_turtle` mock 사용
+- Frontend: MSW `GET /graphs/ttl` mock이 이미 `handlers.ts`에 있음
+  - `GET` → TTL 문자열 반환 (text/turtle)
+  - `PUT` → 204 No Content
+- TtlEditorPanel은 CodeMirror를 직접 DOM에 mount → `vi.mock('@codemirror/...')` 필요할 수 있음
+
+### 작업 체크리스트
+
+- [x] **T31-1** Backend: `tests/test_graphs_ttl.py` 작성 (5/5 통과)
+- [x] **T31-2** Frontend: `TtlEditorPanel.test.tsx` 작성 (5/5 통과)
+- [x] **T31-3** 모든 테스트 통과 확인 + 기존 회귀 없음 확인
