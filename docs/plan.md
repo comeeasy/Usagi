@@ -2256,3 +2256,135 @@ async with self._lock:
 - [ ] **C32-L1** 대용량 성능 — 스트리밍 + World 캐시
 - [ ] **C32-L2** 테스트 추가 (`test_reasoner_service.py`, 6개)
 - [ ] **C32-L3** `logger.info` → `logger.debug` 로그 레벨 정리
+
+---
+
+## Section 33 — Subgraph 구성 알고리즘 (Path-based + Flow Pruning)
+
+**날짜:** 2026-04-13
+
+### 배경 및 알고리즘 조사
+
+사용자가 선택한 entity IRI 집합과 relation type IRI 집합을 seed로 하여, 그 사이의 의미 있는 경로들로 구성된 subgraph를 만드는 기능 구현.
+
+기존 `api/subgraph.py`의 BFS depth 방식은 depth 값이 결과를 임의로 결정하는 문제가 있어, **path + relation type 기반**으로 전면 교체.
+
+#### 알고리즘 후보 조사 결과
+
+> 참고 자료: Graph RAG Survey (arXiv:2504.10499), RECON (arXiv:2010.06336, IEEE 2022), PathRAG (arXiv:2502.14902, AAAI 2025), HippoRAG (NeurIPS 2024)
+
+| 알고리즘 | 설명 | RDF 친화성 | 구현 복잡도 | Connected 보장 |
+|----------|------|-----------|------------|----------------|
+| **k-hop + Relation Filter** | BFS depth + relation type 제약 조합. GraiL·DRUM 등 GNN 논문 표준 기법. SPARQL property path로 구현 가능 | 높음 | 낮음 | 보장 안 됨 |
+| **Steiner Tree 근사 (RECON)** | entity들을 모두 포함하는 최소 연결 subgraph. 중간 노드(Steiner node) 자동 발견. PLL 인덱스 기반 밀리초 응답. RDF + ontology 특화 구현체 존재 (IEEE 2022) | 중간 | 높음 | 보장됨 |
+| **Path-based + Flow Pruning (PathRAG)** | entity 쌍 사이 경로를 BFS로 탐색 후 flow score로 상위 K개 선택. seed에 자원값 1.0 부여 후 감쇠율 α로 전파, threshold 이하 경로 제거. AAAI 2025, 랜덤 대비 56-57% win-rate | 낮음 (Python BFS) | 중간 | 보장됨 (쌍별) |
+
+#### 선택: **알고리즘 C — Path-based + Flow Pruning**
+
+- Depth 개념 없이 relation type constraint로만 경로 종료 조건 결정
+- 경로가 명시적으로 노출되어 시각화·설명 가능성(explainability) 우수
+- entity 쌍 간 연결 보장 (경로 없는 쌍은 제외됨)
+- 기존 SPARQL BFS 인프라 재활용 가능
+
+---
+
+### 알고리즘 상세 설계
+
+#### 입력
+```
+seed_entities:   list[IRI]   — 반드시 포함할 entity IRI 목록
+seed_relations:  list[IRI]   — 허용할 relation type IRI 목록 (빈 배열이면 모든 relation 허용)
+max_paths:       int = 50    — 반환할 최대 경로 수 (flow score 상위 K개)
+alpha:           float = 0.7 — 경로 감쇠율 (각 hop마다 score에 곱함)
+min_score:       float = 0.05 — 이 threshold 미만 경로는 제거
+```
+
+#### 알고리즘 흐름
+
+```
+1. ENTITY PAIR ENUMERATION
+   seed_entities 중 2개씩 쌍 생성 (n*(n-1)/2 쌍)
+   단일 entity인 경우: 해당 entity를 root로 방사형 탐색
+
+2. PER-PAIR BFS PATH FINDING
+   각 쌍 (s, t)에 대해:
+     - SPARQL로 s에서 직접 이웃 조회 (seed_relations 필터 적용)
+     - BFS 큐로 t를 향해 탐색
+     - 방문한 경로를 path stack으로 추적
+     - t에 도달하면 path 저장 (max_hops = 6 하드캡)
+     - 사이클 방지: visited set으로 노드 재방문 차단
+
+3. FLOW SCORE 계산 (PathRAG 방식)
+   각 path에 대해:
+     score = alpha ^ (hop_count - 1)
+     # hop이 늘어날수록 감쇠
+     # 직접 연결(1-hop) = 1.0, 2-hop = alpha, 3-hop = alpha² ...
+
+4. PRUNING
+   전체 path 목록을 score 내림차순 정렬
+   min_score 미만 경로 제거
+   상위 max_paths개 선택
+
+5. SUBGRAPH ASSEMBLY
+   선택된 경로들의 노드/엣지 합집합 → { nodes, edges }
+   각 노드에 label·type 조회 (기존 코드 재사용)
+```
+
+#### seed_entities = 1개인 경우 (방사형)
+쌍을 만들 수 없으므로 단일 entity에서 seed_relations를 따라 1-hop 탐색 (별도 분기).
+
+#### seed_relations = [] (비어 있음)인 경우
+모든 relation type 허용 → BFS에서 relation 필터 없이 탐색.  
+단, `max_hops`를 더 작게 적용 (기본 3 → 2)하여 폭발 방지.
+
+#### 사이클 처리
+각 경로 탐색 시 `path_visited` set으로 현재 경로상 방문 노드 추적 → 재방문 즉시 차단.  
+전체 그래프 레벨 `global_visited`는 사용하지 않음 (다른 경로에서 동일 노드를 다시 방문 허용).
+
+---
+
+### 구현 범위
+
+#### Backend
+
+**`api/subgraph.py` 전면 교체:**
+
+| 항목 | 변경 내용 |
+|------|-----------|
+| `SubgraphRequest` 모델 | `entity_iris`, `relation_iris`, `max_paths`, `alpha`, `min_score` 필드. `depth` 제거 |
+| `_bfs_path_find(s, t, relations, max_hops)` | 단일 쌍 경로 탐색 (신규) |
+| `_flow_score(path, alpha)` | 경로 점수 계산 (신규) |
+| `_assemble_subgraph(paths, store, gf)` | 경로 → nodes/edges 조합 (신규) |
+| `POST /subgraph` | 기존 유지, 내부 로직만 교체 |
+
+**`services/ontology_graph.py`:** `graphs_filter_clause` 재사용 (변경 없음)
+
+#### Frontend
+
+**`SubgraphSelector.tsx` 확장:**
+
+| 항목 | 변경 내용 |
+|------|-----------|
+| `availableGraphs` prop | 제거 (Named Graph 선택 → 별도 기능으로 분리) |
+| `selectedEntities` | entity IRI 다중 선택 UI 추가 |
+| `selectedRelations` | relation type IRI 다중 선택 UI 추가 |
+| depth 관련 UI | 제거 |
+| `max_paths`, `alpha` | 고급 옵션으로 접을 수 있는 섹션에 배치 |
+
+**`ReasonerPage.tsx`:** `subgraph_iris` → `subgraph_entity_iris` + `subgraph_relation_iris` 필드 수정
+
+---
+
+### 작업 체크리스트
+
+#### Backend
+- [ ] **C33-B1** `SubgraphRequest` 모델 교체 (`depth` 제거, `relation_iris`/`alpha`/`min_score`/`max_paths` 추가)
+- [ ] **C33-B2** `_bfs_path_find()` 단일 쌍 경로 탐색 구현
+- [ ] **C33-B3** `_flow_score()` + pruning 구현
+- [ ] **C33-B4** `_assemble_subgraph()` 노드/엣지 조합 구현
+- [ ] **C33-B5** `POST /subgraph` 엔드포인트 내부 로직 교체
+- [ ] **C33-B6** 테스트 (`test_subgraph_path.py`): 경로 탐색, flow score, pruning, single-entity 케이스
+
+#### Frontend
+- [ ] **C33-F1** `SubgraphSelector` — entity/relation 다중 선택 UI 구현
+- [ ] **C33-F2** `ReasonerPage` — 파라미터 연결 수정
