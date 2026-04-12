@@ -2169,32 +2169,74 @@ TransitiveProperty, InverseProperty 추론이 수행되지 않을 수 있음.
 
 **검증:** 각 위반 유형에 해당하는 테스트 온톨로지로 탐지 확인
 
-#### L1 — 대용량 성능 개선
+#### L1 — 대용량 온톨로지 안전 가드 + HermiT 타임아웃
+
+> 원안(World 캐시 + 스트리밍)은 스레드 안전성 문제로 위험하여 실용적인 방향으로 변경.
 
 **파일:** `backend/services/reasoner_service.py`
 
-1. `export_turtle()` 대신 스트리밍 방식: Named Graph 별로 청크 처리
-2. owlready2 World 재사용 (요청마다 새 World 생성 → 싱글톤 캐시)
-3. 동일 ontology_id + 동일 Named Graph 조합은 5분간 캐시 (content hash 비교)
+**L1-a: 트리플 수 사전 확인 + 경고**
 
-#### L2 — 테스트 추가
+`_execute()` 에서 owlready2 실행 전 트리플 수 체크:
+```python
+total_triples = sum(
+    await self._store.count_graph_triples(g, dataset) for g in ont_graphs
+)
+if total_triples > LARGE_ONT_THRESHOLD:   # 기본값 50_000
+    logger.warning("Large ontology: %d triples — HermiT may be slow", total_triples)
+```
+- 임계값 초과 시 warn 로그 + `ReasonerResult`에 `warning` 필드 포함
+- `LARGE_ONT_THRESHOLD = 50_000` (모듈 상수로 노출, 테스트에서 오버라이드 가능)
 
-**파일:** `backend/tests/test_reasoner_service.py` (신규)
+**L1-b: HermiT/Pellet 실행 타임아웃**
 
-| 테스트 ID | 검증 내용 |
-|-----------|-----------|
-| R1 | job 생성 → PENDING 상태 반환 |
-| R2 | job 완료 후 status = COMPLETED, violations 포함 |
-| R3 | subgraph_entity_iris 필터링 — 지정 엔티티 외 위반 미포함 |
-| R4 | Cardinality 위반 탐지 정확성 |
-| R5 | DomainRange 위반 탐지 정확성 |
-| R6 | Disjoint 위반 탐지 정확성 |
+`run_in_executor` 호출에 `asyncio.wait_for` 래핑:
+```python
+async with self._lock:
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, self._dispatch_reasoner, tmp_path, profile),
+            timeout=REASONER_TIMEOUT_SECONDS,   # 기본값 120
+        )
+    except asyncio.TimeoutError:
+        raise RuntimeError(f"Reasoner timed out after {REASONER_TIMEOUT_SECONDS}s")
+```
+- `REASONER_TIMEOUT_SECONDS = 120` (모듈 상수)
+- 타임아웃 시 job status = `"failed"`, error = `"Reasoner timed out after 120s"`
+
+**검증:** 임계값 아래/위 온톨로지에서 warning 로그 여부 확인, 타임아웃 경로 테스트
+
+---
+
+#### L2 — 서비스 통합 테스트 보강
+
+> H/M 테스트(unit)에서 다루지 못한 `_execute()` 전체 흐름과 엣지케이스 커버.
+
+**파일:** `backend/tests/test_reasoner_integration.py` (신규)
+
+| 테스트 ID | 검증 내용 | 특이사항 |
+|-----------|-----------|---------|
+| I1 | `run()` 호출 → job status가 pending → completed로 전이 | `_dispatch_reasoner` mock |
+| I2 | OWL_RL 프로파일로 `run()` → owlready2 호출 없이 SPARQL 위반만 수집 | `_run_hermit` 호출 없음 assert |
+| I3 | `get_result()` 존재하지 않는 job_id → KeyError | - |
+| I4 | 타임아웃 발생 시 job status = `"failed"`, error에 "timed out" 포함 | `wait_for` mock |
+| I5 | 대용량 경고: 트리플 수 > LARGE_ONT_THRESHOLD → warning 로그 기록 | `count_graph_triples` mock |
+| I6 | `_execute()` 중 예외 → job status = `"failed"`, error 메시지 저장 | store.sparql_select exception |
+
+---
 
 #### L3 — 로그 레벨 정리
 
 **파일:** `backend/services/reasoner_service.py`
 
-`_detect_disjoint_violations` 내 `logger.info` → `logger.debug`로 일괄 변경
+현재 `logger.info`로 출력되는 디버그성 로그를 `logger.debug`로 변경:
+
+| 위치 | 내용 |
+|------|------|
+| `_execute()` — named graph 목록 | `"found %d named graph(s) for %s"` |
+| `_dispatch_reasoner()` — profile skip | `"Profile %s: skipping owlready2..."` |
+
+`logger.warning`은 유지 (실패한 graph export, 대용량 경고).
 
 ---
 
