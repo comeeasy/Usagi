@@ -2206,9 +2206,9 @@ TransitiveProperty, InverseProperty 추론이 수행되지 않을 수 있음.
 - [x] **C32-H3** `job_store.py` SQLite 기반 영속 저장 + `GET /jobs` 엔드포인트 추가
 
 #### MEDIUM
-- [ ] **C32-M1** `reasoner_profile` 백엔드 모델 추가 + 프로파일별 추론기 분기
-- [ ] **C32-M2** `infer_property_values` 복구 또는 SPARQL TransitiveProperty 규칙 대체
-- [ ] **C32-M3** FunctionalProperty / minCardinality / inverseOf 위반 탐지 추가
+- [x] **C32-M1** `reasoner_profile` 모델 추가 (OWL_DL/EL/RL/QL) + `_dispatch_reasoner` 분기
+- [x] **C32-M2** SPARQL TransitiveProperty/InverseOf 추론 규칙 (`_apply_sparql_inference_rules`)
+- [x] **C32-M3** FunctionalProperty / minCardinality / inverseOf 위반 탐지 추가 (총 6종)
 
 #### LOW
 - [ ] **C32-L1** 대용량 성능 — 스트리밍 + World 캐시

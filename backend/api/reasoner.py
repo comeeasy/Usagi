@@ -26,7 +26,12 @@ async def run_reasoner(
 ) -> dict:
     """OWL 2 추론 실행 (비동기). 202 Accepted + jobId 즉시 반환."""
     reasoner = request.app.state.reasoner_service
-    job_id = await reasoner.run(ontology_id, body.subgraph_entity_iris, dataset=dataset)
+    job_id = await reasoner.run(
+        ontology_id,
+        body.subgraph_entity_iris,
+        reasoner_profile=body.reasoner_profile,
+        dataset=dataset,
+    )
     return {"job_id": job_id, "status": "pending"}
 
 

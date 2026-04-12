@@ -14,6 +14,8 @@ class ReasonerViolation(BaseModel):
         "CardinalityViolation",
         "DisjointViolation",
         "DomainRangeViolation",
+        "FunctionalPropertyViolation",
+        "InverseOfViolation",
     ]
     subject_iri: str
     description: str
@@ -45,6 +47,7 @@ class ReasonerJob(BaseModel):
 
 class ReasonerRunRequest(BaseModel):
     subgraph_entity_iris: list[str] | None = None  # None이면 전체 온톨로지
+    reasoner_profile: Literal["OWL_DL", "OWL_EL", "OWL_RL", "OWL_QL"] = "OWL_DL"
 
 
 class JobResponse(BaseModel):
