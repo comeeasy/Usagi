@@ -50,7 +50,7 @@ export default function EntityGraphPanel({ ontologyId, entityIris, onRemoveIri }
     }
     setLoading(true)
     setError(null)
-    getSubgraph(ontologyId, { rootIris: entityIris, depth: 1, dataset })
+    getSubgraph(ontologyId, { rootIris: entityIris, dataset })
       .then((data) => {
         const allowedNodeIds = new Set(
           data.nodes
@@ -88,7 +88,7 @@ export default function EntityGraphPanel({ ontologyId, entityIris, onRemoveIri }
     if (expandedIris.has(iri)) return
     setExpandedIris((prev) => new Set([...prev, iri]))
     try {
-      const data = await getSubgraph(ontologyId, { rootIris: [iri], depth: 1, dataset })
+      const data = await getSubgraph(ontologyId, { rootIris: [iri], dataset })
       const allowedNodeIds = new Set(
         data.nodes
           .map((n) => n.data.id)

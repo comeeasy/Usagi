@@ -16,7 +16,7 @@ export default function SchemaReasonerPanel({ ontologyId, entityIris = [] }: Pro
   const [expanded, setExpanded] = useState(false)
   const [checkConsistency, setCheckConsistency] = useState(true)
   const [includeInferences, setIncludeInferences] = useState(true)
-  const [profile, setProfile] = useState<'EL' | 'RL' | 'QL' | 'FULL'>('EL')
+  const [profile, setProfile] = useState<'OWL_DL' | 'OWL_EL' | 'OWL_RL' | 'OWL_QL'>('OWL_DL')
 
   const { runMutation, resultQuery, jobId } = useReasoner(ontologyId)
 
@@ -125,7 +125,7 @@ export default function SchemaReasonerPanel({ ontologyId, entityIris = [] }: Pro
                 color: 'var(--color-text-secondary)',
               }}
             >
-              {(['EL', 'RL', 'QL', 'FULL'] as const).map((p) => (
+              {(['OWL_DL', 'OWL_EL', 'OWL_RL', 'OWL_QL'] as const).map((p) => (
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>

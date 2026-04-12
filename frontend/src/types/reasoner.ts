@@ -37,5 +37,5 @@ export interface ReasonerRunRequest {
   subgraph_entity_iris?: string[]
   include_inferences?: boolean
   check_consistency?: boolean
-  reasoner_profile?: 'EL' | 'RL' | 'QL' | 'FULL'
+  reasoner_profile?: 'OWL_DL' | 'OWL_EL' | 'OWL_RL' | 'OWL_QL'
 }

@@ -12,17 +12,18 @@ export default function ReasonerPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
   const { runMutation, resultQuery, jobId } = useReasoner(ontologyId)
 
-  const [selectedGraphs, setSelectedGraphs] = useState<string[]>([])
-  const [profile, setProfile] = useState('EL')
+  const [selectedEntities, setSelectedEntities] = useState<string[]>([])
+  const [selectedRelations, setSelectedRelations] = useState<string[]>([])
+  const [profile, setProfile] = useState<'OWL_DL' | 'OWL_EL' | 'OWL_RL' | 'OWL_QL'>('OWL_DL')
   const [includeInferences, setIncludeInferences] = useState(true)
   const [checkConsistency, setCheckConsistency] = useState(true)
 
   const handleRun = () => {
     runMutation.mutate({
-      subgraph_iris: selectedGraphs.length > 0 ? selectedGraphs : undefined,
+      subgraph_entity_iris: selectedEntities.length > 0 ? selectedEntities : undefined,
       include_inferences: includeInferences,
       check_consistency: checkConsistency,
-      reasoner_profile: profile as 'EL' | 'RL' | 'QL' | 'FULL',
+      reasoner_profile: profile,
     })
   }
 
@@ -49,11 +50,12 @@ export default function ReasonerPage() {
             </div>
 
             <SubgraphSelector
-              availableGraphs={[]}
-              selectedGraphs={selectedGraphs}
-              onSelectionChange={setSelectedGraphs}
               profile={profile}
-              onProfileChange={setProfile}
+              onProfileChange={(p) => setProfile(p as 'OWL_DL' | 'OWL_EL' | 'OWL_RL' | 'OWL_QL')}
+              selectedEntities={selectedEntities}
+              onEntitiesChange={setSelectedEntities}
+              selectedRelations={selectedRelations}
+              onRelationsChange={setSelectedRelations}
             />
 
             <div className="flex flex-col gap-2">
