@@ -2557,8 +2557,8 @@ interface SubgraphPreviewPanelProps {
 
 ### 작업 체크리스트
 
-- [ ] **C34-1** `SchemaEntityPicker` 컴포넌트
-- [ ] **C34-2** `SchemaRelationPicker` 컴포넌트
-- [ ] **C34-3** `SubgraphSelector` 개선 (피커 교체)
-- [ ] **C34-4** `SubgraphPreviewPanel` 컴포넌트
-- [ ] **C34-5** `ReasonerPage` 탭 레이아웃 + 연결
+- [x] **C34-1** `SchemaEntityPicker` 컴포넌트
+- [x] **C34-2** `SchemaRelationPicker` 컴포넌트
+- [x] **C34-3** `SubgraphSelector` 개선 (피커 교체)
+- [x] **C34-4** `SubgraphPreviewPanel` 컴포넌트
+- [x] **C34-5** `ReasonerPage` 탭 레이아웃 + 연결
