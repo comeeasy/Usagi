@@ -39,8 +39,8 @@ export default function SchemaRelationPicker({
   const propsQuery = useQuery({
     queryKey: ['object-properties', ontologyId, dataset, 'picker', selectedGraphIris],
     queryFn: () => listObjectProperties(ontologyId, { pageSize: 200, dataset, graphIris: selectedGraphIris }),
-    enabled: !!ontologyId && open,
-    staleTime: 30_000,
+    enabled: !!ontologyId,
+    staleTime: 60_000,
   })
 
   // 바깥 클릭 시 닫기
@@ -149,7 +149,7 @@ export default function SchemaRelationPicker({
 
             {properties.length === 0 && (
               <p className="px-2 py-3 text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
-                {propsQuery.isLoading ? 'Loading…' : 'No properties found'}
+                {propsQuery.isFetching ? 'Loading…' : 'No properties found'}
               </p>
             )}
           </div>

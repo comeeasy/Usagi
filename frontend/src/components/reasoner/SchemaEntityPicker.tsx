@@ -45,15 +45,15 @@ export default function SchemaEntityPicker({
   const conceptsQuery = useQuery({
     queryKey: ['concepts', ontologyId, dataset, 'picker', selectedGraphIris],
     queryFn: () => listConcepts(ontologyId, { pageSize: 200, dataset, graphIris: selectedGraphIris }),
-    enabled: !!ontologyId && open,
-    staleTime: 30_000,
+    enabled: !!ontologyId,
+    staleTime: 60_000,
   })
 
   const individualsQuery = useQuery({
     queryKey: ['individuals', ontologyId, dataset, 'picker', selectedGraphIris],
     queryFn: () => listIndividuals(ontologyId, { pageSize: 200, dataset, graphIris: selectedGraphIris }),
-    enabled: !!ontologyId && open,
-    staleTime: 30_000,
+    enabled: !!ontologyId,
+    staleTime: 60_000,
   })
 
   // 바깥 클릭 시 닫기
@@ -223,7 +223,7 @@ export default function SchemaEntityPicker({
 
             {concepts.length === 0 && individuals.length === 0 && (
               <p className="px-2 py-3 text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
-                {conceptsQuery.isLoading || individualsQuery.isLoading ? 'Loading…' : 'No items found'}
+                {conceptsQuery.isFetching || individualsQuery.isFetching ? 'Loading…' : 'No items found'}
               </p>
             )}
           </div>
