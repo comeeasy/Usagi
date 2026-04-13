@@ -2386,5 +2386,179 @@ min_score:       float = 0.05 — 이 threshold 미만 경로는 제거
 - [ ] **C33-B6** 테스트 (`test_subgraph_path.py`): 경로 탐색, flow score, pruning, single-entity 케이스
 
 #### Frontend
-- [ ] **C33-F1** `SubgraphSelector` — entity/relation 다중 선택 UI 구현
-- [ ] **C33-F2** `ReasonerPage` — 파라미터 연결 수정
+- [x] **C33-F1** `SubgraphSelector` — entity/relation 다중 선택 UI 구현
+- [x] **C33-F2** `ReasonerPage` — 파라미터 연결 수정
+
+---
+
+## Section 34 — 직관적 서브그래프 빌더
+
+### 배경 및 목표
+
+현재 `SubgraphSelector`는 Entity/Relation IRI를 직접 타이핑해야 한다.
+사용자가 스키마에 어떤 항목이 있는지 알지 못하면 사용할 수 없는 구조.
+
+목표: **스키마에서 항목을 골라** 서브그래프를 구성하고, **결과를 실시간으로 미리보기**할 수 있게 한다.
+
+---
+
+### Part 1 — Schema 기반 피커 (SubgraphSelector 개선)
+
+#### 1-1. `SchemaEntityPicker` 컴포넌트
+
+**파일:** `frontend/src/components/reasoner/SchemaEntityPicker.tsx`
+
+버튼 클릭 시 드롭다운 패널이 열리고 스키마의 Concept·Individual 목록을 표시한다.
+
+```
+[+ Add from Schema ▼]
+
+↓ 클릭 시 드롭다운
+
+┌──────────────────────────┐
+│ 🔍 filter...             │
+│ ── Concepts ──────────── │
+│ ○ Person   (ex:Person)   │  ← 클릭으로 즉시 추가
+│ ✓ Animal   (ex:Animal)   │  ← 이미 선택됨 (체크 + 클릭하면 제거)
+│ ── Individuals ────────  │
+│ ○ Alice    (ex:Alice)    │
+│ ○ Bob      (ex:Bob)      │
+└──────────────────────────┘
+```
+
+**동작:**
+- `listConcepts(ontologyId, { pageSize: 200 })` + `listIndividuals(ontologyId, { pageSize: 200 })` 로 항목 로드
+- filter input은 로컬 필터 (추가 API 호출 없음)
+- 선택된 항목: 체크 표시, 클릭 시 제거
+- 미선택 항목: 클릭 시 `onAdd(iri)` 호출
+- 드롭다운 바깥 클릭 시 닫힘 (useRef + mousedown 핸들러)
+- label 없는 항목은 short IRI fallback
+
+**Props:**
+```typescript
+interface SchemaEntityPickerProps {
+  ontologyId: string
+  dataset?: string
+  selectedIris: string[]
+  onAdd: (iri: string) => void
+  onRemove: (iri: string) => void
+}
+```
+
+#### 1-2. `SchemaRelationPicker` 컴포넌트
+
+**파일:** `frontend/src/components/reasoner/SchemaRelationPicker.tsx`
+
+동일 패턴, Object Property 목록 표시.
+
+```
+[+ Add from Schema ▼]
+
+↓ 클릭 시 드롭다운
+
+┌──────────────────────────────┐
+│ 🔍 filter...                 │
+│ ○ knows    Person → Person   │
+│ ○ worksAt  Person → Org      │
+│ ○ hasAge   Person → xsd:int  │
+└──────────────────────────────┘
+```
+
+**동작:**
+- `listObjectProperties(ontologyId, { pageSize: 200 })` 로 로드
+- domain/range short IRI를 힌트로 표시
+- 동일 선택/제거 패턴
+
+**Props:**
+```typescript
+interface SchemaRelationPickerProps {
+  ontologyId: string
+  dataset?: string
+  selectedIris: string[]
+  onAdd: (iri: string) => void
+  onRemove: (iri: string) => void
+}
+```
+
+#### 1-3. `SubgraphSelector` 개선
+
+**파일:** `frontend/src/components/reasoner/SubgraphSelector.tsx`
+
+기존 텍스트 입력 + Add 버튼 → `SchemaEntityPicker` / `SchemaRelationPicker` 로 교체.
+선택된 IRI 태그 표시(X 버튼으로 제거)는 유지.
+
+`ontologyId`, `dataset` prop 추가 필요.
+
+---
+
+### Part 2 — 서브그래프 미리보기 패널
+
+#### 2-1. `SubgraphPreviewPanel` 컴포넌트
+
+**파일:** `frontend/src/components/reasoner/SubgraphPreviewPanel.tsx`
+
+선택된 entity/relation 이 바뀌면 자동으로 `getSubgraph()` 를 호출하고 `GraphCanvas` 로 렌더링.
+
+**동작:**
+- `selectedEntities.length === 0` → 빈 상태 메시지 표시
+- entity/relation 변경 후 500ms debounce → `getSubgraph()` 호출
+- 로딩 중: spinner overlay
+- 결과: `GraphCanvas` (기존 컴포넌트 재사용, read-only)
+- 노드 클릭 → 해당 IRI를 `onAddEntity(iri)` 로 seed에 추가 (확장 탐색)
+- 노드/엣지 수 표시 (예: `12 nodes · 8 edges`)
+
+**Props:**
+```typescript
+interface SubgraphPreviewPanelProps {
+  ontologyId: string
+  dataset?: string
+  selectedEntities: string[]
+  selectedRelations: string[]
+  onAddEntity: (iri: string) => void
+}
+```
+
+#### 2-2. `ReasonerPage` 레이아웃 변경
+
+오른쪽 패널에 `[Subgraph Preview]` / `[Results]` 탭 추가.
+
+```
+┌──────────────────────────────────────────────────┐
+│ Config (w-72)  │ [Subgraph Preview] [Results]    │
+│                │                                  │
+│ Seed Entities  │  ← SubgraphPreviewPanel          │
+│ [+ Add ▼]      │    or ReasonerResults            │
+│ [× Person]     │    (탭 전환)                      │
+│                │                                  │
+│ Relations      │                                  │
+│ [+ Add ▼]      │                                  │
+│                │                                  │
+│ Profile        │                                  │
+│ [Run Reasoner] │                                  │
+└──────────────────────────────────────────────────┘
+```
+
+- Run Reasoner 클릭 → 자동으로 Results 탭으로 전환
+- `ontologyId`, `dataset` 을 `SubgraphSelector` 에 전달
+
+---
+
+### 변경 파일 목록
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `components/reasoner/SchemaEntityPicker.tsx` | 신규 |
+| `components/reasoner/SchemaRelationPicker.tsx` | 신규 |
+| `components/reasoner/SubgraphPreviewPanel.tsx` | 신규 |
+| `components/reasoner/SubgraphSelector.tsx` | 피커 교체, ontologyId/dataset prop 추가 |
+| `pages/ontology/ReasonerPage.tsx` | 탭 레이아웃, SubgraphSelector prop 연결 |
+
+---
+
+### 작업 체크리스트
+
+- [ ] **C34-1** `SchemaEntityPicker` 컴포넌트
+- [ ] **C34-2** `SchemaRelationPicker` 컴포넌트
+- [ ] **C34-3** `SubgraphSelector` 개선 (피커 교체)
+- [ ] **C34-4** `SubgraphPreviewPanel` 컴포넌트
+- [ ] **C34-5** `ReasonerPage` 탭 레이아웃 + 연결
