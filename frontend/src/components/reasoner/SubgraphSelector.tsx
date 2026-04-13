@@ -1,16 +1,21 @@
 /**
  * SubgraphSelector — Reasoner용 서브그래프 범위 설정
  *
- * entity IRI 목록 + relation type IRI 목록을 선택하여
- * Path+Flow Pruning 알고리즘에 전달할 seed를 구성한다.
+ * SchemaEntityPicker / SchemaRelationPicker 를 통해
+ * 스키마에서 seed entity / allowed relation 을 선택한다.
  */
-import { useState } from 'react'
 import { X, ChevronDown, ChevronUp } from 'lucide-react'
+import { useState } from 'react'
 import IRIBadge from '@/components/shared/IRIBadge'
+import SchemaEntityPicker from './SchemaEntityPicker'
+import SchemaRelationPicker from './SchemaRelationPicker'
 
 const PROFILES = ['OWL_DL', 'OWL_EL', 'OWL_RL', 'OWL_QL'] as const
 
 interface SubgraphSelectorProps {
+  ontologyId: string
+  dataset?: string
+
   /** Reasoner 프로파일 */
   profile?: string
   onProfileChange?: (profile: string) => void
@@ -25,46 +30,22 @@ interface SubgraphSelectorProps {
 }
 
 export default function SubgraphSelector({
-  profile = 'EL',
+  ontologyId,
+  dataset,
+  profile = 'OWL_DL',
   onProfileChange,
   selectedEntities = [],
   onEntitiesChange,
   selectedRelations = [],
   onRelationsChange,
 }: SubgraphSelectorProps) {
-  const [entityInput, setEntityInput]     = useState('')
-  const [relationInput, setRelationInput] = useState('')
-  const [advancedOpen, setAdvancedOpen]   = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
-  const addEntity = () => {
-    const iri = entityInput.trim()
-    if (iri && !selectedEntities.includes(iri)) {
-      onEntitiesChange?.([...selectedEntities, iri])
-    }
-    setEntityInput('')
-  }
+  const addEntity    = (iri: string) => onEntitiesChange?.([...selectedEntities, iri])
+  const removeEntity = (iri: string) => onEntitiesChange?.(selectedEntities.filter((e) => e !== iri))
 
-  const removeEntity = (iri: string) =>
-    onEntitiesChange?.(selectedEntities.filter((e) => e !== iri))
-
-  const addRelation = () => {
-    const iri = relationInput.trim()
-    if (iri && !selectedRelations.includes(iri)) {
-      onRelationsChange?.([...selectedRelations, iri])
-    }
-    setRelationInput('')
-  }
-
-  const removeRelation = (iri: string) =>
-    onRelationsChange?.(selectedRelations.filter((r) => r !== iri))
-
-  const onEntityKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') { e.preventDefault(); addEntity() }
-  }
-
-  const onRelationKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') { e.preventDefault(); addRelation() }
-  }
+  const addRelation    = (iri: string) => onRelationsChange?.([...selectedRelations, iri])
+  const removeRelation = (iri: string) => onRelationsChange?.(selectedRelations.filter((r) => r !== iri))
 
   return (
     <div className="flex flex-col gap-4">
@@ -104,16 +85,26 @@ export default function SubgraphSelector({
         <label className="block text-xs mb-1.5 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
           Seed Entities
           <span className="ml-1 font-normal" style={{ color: 'var(--color-text-muted)' }}>
-            ({selectedEntities.length} selected)
+            ({selectedEntities.length === 0 ? 'all' : `${selectedEntities.length} selected`})
           </span>
         </label>
 
-        {/* 선택된 entity 태그 */}
+        <SchemaEntityPicker
+          ontologyId={ontologyId}
+          dataset={dataset}
+          selectedIris={selectedEntities}
+          onAdd={addEntity}
+          onRemove={removeEntity}
+        />
+
         {selectedEntities.length > 0 && (
-          <div className="flex flex-col gap-1 mb-2">
+          <div className="flex flex-col gap-1 mt-2">
             {selectedEntities.map((iri) => (
-              <div key={iri} className="flex items-center justify-between gap-1 px-2 py-1 rounded"
-                style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)' }}>
+              <div
+                key={iri}
+                className="flex items-center justify-between gap-1 px-2 py-1 rounded"
+                style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)' }}
+              >
                 <IRIBadge iri={iri} />
                 <button
                   onClick={() => removeEntity(iri)}
@@ -127,32 +118,8 @@ export default function SubgraphSelector({
           </div>
         )}
 
-        {/* IRI 입력 */}
-        <div className="flex gap-1">
-          <input
-            type="text"
-            value={entityInput}
-            onChange={(e) => setEntityInput(e.target.value)}
-            onKeyDown={onEntityKeyDown}
-            placeholder="https://ex.org/Entity"
-            className="flex-1 text-xs px-2 py-1.5 rounded border min-w-0"
-            style={{
-              backgroundColor: 'var(--color-bg-elevated)',
-              borderColor:     'var(--color-border)',
-              color:           'var(--color-text-primary)',
-            }}
-          />
-          <button
-            onClick={addEntity}
-            disabled={!entityInput.trim()}
-            className="px-2 py-1 rounded text-xs font-medium hover:opacity-80 disabled:opacity-40"
-            style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-          >
-            Add
-          </button>
-        </div>
         <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-          Enter key to add. Empty = entire ontology.
+          Empty = entire ontology.
         </p>
       </div>
 
@@ -161,15 +128,26 @@ export default function SubgraphSelector({
         <label className="block text-xs mb-1.5 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
           Allowed Relations
           <span className="ml-1 font-normal" style={{ color: 'var(--color-text-muted)' }}>
-            ({selectedRelations.length === 0 ? 'all' : selectedRelations.length + ' selected'})
+            ({selectedRelations.length === 0 ? 'all' : `${selectedRelations.length} selected`})
           </span>
         </label>
 
+        <SchemaRelationPicker
+          ontologyId={ontologyId}
+          dataset={dataset}
+          selectedIris={selectedRelations}
+          onAdd={addRelation}
+          onRemove={removeRelation}
+        />
+
         {selectedRelations.length > 0 && (
-          <div className="flex flex-col gap-1 mb-2">
+          <div className="flex flex-col gap-1 mt-2">
             {selectedRelations.map((iri) => (
-              <div key={iri} className="flex items-center justify-between gap-1 px-2 py-1 rounded"
-                style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)' }}>
+              <div
+                key={iri}
+                className="flex items-center justify-between gap-1 px-2 py-1 rounded"
+                style={{ backgroundColor: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)' }}
+              >
                 <IRIBadge iri={iri} />
                 <button
                   onClick={() => removeRelation(iri)}
@@ -183,29 +161,6 @@ export default function SubgraphSelector({
           </div>
         )}
 
-        <div className="flex gap-1">
-          <input
-            type="text"
-            value={relationInput}
-            onChange={(e) => setRelationInput(e.target.value)}
-            onKeyDown={onRelationKeyDown}
-            placeholder="https://ex.org/knows"
-            className="flex-1 text-xs px-2 py-1.5 rounded border min-w-0"
-            style={{
-              backgroundColor: 'var(--color-bg-elevated)',
-              borderColor:     'var(--color-border)',
-              color:           'var(--color-text-primary)',
-            }}
-          />
-          <button
-            onClick={addRelation}
-            disabled={!relationInput.trim()}
-            className="px-2 py-1 rounded text-xs font-medium hover:opacity-80 disabled:opacity-40"
-            style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-          >
-            Add
-          </button>
-        </div>
         <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
           Empty = all relation types allowed.
         </p>

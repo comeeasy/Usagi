@@ -1,15 +1,20 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Brain, Play } from 'lucide-react'
+import { Brain, Play, Network, FlaskConical } from 'lucide-react'
 import OntologyTabs from '@/components/layout/OntologyTabs'
 import SubgraphSelector from '@/components/reasoner/SubgraphSelector'
+import SubgraphPreviewPanel from '@/components/reasoner/SubgraphPreviewPanel'
 import ReasonerResults from '@/components/reasoner/ReasonerResults'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import ErrorBoundary from '@/components/shared/ErrorBoundary'
 import { useReasoner } from '@/hooks/useReasoner'
+import { useDataset } from '@/contexts/DatasetContext'
+
+type RightTab = 'preview' | 'results'
 
 export default function ReasonerPage() {
   const { ontologyId } = useParams<{ ontologyId: string }>()
+  const { dataset } = useDataset()
   const { runMutation, resultQuery, jobId } = useReasoner(ontologyId)
 
   const [selectedEntities, setSelectedEntities] = useState<string[]>([])
@@ -17,6 +22,7 @@ export default function ReasonerPage() {
   const [profile, setProfile] = useState<'OWL_DL' | 'OWL_EL' | 'OWL_RL' | 'OWL_QL'>('OWL_DL')
   const [includeInferences, setIncludeInferences] = useState(true)
   const [checkConsistency, setCheckConsistency] = useState(true)
+  const [rightTab, setRightTab] = useState<RightTab>('preview')
 
   const handleRun = () => {
     runMutation.mutate({
@@ -25,6 +31,7 @@ export default function ReasonerPage() {
       check_consistency: checkConsistency,
       reasoner_profile: profile,
     })
+    setRightTab('results')
   }
 
   const isRunning = runMutation.isPending ||
@@ -37,7 +44,7 @@ export default function ReasonerPage() {
         <OntologyTabs />
 
         <div className="flex flex-1 overflow-hidden">
-          {/* Config sidebar */}
+          {/* ── Config sidebar ── */}
           <div
             className="w-72 flex flex-col p-4 gap-4 border-r overflow-y-auto flex-shrink-0"
             style={{ backgroundColor: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}
@@ -50,6 +57,8 @@ export default function ReasonerPage() {
             </div>
 
             <SubgraphSelector
+              ontologyId={ontologyId!}
+              dataset={dataset}
               profile={profile}
               onProfileChange={(p) => setProfile(p as 'OWL_DL' | 'OWL_EL' | 'OWL_RL' | 'OWL_QL')}
               selectedEntities={selectedEntities}
@@ -111,22 +120,81 @@ export default function ReasonerPage() {
             )}
           </div>
 
-          {/* Results */}
-          <div className="flex-1 overflow-y-auto p-4">
-            {!jobId && !runMutation.isPending && (
-              <div
-                className="flex flex-col items-center justify-center h-full gap-4"
-                style={{ color: 'var(--color-text-muted)' }}
+          {/* ── Right panel ── */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Tabs */}
+            <div
+              className="flex border-b flex-shrink-0"
+              style={{ borderColor: 'var(--color-border)' }}
+            >
+              <button
+                onClick={() => setRightTab('preview')}
+                className="flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 transition-colors"
+                style={{
+                  borderColor: rightTab === 'preview' ? 'var(--color-primary)' : 'transparent',
+                  color: rightTab === 'preview' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                  fontWeight: rightTab === 'preview' ? 500 : undefined,
+                }}
               >
-                <Brain size={48} style={{ opacity: 0.3 }} />
-                <p className="text-sm">Configure and run the reasoner to see results</p>
-              </div>
-            )}
+                <Network size={13} />
+                Subgraph Preview
+              </button>
+              <button
+                onClick={() => setRightTab('results')}
+                className="flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 transition-colors"
+                style={{
+                  borderColor: rightTab === 'results' ? 'var(--color-primary)' : 'transparent',
+                  color: rightTab === 'results' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                  fontWeight: rightTab === 'results' ? 500 : undefined,
+                }}
+              >
+                <FlaskConical size={13} />
+                Results
+                {jobId && (
+                  <span
+                    className="ml-1 px-1.5 py-0.5 rounded-full text-xs"
+                    style={{ backgroundColor: 'var(--color-primary)', color: '#fff', fontSize: '10px' }}
+                  >
+                    {resultQuery.data?.status === 'completed' ? '✓' : '…'}
+                  </span>
+                )}
+              </button>
+            </div>
 
-            <ReasonerResults
-              result={resultQuery.data ?? null}
-              isLoading={isRunning}
-            />
+            {/* Tab content */}
+            <div className="flex-1 overflow-hidden">
+              {rightTab === 'preview' && (
+                <SubgraphPreviewPanel
+                  ontologyId={ontologyId!}
+                  dataset={dataset}
+                  selectedEntities={selectedEntities}
+                  selectedRelations={selectedRelations}
+                  onAddEntity={(iri) => {
+                    if (!selectedEntities.includes(iri)) {
+                      setSelectedEntities((prev) => [...prev, iri])
+                    }
+                  }}
+                />
+              )}
+
+              {rightTab === 'results' && (
+                <div className="h-full overflow-y-auto p-4">
+                  {!jobId && !runMutation.isPending && (
+                    <div
+                      className="flex flex-col items-center justify-center h-full gap-4"
+                      style={{ color: 'var(--color-text-muted)' }}
+                    >
+                      <Brain size={48} style={{ opacity: 0.3 }} />
+                      <p className="text-sm">Configure and run the reasoner to see results</p>
+                    </div>
+                  )}
+                  <ReasonerResults
+                    result={resultQuery.data ?? null}
+                    isLoading={isRunning}
+                  />
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
