@@ -15,7 +15,10 @@
   "dependencies": {
     "@codemirror/state": "^6.0.0",
     "@codemirror/view": "^6.0.0",
+    "@dagrejs/dagre": "^3.0.0",
     "@tanstack/react-query": "^5.0.0",
+    "@types/dagre": "^0.7.54",
+    "@xyflow/react": "^12.10.2",
     "cytoscape": "^3.30.0",
     "cytoscape-dagre": "^2.5.0",
     "lucide-react": "^0.460.0",
