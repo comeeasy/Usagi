@@ -5,6 +5,7 @@ import { useRef, useState, useEffect } from 'react'
 import { Plus, Check, Search } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { listConcepts, listIndividuals } from '@/api/entities'
+import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 
 function shortLabel(iri: string, label?: string): string {
   if (label) return label
@@ -39,17 +40,18 @@ export default function SchemaEntityPicker({
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
+  const { selectedGraphIris } = useNamedGraphs()
 
   const conceptsQuery = useQuery({
-    queryKey: ['concepts', ontologyId, dataset, 'picker'],
-    queryFn: () => listConcepts(ontologyId, { pageSize: 200, dataset }),
+    queryKey: ['concepts', ontologyId, dataset, 'picker', selectedGraphIris],
+    queryFn: () => listConcepts(ontologyId, { pageSize: 200, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId && open,
     staleTime: 30_000,
   })
 
   const individualsQuery = useQuery({
-    queryKey: ['individuals', ontologyId, dataset, 'picker'],
-    queryFn: () => listIndividuals(ontologyId, { pageSize: 200, dataset }),
+    queryKey: ['individuals', ontologyId, dataset, 'picker', selectedGraphIris],
+    queryFn: () => listIndividuals(ontologyId, { pageSize: 200, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId && open,
     staleTime: 30_000,
   })

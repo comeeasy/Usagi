@@ -5,6 +5,7 @@ import { useRef, useState, useEffect } from 'react'
 import { Plus, Check, Search } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { listObjectProperties } from '@/api/relations'
+import { useNamedGraphs } from '@/contexts/NamedGraphsContext'
 
 function shortLabel(iri: string, label?: string): string {
   if (label) return label
@@ -33,10 +34,11 @@ export default function SchemaRelationPicker({
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
+  const { selectedGraphIris } = useNamedGraphs()
 
   const propsQuery = useQuery({
-    queryKey: ['object-properties', ontologyId, dataset, 'picker'],
-    queryFn: () => listObjectProperties(ontologyId, { pageSize: 200, dataset }),
+    queryKey: ['object-properties', ontologyId, dataset, 'picker', selectedGraphIris],
+    queryFn: () => listObjectProperties(ontologyId, { pageSize: 200, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId && open,
     staleTime: 30_000,
   })
