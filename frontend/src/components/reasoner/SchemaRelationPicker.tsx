@@ -38,7 +38,7 @@ export default function SchemaRelationPicker({
 
   const propsQuery = useQuery({
     queryKey: ['object-properties', ontologyId, dataset, 'picker', selectedGraphIris],
-    queryFn: () => listObjectProperties(ontologyId, { pageSize: 200, dataset, graphIris: selectedGraphIris }),
+    queryFn: () => listObjectProperties(ontologyId, { pageSize: 100, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId,
     staleTime: 60_000,
   })

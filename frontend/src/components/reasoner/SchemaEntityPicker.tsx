@@ -44,14 +44,14 @@ export default function SchemaEntityPicker({
 
   const conceptsQuery = useQuery({
     queryKey: ['concepts', ontologyId, dataset, 'picker', selectedGraphIris],
-    queryFn: () => listConcepts(ontologyId, { pageSize: 200, dataset, graphIris: selectedGraphIris }),
+    queryFn: () => listConcepts(ontologyId, { pageSize: 100, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId,
     staleTime: 60_000,
   })
 
   const individualsQuery = useQuery({
     queryKey: ['individuals', ontologyId, dataset, 'picker', selectedGraphIris],
-    queryFn: () => listIndividuals(ontologyId, { pageSize: 200, dataset, graphIris: selectedGraphIris }),
+    queryFn: () => listIndividuals(ontologyId, { pageSize: 100, dataset, graphIris: selectedGraphIris }),
     enabled: !!ontologyId,
     staleTime: 60_000,
   })
