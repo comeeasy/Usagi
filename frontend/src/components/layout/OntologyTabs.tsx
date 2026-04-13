@@ -5,7 +5,6 @@ const tabs = [
   { path: 'schema', label: 'Schema' },
   { path: 'sparql', label: 'SPARQL' },
   { path: 'sources', label: 'Sources' },
-  { path: 'merge', label: 'Merge' },
   { path: 'reasoner', label: 'Reasoner' },
 ]
 

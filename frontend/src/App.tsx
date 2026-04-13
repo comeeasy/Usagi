@@ -8,7 +8,6 @@ import GraphPage from '@/pages/ontology/GraphPage'
 import SchemaPage from '@/pages/ontology/SchemaPage'
 import SPARQLPage from '@/pages/ontology/SPARQLPage'
 import ImportPage from '@/pages/ontology/ImportPage'
-import MergePage from '@/pages/ontology/MergePage'
 import ReasonerPage from '@/pages/ontology/ReasonerPage'
 import SourcesPage from '@/pages/ontology/SourcesPage'
 
@@ -22,7 +21,6 @@ function OntologyShell() {
           <Route path="schema" element={<SchemaPage />} />
           <Route path="sparql" element={<SPARQLPage />} />
           <Route path="import" element={<ImportPage />} />
-          <Route path="merge" element={<MergePage />} />
           <Route path="reasoner" element={<ReasonerPage />} />
           <Route path="sources" element={<SourcesPage />} />
           <Route path="" element={<GraphPage />} />
