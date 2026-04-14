@@ -2896,3 +2896,317 @@ Phase 1~3 완료 후 Vector search 신뢰도가 낮은 케이스를 위한 Claud
 - [ ] **M4-1** `llm_client.py` Claude API 래퍼
 - [ ] **M4-2** `TermNormalizerService` LLM 분기
 - [ ] **M4-3** LLM 응답 캐시
+
+---
+
+---
+
+# 운영 매뉴얼: JSON · 온톨로지 수정 가이드
+
+**작성일:** 2026-04-14
+
+이 매뉴얼은 서비스 운영 중 용어·온톨로지를 확장하거나 수정해야 할 때 참고한다.
+
+---
+
+## 1. 용어 정규화가 실패할 때 (requires_review: true)
+
+`POST /normalize` 응답에 `requires_review: true` 가 나오면 아래 세 가지 방법 중 하나로 해결한다.
+
+```
+우선순위: 사전 추가 > altLabel 등록 > 온톨로지 클래스 신규 생성
+```
+
+| 상황 | 해결책 |
+|---|---|
+| 약어/은어 → 이미 있는 클래스 | **방법 A** 사전 추가 또는 **방법 B** altLabel 등록 |
+| 용어 자체가 온톨로지에 없음 | **방법 C** 온톨로지 클래스 신규 생성 |
+| 임시로 빠르게 연결 | **방법 B** altLabel API 등록 (즉시 반영) |
+
+---
+
+## 2. 방법 A — 사전 파일 수정 (`military_terms.json`)
+
+**파일 위치:** `backend/data/military_terms.json`
+
+### 새 용어 그룹 추가
+
+```json
+{
+  "canonical": "온톨로지에_있는_rdfs:label",
+  "category": "카테고리명",
+  "variants": ["약어1", "은어2", "비표준표현3"]
+}
+```
+
+**예시** — "전투근무지원"이라는 클래스에 CSS, 전투지원 등을 매핑:
+
+```json
+{
+  "canonical": "전투근무지원",
+  "category": "logistics",
+  "variants": ["CSS", "전투지원", "전근지", "Combat Service Support"]
+}
+```
+
+### 기존 용어에 variant 추가
+
+```json
+{
+  "canonical": "지휘관",
+  "category": "personnel",
+  "variants": ["CO", "Cdr", "Commander", "사령관", "부대장", "새로추가할별칭"]
+                                                              ↑ 여기에 추가
+}
+```
+
+### 주의사항
+
+- `canonical` 값은 **온톨로지의 `rdfs:label`과 정확히 일치**해야 한다.  
+  일치하지 않으면 사전 매핑은 성공해도 SPARQL 조회에서 실패한다.
+- 약어는 **대소문자를 구분하지 않고** 저장된다 (`CO`, `co`, `Co` 모두 동일).  
+  단, 서로 다른 클래스의 약어가 소문자로 충돌하면 **나중에 등록된 것이 우선**한다.  
+  예: `CO` (지휘관)와 `Co` (중대)가 충돌 → 둘 중 하나를 다른 표현으로 교체.
+- 수정 후 **백엔드 재시작 필요** (파일은 최초 1회 lazy-load, 이후 캐시됨).
+
+```bash
+docker restart projects-backend-1
+```
+
+---
+
+## 3. 방법 B — altLabel API 등록 (재시작 불필요)
+
+사전 파일을 수정하지 않고 **런타임에 즉시** 특정 클래스/개체에 altLabel을 붙인다.  
+등록된 altLabel은 Fuseki에 `skos:altLabel` 트리플로 저장되어 **영구 반영**된다.
+
+### 등록
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/ontologies/{온톨로지ID}/terms/altlabel" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entity_iri": "https://example.org/military#MilitaryUnit",
+    "label": "OPCON",
+    "lang": "en"
+  }'
+```
+
+- `entity_iri`: 연결할 클래스 또는 Individual의 전체 IRI  
+  (모를 경우 먼저 `GET /ontologies/{id}/concepts` 또는 Swagger UI에서 조회)
+- `lang`: 한국어는 `"ko"`, 영어는 `"en"`, 언어 무관은 `""` 사용
+
+### 목록 조회
+
+```bash
+curl "http://localhost:8000/api/v1/ontologies/{온톨로지ID}/terms/altlabel"
+```
+
+### 삭제
+
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/ontologies/{온톨로지ID}/terms/altlabel" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entity_iri": "https://example.org/military#MilitaryUnit",
+    "label": "OPCON",
+    "lang": "en"
+  }'
+```
+
+### 방법 A vs B 비교
+
+| | 방법 A (사전) | 방법 B (altLabel API) |
+|---|---|---|
+| 저장 위치 | `military_terms.json` 파일 | Fuseki triple store |
+| 적용 시점 | 재시작 후 | 즉시 |
+| 온톨로지 이식성 | 파일 따로 관리 | OWL 파일 export 시 포함 |
+| 권장 용도 | 도메인 공통 약어/은어 | 온톨로지별 특수 표현 |
+
+---
+
+## 4. 방법 C — 온톨로지 TTL 파일에 클래스 추가
+
+완전히 새로운 개념이 필요할 때 `military_example.ttl` 을 직접 수정한다.
+
+**파일 위치:** `backend/data/military_example.ttl`
+
+### 최소 클래스 정의
+
+```turtle
+mil:신규클래스명
+    a owl:Class ;
+    rdfs:subClassOf mil:상위클래스 ;          # 선택 — 계층 구조
+    rdfs:label "한국어레이블"@ko ;
+    rdfs:label "EnglishLabel"@en ;
+    skos:altLabel "약어1"@en ;               # 선택 — altLabel 복수 등록 가능
+    skos:altLabel "은어"@ko .
+```
+
+**예시** — 무인기(UAV) 클래스 추가:
+
+```turtle
+mil:UAV
+    a owl:Class ;
+    rdfs:subClassOf mil:Equipment ;
+    rdfs:label "무인기"@ko ;
+    rdfs:label "UAV"@en ;
+    skos:altLabel "드론"@ko ;
+    skos:altLabel "Drone"@en ;
+    skos:altLabel "UAS"@en .
+```
+
+### Object Property + Restriction 추가
+
+클래스 간 관계가 있으면 Property와 Restriction을 함께 등록해야  
+Phase 2 JSON Ingester가 관계를 **자동 추론**할 수 있다.
+
+```turtle
+# 1. Property 정의
+mil:operates
+    a owl:ObjectProperty ;
+    rdfs:label "운용하다"@ko ;
+    rdfs:domain mil:MilitaryUnit ;
+    rdfs:range  mil:UAV .
+
+# 2. 클래스에 Restriction 추가 (MilitaryUnit이 UAV를 운용할 수 있음을 선언)
+mil:MilitaryUnit
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty mil:operates ;
+        owl:someValuesFrom mil:UAV
+    ] .
+```
+
+### TTL 수정 후 온톨로지에 반영하는 방법
+
+1. **Swagger UI** → `POST /ontologies/{id}/import` → `military_example.ttl` 업로드  
+   (기존 import 그래프는 자동으로 교체되지 않음 → 중복 방지를 위해 먼저 그래프 삭제 후 재업로드)
+
+2. **또는 curl**:
+
+```bash
+# 기존 import 그래프 삭제 (선택)
+curl -X DELETE "http://localhost:8000/api/v1/ontologies/{id}/graphs" \
+  -H "Content-Type: application/json" \
+  -d '{"graph_iri": "https://milTest.com/imports/military_example.ttl"}'
+
+# 재업로드
+curl -X POST "http://localhost:8000/api/v1/ontologies/{id}/import" \
+  -F "file=@backend/data/military_example.ttl"
+```
+
+### TTL 구문 검증 (업로드 전)
+
+```bash
+python3 -c "
+import rdflib
+g = rdflib.Graph()
+g.parse('backend/data/military_example.ttl', format='turtle')
+print(f'OK: 트리플 {len(g)}개')
+"
+```
+
+---
+
+## 5. 매핑 결과가 잘못됐을 때 (wrong mapping)
+
+`normalize` 결과의 IRI가 맞지 않는 경우:
+
+### 진단
+
+```bash
+# candidates 확인 — 올바른 IRI가 상위 3개 안에 있는지
+curl -X POST ".../normalize" \
+  -d '{"term": "문제용어", "kind": "any"}' | jq '.candidates'
+```
+
+### 조치
+
+| 원인 | 조치 |
+|---|---|
+| 사전에서 canonical이 잘못된 클래스로 연결됨 | `military_terms.json`에서 해당 entry 수정 |
+| 비슷한 이름의 다른 클래스로 매핑됨 | 원하는 클래스에 altLabel 직접 등록 (방법 B) |
+| 두 클래스가 같은 label을 가짐 | 하나의 label을 더 구체적으로 변경 |
+| vector search가 오류 매핑 | threshold 높이기 (`"threshold": 0.80`) |
+
+---
+
+## 6. JSON 문서 포맷 가이드 (Phase 2 준비)
+
+JSON Ingester(Phase 2)가 구현되면 아래 형식으로 문서를 입력한다.
+
+### 기본 포맷
+
+```json
+{
+  "지휘관": "홍길동",
+  "부대": "3사단",
+  "임무": "수색정찰",
+  "위치": "철원 진지"
+}
+```
+
+- **key** → 온톨로지 클래스 (Term Normalizer로 매핑)
+- **value** → 해당 클래스의 Individual (새로 생성되거나 기존 조회)
+
+### 중첩 구조 (계획)
+
+```json
+{
+  "지휘관": {
+    "이름": "홍길동",
+    "계급": "대령"
+  },
+  "부대": {
+    "명칭": "3사단",
+    "병력": 15000
+  }
+}
+```
+
+- 중첩 key → Data Property 값으로 처리 예정
+- 최상위 key들 간의 관계는 TBox Restriction 기반으로 자동 추론
+
+### 매핑이 잘 되는 JSON 작성 팁
+
+1. **key는 온톨로지 rdfs:label 또는 등록된 약어**를 사용한다  
+   `"지휘관"` (O), `"사람"` (X — 온톨로지에 없음)
+
+2. **같은 key가 반복될 경우** 배열로 묶는다  
+   `"병력": ["홍길동", "김철수"]`
+
+3. **식별자가 있는 Individual**은 value에 포함한다  
+   `"부대": "3사단"` → `ind_3사단`으로 매핑
+
+---
+
+## 7. 자주 묻는 질문
+
+**Q. 사전에 추가했는데 매핑이 안 됩니다.**  
+A. 백엔드를 재시작했는지 확인 (`docker restart projects-backend-1`).  
+   `canonical` 값이 온톨로지 `rdfs:label`과 **정확히** 일치하는지도 확인.
+
+**Q. altLabel을 등록했는데 아직 안 됩니다.**  
+A. altLabel API는 즉시 반영되지만, normalize 요청에서 ontology_id가 올바른지 확인.  
+   `GET /terms/altlabel` 로 등록 여부를 먼저 확인.
+
+**Q. 같은 용어가 두 클래스 모두에 해당합니다.**  
+A. `kind` 파라미터로 범위를 좁힌다: `"kind": "concept"`.  
+   그래도 모호하면 더 구체적인 용어를 사용하거나, candidates 중 올바른 것을 선택.
+
+**Q. TTL 파일을 수정하면 기존 Individual이 사라지나요?**  
+A. 아니다. Individual은 별도 Named Graph(`/manual`, `/imports/...`)에 저장된다.  
+   TTL 재업로드는 해당 import 그래프만 교체하므로 수동 등록 Individual은 유지된다.
+
+**Q. normalize score 기준은 무엇인가요?**  
+A. `score < 0.60` → `requires_review: true` (기본 threshold).  
+   threshold는 요청 파라미터로 조정 가능: `"threshold": 0.75`.  
+   source별 score 해석:
+
+| source | score 의미 |
+|---|---|
+| `dict` | 1.0 고정 (사전 정확 매핑) |
+| `sparql` | 0.75~1.0 (label/altLabel 일치 정도) |
+| `vector` | 0.0~1.0 (cosine 유사도) |
+| `none` | 0.0 (매핑 실패) |
