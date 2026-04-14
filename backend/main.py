@@ -18,6 +18,7 @@ from services.ontology_store import OntologyStore
 from services.reasoner_service import ReasonerService
 from services.merge_service import MergeService
 from services.vector_index import VectorIndexManager
+from services.term_normalizer import TermNormalizerService
 from services.ingestion.kafka_producer import KafkaProducer
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.reasoner_service = ReasonerService(app.state.ontology_store)
     app.state.merge_service = MergeService(app.state.ontology_store)
     app.state.vector_index_manager = VectorIndexManager()
+    app.state.term_normalizer = TermNormalizerService(
+        app.state.ontology_store,
+        app.state.vector_index_manager,
+    )
     app.state.kafka_producer = KafkaProducer(settings.kafka_brokers)
 
     # MCP 서비스 등록
@@ -44,6 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.ontology_store,
         app.state.reasoner_service,
         app.state.vector_index_manager,
+        app.state.term_normalizer,
     )
 
     # 백그라운드 태스크
@@ -80,6 +86,7 @@ API_PREFIX = "/api/v1"
 
 from api import ontologies, concepts, individuals, properties, search, subgraph
 from api import sparql, import_, merge, reasoner, sources, datasets, graphs
+from api import normalize
 
 app.include_router(ontologies.router, prefix=API_PREFIX)
 app.include_router(concepts.router, prefix=API_PREFIX)
@@ -94,6 +101,7 @@ app.include_router(reasoner.router, prefix=API_PREFIX)
 app.include_router(sources.router, prefix=API_PREFIX)
 app.include_router(datasets.router, prefix=API_PREFIX)
 app.include_router(graphs.router, prefix=API_PREFIX)
+app.include_router(normalize.router, prefix=API_PREFIX)
 
 app.mount("/mcp", _mcp_app)
 

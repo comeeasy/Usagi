@@ -1,0 +1,246 @@
+{
+  "_comment": "군사 용어 정규화 사전. variants → canonical 표준어 매핑. canonical은 온톨로지 rdfs:label 검색에 사용됨.",
+  "version": "1.0",
+  "terms": [
+    {
+      "canonical": "지휘관",
+      "category": "personnel",
+      "variants": ["지휘자", "CO", "Commander", "Cdr", "지휘", "사령관", "부대장"]
+    },
+    {
+      "canonical": "작전참모",
+      "category": "personnel",
+      "variants": ["G3", "S3", "작참", "작전장교", "Operations Officer", "작전부장"]
+    },
+    {
+      "canonical": "정보참모",
+      "category": "personnel",
+      "variants": ["G2", "S2", "정참", "정보장교", "Intelligence Officer", "정보부장"]
+    },
+    {
+      "canonical": "군수참모",
+      "category": "personnel",
+      "variants": ["G4", "S4", "군참", "군수장교", "Logistics Officer", "보급장교"]
+    },
+    {
+      "canonical": "인사참모",
+      "category": "personnel",
+      "variants": ["G1", "S1", "인참", "인사장교", "Personnel Officer"]
+    },
+    {
+      "canonical": "통신참모",
+      "category": "personnel",
+      "variants": ["G6", "S6", "통참", "통신장교", "Signal Officer", "정보통신장교"]
+    },
+    {
+      "canonical": "부대",
+      "category": "organization",
+      "variants": ["unit", "Unit", "부서", "조직", "소속"]
+    },
+    {
+      "canonical": "사단",
+      "category": "organization",
+      "variants": ["Division", "Div", "DIV", "사단급"]
+    },
+    {
+      "canonical": "여단",
+      "category": "organization",
+      "variants": ["Brigade", "Bde", "BDE", "여단급"]
+    },
+    {
+      "canonical": "연대",
+      "category": "organization",
+      "variants": ["Regiment", "Regt", "REGT", "연대급"]
+    },
+    {
+      "canonical": "대대",
+      "category": "organization",
+      "variants": ["Battalion", "Bn", "BN", "대대급", "영"]
+    },
+    {
+      "canonical": "중대",
+      "category": "organization",
+      "variants": ["Company", "Coy", "COY", "중대급"]
+    },
+    {
+      "canonical": "소대",
+      "category": "organization",
+      "variants": ["Platoon", "Plt", "PLT", "소대급"]
+    },
+    {
+      "canonical": "분대",
+      "category": "organization",
+      "variants": ["Squad", "Sqd", "SQD"]
+    },
+    {
+      "canonical": "군단",
+      "category": "organization",
+      "variants": ["Corps", "CORPS", "군단급"]
+    },
+    {
+      "canonical": "야전군",
+      "category": "organization",
+      "variants": ["Field Army", "FA", "야전군사령부"]
+    },
+    {
+      "canonical": "임무",
+      "category": "operation",
+      "variants": ["Mission", "미션", "임무명", "작전임무", "과업"]
+    },
+    {
+      "canonical": "작전",
+      "category": "operation",
+      "variants": ["Operation", "Op", "OPS", "ops", "작전계획", "작계"]
+    },
+    {
+      "canonical": "정찰",
+      "category": "operation",
+      "variants": ["Reconnaissance", "Recon", "RECON", "수색정찰", "첩보수집"]
+    },
+    {
+      "canonical": "수색",
+      "category": "operation",
+      "variants": ["Search", "수색작전", "탐색", "수색정찰"]
+    },
+    {
+      "canonical": "기동",
+      "category": "operation",
+      "variants": ["Maneuver", "Manoeuvre", "기동작전", "이동", "전진"]
+    },
+    {
+      "canonical": "공격",
+      "category": "operation",
+      "variants": ["Attack", "ATK", "Atk", "진격", "돌격", "공세"]
+    },
+    {
+      "canonical": "방어",
+      "category": "operation",
+      "variants": ["Defense", "Defence", "DEF", "Def", "방어작전", "진지방어"]
+    },
+    {
+      "canonical": "철수",
+      "category": "operation",
+      "variants": ["Withdrawal", "WDRL", "후퇴", "후방이동", "철퇴"]
+    },
+    {
+      "canonical": "보급",
+      "category": "logistics",
+      "variants": ["Supply", "보급품", "군수지원", "지원", "보급작전"]
+    },
+    {
+      "canonical": "정비",
+      "category": "logistics",
+      "variants": ["Maintenance", "Maint", "MAINT", "수리", "장비정비"]
+    },
+    {
+      "canonical": "화력지원",
+      "category": "fires",
+      "variants": ["Fire Support", "FS", "화력", "사격지원", "포병지원", "항공화력"]
+    },
+    {
+      "canonical": "포병",
+      "category": "fires",
+      "variants": ["Artillery", "Arty", "ARTY", "포부대", "포병대대"]
+    },
+    {
+      "canonical": "항공",
+      "category": "fires",
+      "variants": ["Aviation", "Air", "공중", "항공지원", "헬기"]
+    },
+    {
+      "canonical": "전술작전센터",
+      "category": "facility",
+      "variants": ["TOC", "Tactical Operations Center", "작전센터", "전술지휘소"]
+    },
+    {
+      "canonical": "지휘소",
+      "category": "facility",
+      "variants": ["CP", "Command Post", "지휘부", "전방지휘소", "후방지휘소", "FCP", "RCP"]
+    },
+    {
+      "canonical": "진지",
+      "category": "facility",
+      "variants": ["Position", "Pos", "POS", "배치진지", "방어진지", "관측소"]
+    },
+    {
+      "canonical": "작전계획",
+      "category": "document",
+      "variants": ["OPLAN", "Op Plan", "작계", "작전명령", "OPORD"]
+    },
+    {
+      "canonical": "명령",
+      "category": "document",
+      "variants": ["Order", "ORD", "지시", "하달", "명령서", "작전명령"]
+    },
+    {
+      "canonical": "보고",
+      "category": "document",
+      "variants": ["Report", "REP", "보고서", "상황보고", "SITREP", "상황보고서"]
+    },
+    {
+      "canonical": "전시작전통제권",
+      "category": "command",
+      "variants": ["OPCON", "Operational Control", "작전통제", "전작권"]
+    },
+    {
+      "canonical": "전술통제",
+      "category": "command",
+      "variants": ["TACON", "Tactical Control", "전술통제권"]
+    },
+    {
+      "canonical": "지원",
+      "category": "command",
+      "variants": ["SUPT", "Support", "DS", "직접지원", "일반지원", "GS"]
+    },
+    {
+      "canonical": "집결지",
+      "category": "location",
+      "variants": ["AA", "Assembly Area", "집결", "대기지역"]
+    },
+    {
+      "canonical": "출발선",
+      "category": "location",
+      "variants": ["LD", "Line of Departure", "공격출발선", "LOD"]
+    },
+    {
+      "canonical": "목표",
+      "category": "location",
+      "variants": ["Objective", "OBJ", "Obj", "목표물", "목표지점", "타격목표"]
+    },
+    {
+      "canonical": "좌표",
+      "category": "location",
+      "variants": ["Grid", "좌표값", "격자좌표", "위치좌표", "MGRS", "경위도"]
+    },
+    {
+      "canonical": "통신",
+      "category": "equipment",
+      "variants": ["Communication", "Comms", "COMMS", "무전", "통신망", "신호"]
+    },
+    {
+      "canonical": "장갑차",
+      "category": "equipment",
+      "variants": ["APC", "Armored Personnel Carrier", "장갑", "보병전투차", "IFV"]
+    },
+    {
+      "canonical": "전차",
+      "category": "equipment",
+      "variants": ["Tank", "MBT", "Main Battle Tank", "K1", "K2"]
+    },
+    {
+      "canonical": "무기",
+      "category": "equipment",
+      "variants": ["Weapon", "WPN", "장비", "무장", "병기"]
+    },
+    {
+      "canonical": "병력",
+      "category": "personnel",
+      "variants": ["Personnel", "PAX", "병원", "인원", "전투원", "병사", "부사관", "장교"]
+    },
+    {
+      "canonical": "사상자",
+      "category": "personnel",
+      "variants": ["Casualty", "CAS", "CASEVAC", "사망", "부상", "전사", "부상자", "피해"]
+    }
+  ]
+}

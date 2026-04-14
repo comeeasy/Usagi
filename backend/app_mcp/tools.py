@@ -1,5 +1,5 @@
 """
-mcp/tools.py — FastMCP 10종 MCP 도구 정의
+mcp/tools.py — FastMCP 12종 MCP 도구 정의
 
 MCP 도구 목록 (읽기):
   1. list_ontologies       — 온톨로지 목록 조회
@@ -9,17 +9,20 @@ MCP 도구 목록 (읽기):
   5. get_subgraph          — 서브그래프 조회
   6. sparql_query          — SPARQL 실행 (SELECT/ASK only)
   7. run_reasoner          — OWL 추론 실행
+ 11. normalize_term        — 군사 용어 정규화 (은어/약어 → 온톨로지 IRI)
 
 MCP 도구 목록 (쓰기):
   8. add_individual        — Individual 생성 (owl:NamedIndividual)
   9. update_individual     — Individual 수정 (label/types/properties)
  10. delete_individual     — Individual 삭제
+ 12. add_concept           — Concept(owl:Class) 생성
 
-쓰기 도구 사용 패턴 (PDF → Individual):
+쓰기 도구 사용 패턴 (JSON 문서 → 온톨로지):
   1. list_ontologies()으로 대상 온톨로지 IRI 확인
-  2. search_entities(kind="concept")으로 매핑할 클래스 IRI 확인
-  3. search_relations()으로 사용할 property IRI 확인
+  2. normalize_term()으로 JSON key → 클래스 IRI 매핑
+  3. search_entities(kind="concept")으로 매핑 결과 검증
   4. add_individual()로 Individual 생성
+  5. run_reasoner()로 정합성 검증
 
 Named Graph 규칙:
   - 온톨로지 본문(스키마+인스턴스): {ontology_id}/kg
@@ -42,11 +45,17 @@ mcp = FastMCP("Ontology Platform")
 _services: dict[str, Any] = {}
 
 
-def init_services(store: Any, reasoner: Any, vector_index_manager: Any = None) -> None:
+def init_services(
+    store: Any,
+    reasoner: Any,
+    vector_index_manager: Any = None,
+    term_normalizer: Any = None,
+) -> None:
     """앱 lifespan에서 호출하여 서비스 인스턴스를 등록."""
     _services["store"] = store
     _services["reasoner"] = reasoner
     _services["vector_index_manager"] = vector_index_manager
+    _services["term_normalizer"] = term_normalizer
     logger.info("MCP tools: services registered")
 
 
@@ -701,3 +710,62 @@ WHERE  {{ GRAPH <{g}> {{ <{iri}> ?p ?o }} }}""", dataset=dataset)
 
     logger.info("delete_individual: deleted %s", iri)
     return {"status": "deleted", "iri": iri}
+
+
+@mcp.tool()
+async def normalize_term(
+    ontology_id: str,
+    term: str,
+    kind: str = "any",
+    threshold: float = 0.60,
+    dataset: str | None = None,
+) -> dict:
+    """군사 용어(은어/약어/비표준어)를 온톨로지 클래스/개체 IRI로 정규화.
+
+    JSON 문서 수집 시 key를 온톨로지 클래스에 매핑할 때 사용합니다.
+
+    매핑 순서:
+      1. 군사 용어 사전 정확 매칭 (약어/은어 → canonical)
+      2. SPARQL rdfs:label + skos:altLabel 검색
+      3. 벡터 유사도 검색 (fastembed)
+
+    Args:
+        ontology_id: 대상 온톨로지 IRI 또는 UUID
+        term: 정규화할 용어 (예: "지휘관", "CO", "TOC", "OPCON")
+        kind: "concept" | "individual" | "any" (기본: "any")
+        threshold: 신뢰도 임계값. 이 미만이면 requires_review=True (기본: 0.60)
+        dataset: Fuseki dataset 이름 (기본값 사용 시 생략)
+
+    Returns:
+        {
+            "term": str,
+            "iri": str | null,          # 매핑된 IRI
+            "label": str | null,        # 매핑된 레이블
+            "score": float,             # 0.0~1.0
+            "source": str,              # "dict" | "sparql" | "vector" | "none"
+            "requires_review": bool,    # True면 사람 검토 필요
+            "candidates": [...]         # 상위 3개 후보
+        }
+    """
+    normalizer = _services.get("term_normalizer")
+    if normalizer is None:
+        return {"error": "term_normalizer service not initialized"}
+    if kind not in ("concept", "individual", "any"):
+        return {"error": f"invalid kind: {kind}. must be concept|individual|any"}
+
+    result = await normalizer.normalize(
+        ontology_id=ontology_id,
+        term=term,
+        kind=kind,  # type: ignore[arg-type]
+        threshold=threshold,
+        dataset=dataset,
+    )
+    return {
+        "term": term,
+        "iri": result.iri,
+        "label": result.label,
+        "score": result.score,
+        "source": result.source,
+        "requires_review": result.requires_review,
+        "candidates": result.candidates,
+    }

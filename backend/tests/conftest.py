@@ -102,6 +102,67 @@ class MemoryOntologyStore:
         body = turtle if isinstance(turtle, str) else turtle.decode("utf-8")
         self._graph.parse(data=body, format="turtle", publicID=rdflib.URIRef(graph_iri))
 
+    async def add_alt_label(self, graph_iri: str, entity_iri: str, label: str, lang: str = "ko", dataset=None) -> None:
+        escaped = label.replace("\\", "\\\\").replace('"', '\\"')
+        self._graph.update(
+            "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n"
+            f'INSERT DATA {{ GRAPH <{graph_iri}> {{'
+            f'    <{entity_iri}> skos:altLabel "{escaped}"@{lang} .'
+            "} }"
+        )
+
+    async def remove_alt_label(self, graph_iri: str, entity_iri: str, label: str, lang: str = "ko", dataset=None) -> None:
+        escaped = label.replace("\\", "\\\\").replace('"', '\\"')
+        self._graph.update(
+            "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n"
+            f'DELETE DATA {{ GRAPH <{graph_iri}> {{'
+            f'    <{entity_iri}> skos:altLabel "{escaped}"@{lang} .'
+            "} }"
+        )
+
+    async def get_alt_labels(self, ontology_iri: str, entity_iri: str, dataset=None) -> list[dict]:
+        ont = ontology_iri.rstrip("/")
+        q = (
+            "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n"
+            "SELECT ?label ?lang WHERE {\n"
+            "    GRAPH ?_g {\n"
+            f"        <{entity_iri}> skos:altLabel ?label\n"
+            "    }\n"
+            f'    FILTER(STRSTARTS(STR(?_g), "{ont}/"))\n'
+            "    BIND(LANG(?label) AS ?lang)\n"
+            "}"
+        )
+        rows = await self.sparql_select(q)
+        return [
+            {"label": r["label"]["value"], "lang": r.get("lang", {}).get("value", "")}
+            for r in rows if "label" in r
+        ]
+
+    async def list_all_alt_labels(self, ontology_iri: str, dataset=None) -> list[dict]:
+        ont = ontology_iri.rstrip("/")
+        q = (
+            "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n"
+            "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n"
+            "SELECT DISTINCT ?entity ?label ?lang ?rdfsLabel WHERE {\n"
+            "    GRAPH ?_g {\n"
+            "        ?entity skos:altLabel ?label\n"
+            "    }\n"
+            f'    FILTER(STRSTARTS(STR(?_g), "{ont}/"))\n'
+            "    BIND(LANG(?label) AS ?lang)\n"
+            "    OPTIONAL { GRAPH ?_lg { ?entity rdfs:label ?rdfsLabel } }\n"
+            "} ORDER BY ?entity"
+        )
+        rows = await self.sparql_select(q)
+        return [
+            {
+                "entity_iri": r["entity"]["value"],
+                "rdfs_label": r.get("rdfsLabel", {}).get("value", ""),
+                "alt_label": r["label"]["value"],
+                "lang": r.get("lang", {}).get("value", ""),
+            }
+            for r in rows if "entity" in r and "label" in r
+        ]
+
     async def close(self) -> None:
         pass
 
