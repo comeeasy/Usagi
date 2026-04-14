@@ -2863,13 +2863,13 @@ Phase 1~3 완료 후 Vector search 신뢰도가 낮은 케이스를 위한 Claud
 
 ### Phase 1 — Term Normalizer
 
-- [ ] **M1-1** `OntologyStore.add_alt_label()` / `get_alt_labels()` 메서드
-- [ ] **M1-2** `military_terms.json` 초기 사전 작성 (50개 이상)
-- [ ] **M1-3** `TermNormalizerService` (dict → SPARQL → vector 3단계)
-- [ ] **M1-4** `POST /ontologies/{id}/normalize` 엔드포인트
-- [ ] **M1-5** `POST/GET /ontologies/{id}/terms/altlabel` 엔드포인트
-- [ ] **M1-6** MCP 도구 `normalize_term`
-- [ ] **M1-T** 단위 테스트 + 수동 검증
+- [x] **M1-1** `OntologyStore.add_alt_label()` / `get_alt_labels()` 메서드
+- [x] **M1-2** `military_terms.json` 초기 사전 작성 (50개)
+- [x] **M1-3** `TermNormalizerService` (dict → SPARQL → vector 3단계)
+- [x] **M1-4** `POST /ontologies/{id}/normalize` 엔드포인트
+- [x] **M1-5** `POST/GET/DELETE /ontologies/{id}/terms/altlabel` 엔드포인트
+- [x] **M1-6** MCP 도구 `normalize_term`
+- [x] **M1-T** 단위 테스트 20개 전부 통과 (2026-04-14)
 
 ### Phase 2 — JSON Ingester
 
