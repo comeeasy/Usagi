@@ -93,27 +93,40 @@ def _get_dict() -> dict[str, str]:
 
 _NORMALIZE_SPARQL = """\
 {prefixes}
-SELECT DISTINCT ?iri ?label ?kind WHERE {{
-    GRAPH ?_g {{
-        {{
+SELECT DISTINCT ?iri (MIN(?_rdfsLbl) AS ?label) (MIN(?_altLbl) AS ?altLabel) ?kind WHERE {{
+    {{
+        GRAPH ?_g {{
             ?iri a owl:Class .
-            BIND("concept" AS ?kind)
-        }} UNION {{
-            ?iri a owl:NamedIndividual .
-            BIND("individual" AS ?kind)
+            FILTER(isIRI(?iri))
         }}
-        OPTIONAL {{ ?iri rdfs:label ?_rdfsLabel }}
-        OPTIONAL {{ ?iri skos:altLabel ?_altLabel }}
-        BIND(COALESCE(?_rdfsLabel, ?_altLabel) AS ?label)
-        FILTER(
-            CONTAINS(LCASE(COALESCE(STR(?_rdfsLabel), "")), "{q}") ||
-            CONTAINS(LCASE(COALESCE(STR(?_altLabel), "")), "{q}") ||
-            CONTAINS(LCASE(STR(?iri)), "{q}")
-        )
-        FILTER(isIRI(?iri))
+        BIND("concept" AS ?kind)
+    }} UNION {{
+        GRAPH ?_g {{
+            ?iri a owl:NamedIndividual .
+            FILTER(isIRI(?iri))
+        }}
+        BIND("individual" AS ?kind)
     }}
     {gf}
-}} ORDER BY ?label LIMIT 10
+    OPTIONAL {{
+        GRAPH ?_lg {{
+            ?iri rdfs:label ?_rdfsLbl
+        }}
+        {gf2}
+    }}
+    OPTIONAL {{
+        GRAPH ?_ag {{
+            ?iri skos:altLabel ?_altLbl
+        }}
+        {gf3}
+    }}
+    FILTER(
+        CONTAINS(LCASE(COALESCE(STR(?_rdfsLbl), "")), "{q}") ||
+        CONTAINS(LCASE(COALESCE(STR(?_altLbl), "")), "{q}") ||
+        CONTAINS(LCASE(STR(?iri)), "{q}")
+    )
+}} GROUP BY ?iri ?kind
+ORDER BY ?label LIMIT 10
 """
 
 
@@ -179,13 +192,16 @@ class TermNormalizerService:
         sparql_results = await self._sparql_search(ont_iri, term, kind, dataset)
         if sparql_results:
             best = sparql_results[0]
-            score = self._sparql_score(term, best.get("label", ""))
+            # rdfs:label과 altLabel 중 더 높은 점수 사용
+            label_score = self._sparql_score(term, best.get("label", ""))
+            alt_score = self._sparql_score(term, best.get("alt_label", ""))
+            score = max(label_score, alt_score)
             result = NormalizeResult(
                 iri=best["iri"],
                 label=best.get("label"),
                 score=score,
                 source="sparql",
-                candidates=sparql_results[:3],
+                candidates=[{k: v for k, v in c.items() if k != "alt_label"} for c in sparql_results[:3]],
                 requires_review=score < thr,
             )
             if score >= thr:
@@ -212,7 +228,9 @@ class TermNormalizerService:
             ]
             # SPARQL 후보가 있으면 합쳐서 best 재선택
             if sparql_results and sparql_results[0].get("iri"):
-                sp_score = self._sparql_score(term, sparql_results[0].get("label", ""))
+                sp_label_score = self._sparql_score(term, sparql_results[0].get("label", ""))
+                sp_alt_score = self._sparql_score(term, sparql_results[0].get("alt_label", ""))
+                sp_score = max(sp_label_score, sp_alt_score)
                 if sp_score > score:
                     return NormalizeResult(
                         iri=sparql_results[0]["iri"],
@@ -270,24 +288,42 @@ class TermNormalizerService:
         kind: str,
         dataset: str | None,
     ) -> list[dict]:
-        """SPARQL CONTAINS 검색 → [{"iri", "label", "kind"}] 정렬."""
+        """SPARQL CONTAINS 검색 → [{"iri", "label", "kind"}] 정렬.
+
+        클래스 선언과 altLabel이 다른 Named Graph에 있어도 매핑되도록
+        GRAPH 변수를 분리하여 크로스-그래프 조회.
+        """
         gf = graphs_filter_clause([], ont_iri)
+        # OPTIONAL 블록용 별칭 필터 (변수명만 다르고 동일 조건)
+        gf2 = gf.replace("?_g", "?_lg")
+        gf3 = gf.replace("?_g", "?_ag")
         q_escaped = _esc(term.lower())
         q = _NORMALIZE_SPARQL.format(
             prefixes=COMMON_PREFIXES,
             q=q_escaped,
             gf=gf,
+            gf2=gf2,
+            gf3=gf3,
         )
         rows = await self._store.sparql_select(q, dataset)
 
         results = []
         for r in rows:
             iri = _v(r.get("iri"))
-            label = _v(r.get("label")) or iri.split("#")[-1] if "#" in (iri or "") else (iri or "").split("/")[-1]
+            if not iri:
+                continue
+            frag = iri.split("#")[-1] if "#" in iri else iri.split("/")[-1]
+            label = _v(r.get("label")) or frag
+            alt_label = _v(r.get("altLabel"))
             rk = _v(r.get("kind"), "concept")
             if kind != "any" and rk != kind:
                 continue
-            results.append({"iri": iri, "label": label, "kind": rk})
+            results.append({
+                "iri": iri,
+                "label": label,
+                "alt_label": alt_label,  # 매칭에 사용된 altLabel (스코어링용)
+                "kind": rk,
+            })
         return results
 
     @staticmethod
