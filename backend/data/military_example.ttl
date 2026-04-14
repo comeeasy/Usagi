@@ -1,0 +1,552 @@
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix dc:   <http://purl.org/dc/terms/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix mil:  <https://example.org/military#> .
+
+# ════════════════════════════════════════════════════
+#  온톨로지 메타데이터
+# ════════════════════════════════════════════════════
+
+<https://example.org/military>
+    a owl:Ontology ;
+    rdfs:label "군사 온톨로지 예시"@ko ;
+    rdfs:label "Military Ontology Example"@en ;
+    rdfs:comment "Term Normalizer · JSON Ingester 테스트용 예시 온톨로지"@ko ;
+    owl:versionInfo "1.0" ;
+    dc:created "2026-04-14"^^xsd:date .
+
+
+# ════════════════════════════════════════════════════
+#  Object Properties (관계 속성)
+# ════════════════════════════════════════════════════
+
+mil:commands
+    a owl:ObjectProperty ;
+    rdfs:label "지휘하다"@ko ;
+    rdfs:label "commands"@en ;
+    skos:altLabel "지휘"@ko ;
+    rdfs:domain mil:Commander ;
+    rdfs:range  mil:MilitaryUnit .
+
+mil:belongsTo
+    a owl:ObjectProperty ;
+    rdfs:label "소속이다"@ko ;
+    rdfs:label "belongsTo"@en ;
+    skos:altLabel "소속"@ko ;
+    rdfs:domain mil:Soldier ;
+    rdfs:range  mil:MilitaryUnit .
+
+mil:hasMission
+    a owl:ObjectProperty ;
+    rdfs:label "임무를 갖다"@ko ;
+    rdfs:label "hasMission"@en ;
+    skos:altLabel "임무배정"@ko ;
+    rdfs:domain mil:MilitaryUnit ;
+    rdfs:range  mil:Mission .
+
+mil:locatedAt
+    a owl:ObjectProperty ;
+    rdfs:label "위치하다"@ko ;
+    rdfs:label "locatedAt"@en ;
+    skos:altLabel "위치"@ko ;
+    rdfs:domain mil:MilitaryUnit ;
+    rdfs:range  mil:Location .
+
+mil:usesEquipment
+    a owl:ObjectProperty ;
+    rdfs:label "장비를 운용하다"@ko ;
+    rdfs:label "usesEquipment"@en ;
+    skos:altLabel "장비운용"@ko ;
+    rdfs:domain mil:MilitaryUnit ;
+    rdfs:range  mil:Equipment .
+
+mil:issuedBy
+    a owl:ObjectProperty ;
+    rdfs:label "발령하다"@ko ;
+    rdfs:label "issuedBy"@en ;
+    rdfs:domain mil:Order ;
+    rdfs:range  mil:Commander .
+
+mil:assignedTo
+    a owl:ObjectProperty ;
+    rdfs:label "배속되다"@ko ;
+    rdfs:label "assignedTo"@en ;
+    rdfs:domain mil:MilitaryUnit ;
+    rdfs:range  mil:MilitaryUnit .
+
+mil:supports
+    a owl:ObjectProperty ;
+    rdfs:label "지원하다"@ko ;
+    rdfs:label "supports"@en ;
+    skos:altLabel "화력지원"@ko ;
+    rdfs:domain mil:FireSupportUnit ;
+    rdfs:range  mil:MilitaryUnit .
+
+mil:reportedBy
+    a owl:ObjectProperty ;
+    rdfs:label "보고하다"@ko ;
+    rdfs:label "reportedBy"@en ;
+    rdfs:domain mil:Report ;
+    rdfs:range  mil:Soldier .
+
+
+# ════════════════════════════════════════════════════
+#  Data Properties (데이터 속성)
+# ════════════════════════════════════════════════════
+
+mil:strength
+    a owl:DatatypeProperty ;
+    rdfs:label "병력 수"@ko ;
+    rdfs:label "strength"@en ;
+    rdfs:domain mil:MilitaryUnit ;
+    rdfs:range  xsd:integer .
+
+mil:rank
+    a owl:DatatypeProperty ;
+    rdfs:label "계급"@ko ;
+    rdfs:label "rank"@en ;
+    rdfs:domain mil:Soldier ;
+    rdfs:range  xsd:string .
+
+mil:gridCoordinate
+    a owl:DatatypeProperty ;
+    rdfs:label "격자좌표"@ko ;
+    rdfs:label "gridCoordinate"@en ;
+    skos:altLabel "좌표"@ko ;
+    rdfs:domain mil:Location ;
+    rdfs:range  xsd:string .
+
+mil:missionType
+    a owl:DatatypeProperty ;
+    rdfs:label "임무 유형"@ko ;
+    rdfs:label "missionType"@en ;
+    rdfs:domain mil:Mission ;
+    rdfs:range  xsd:string .
+
+mil:reportDate
+    a owl:DatatypeProperty ;
+    rdfs:label "보고 일시"@ko ;
+    rdfs:label "reportDate"@en ;
+    rdfs:domain mil:Report ;
+    rdfs:range  xsd:dateTime .
+
+
+# ════════════════════════════════════════════════════
+#  Classes (개념) — TBox Restrictions 포함
+# ════════════════════════════════════════════════════
+
+# ── 최상위 ───────────────────────────────────────────
+
+mil:Agent
+    a owl:Class ;
+    rdfs:label "행위자"@ko ;
+    rdfs:label "Agent"@en .
+
+mil:MilitaryEntity
+    a owl:Class ;
+    rdfs:label "군사 개체"@ko ;
+    rdfs:label "MilitaryEntity"@en .
+
+mil:Document
+    a owl:Class ;
+    rdfs:label "문서"@ko ;
+    rdfs:label "Document"@en .
+
+
+# ── 인원 ────────────────────────────────────────────
+
+mil:Soldier
+    a owl:Class ;
+    rdfs:subClassOf mil:Agent ;
+    rdfs:subClassOf mil:MilitaryEntity ;
+    rdfs:label "병사"@ko ;
+    rdfs:label "Soldier"@en ;
+    skos:altLabel "병원"@ko ;
+    skos:altLabel "전투원"@ko ;
+    skos:altLabel "군인"@ko ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty mil:belongsTo ;
+        owl:someValuesFrom mil:MilitaryUnit
+    ] .
+
+mil:Commander
+    a owl:Class ;
+    rdfs:subClassOf mil:Soldier ;
+    rdfs:label "지휘관"@ko ;
+    rdfs:label "Commander"@en ;
+    skos:altLabel "사령관"@ko ;
+    skos:altLabel "부대장"@ko ;
+    skos:altLabel "CO"@en ;
+    skos:altLabel "Cdr"@en ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty mil:commands ;
+        owl:someValuesFrom mil:MilitaryUnit
+    ] .
+
+mil:StaffOfficer
+    a owl:Class ;
+    rdfs:subClassOf mil:Soldier ;
+    rdfs:label "참모장교"@ko ;
+    rdfs:label "StaffOfficer"@en ;
+    skos:altLabel "참모"@ko .
+
+mil:OperationsOfficer
+    a owl:Class ;
+    rdfs:subClassOf mil:StaffOfficer ;
+    rdfs:label "작전참모"@ko ;
+    rdfs:label "OperationsOfficer"@en ;
+    skos:altLabel "G3"@en ;
+    skos:altLabel "S3"@en ;
+    skos:altLabel "작참"@ko .
+
+mil:IntelligenceOfficer
+    a owl:Class ;
+    rdfs:subClassOf mil:StaffOfficer ;
+    rdfs:label "정보참모"@ko ;
+    rdfs:label "IntelligenceOfficer"@en ;
+    skos:altLabel "G2"@en ;
+    skos:altLabel "S2"@en ;
+    skos:altLabel "정참"@ko .
+
+mil:LogisticsOfficer
+    a owl:Class ;
+    rdfs:subClassOf mil:StaffOfficer ;
+    rdfs:label "군수참모"@ko ;
+    rdfs:label "LogisticsOfficer"@en ;
+    skos:altLabel "G4"@en ;
+    skos:altLabel "S4"@en ;
+    skos:altLabel "군참"@ko .
+
+
+# ── 부대 편성 ────────────────────────────────────────
+
+mil:MilitaryUnit
+    a owl:Class ;
+    rdfs:subClassOf mil:MilitaryEntity ;
+    rdfs:label "부대"@ko ;
+    rdfs:label "MilitaryUnit"@en ;
+    skos:altLabel "unit"@en ;
+    skos:altLabel "부서"@ko ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty mil:hasMission ;
+        owl:someValuesFrom mil:Mission
+    ] ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty mil:locatedAt ;
+        owl:someValuesFrom mil:Location
+    ] .
+
+mil:Division
+    a owl:Class ;
+    rdfs:subClassOf mil:MilitaryUnit ;
+    rdfs:label "사단"@ko ;
+    rdfs:label "Division"@en ;
+    skos:altLabel "Div"@en ;
+    skos:altLabel "DIV"@en .
+
+mil:Brigade
+    a owl:Class ;
+    rdfs:subClassOf mil:MilitaryUnit ;
+    rdfs:label "여단"@ko ;
+    rdfs:label "Brigade"@en ;
+    skos:altLabel "Bde"@en ;
+    skos:altLabel "BDE"@en .
+
+mil:Battalion
+    a owl:Class ;
+    rdfs:subClassOf mil:MilitaryUnit ;
+    rdfs:label "대대"@ko ;
+    rdfs:label "Battalion"@en ;
+    skos:altLabel "Bn"@en ;
+    skos:altLabel "BN"@en ;
+    skos:altLabel "영"@ko .
+
+mil:Company
+    a owl:Class ;
+    rdfs:subClassOf mil:MilitaryUnit ;
+    rdfs:label "중대"@ko ;
+    rdfs:label "Company"@en ;
+    skos:altLabel "Coy"@en ;
+    skos:altLabel "COY"@en .
+
+mil:FireSupportUnit
+    a owl:Class ;
+    rdfs:subClassOf mil:MilitaryUnit ;
+    rdfs:label "화력지원부대"@ko ;
+    rdfs:label "FireSupportUnit"@en ;
+    skos:altLabel "포병"@ko ;
+    skos:altLabel "화력"@ko ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty mil:supports ;
+        owl:someValuesFrom mil:MilitaryUnit
+    ] .
+
+# 부대 유형은 상호 배제 (Disjoint)
+[] a owl:AllDisjointClasses ;
+    owl:members ( mil:Division mil:Brigade mil:Battalion mil:Company ) .
+
+
+# ── 임무 ────────────────────────────────────────────
+
+mil:Mission
+    a owl:Class ;
+    rdfs:subClassOf mil:MilitaryEntity ;
+    rdfs:label "임무"@ko ;
+    rdfs:label "Mission"@en ;
+    skos:altLabel "과업"@ko ;
+    skos:altLabel "mission"@en .
+
+mil:ReconMission
+    a owl:Class ;
+    rdfs:subClassOf mil:Mission ;
+    rdfs:label "정찰임무"@ko ;
+    rdfs:label "ReconMission"@en ;
+    skos:altLabel "정찰"@ko ;
+    skos:altLabel "수색정찰"@ko ;
+    skos:altLabel "Recon"@en ;
+    skos:altLabel "RECON"@en .
+
+mil:AttackMission
+    a owl:Class ;
+    rdfs:subClassOf mil:Mission ;
+    rdfs:label "공격임무"@ko ;
+    rdfs:label "AttackMission"@en ;
+    skos:altLabel "공격"@ko ;
+    skos:altLabel "ATK"@en .
+
+mil:DefenseMission
+    a owl:Class ;
+    rdfs:subClassOf mil:Mission ;
+    rdfs:label "방어임무"@ko ;
+    rdfs:label "DefenseMission"@en ;
+    skos:altLabel "방어"@ko ;
+    skos:altLabel "DEF"@en .
+
+# 임무 유형도 상호 배제
+[] a owl:AllDisjointClasses ;
+    owl:members ( mil:ReconMission mil:AttackMission mil:DefenseMission ) .
+
+
+# ── 위치 ────────────────────────────────────────────
+
+mil:Location
+    a owl:Class ;
+    rdfs:subClassOf mil:MilitaryEntity ;
+    rdfs:label "위치"@ko ;
+    rdfs:label "Location"@en ;
+    skos:altLabel "좌표"@ko ;
+    skos:altLabel "진지"@ko .
+
+mil:CommandPost
+    a owl:Class ;
+    rdfs:subClassOf mil:Location ;
+    rdfs:label "지휘소"@ko ;
+    rdfs:label "CommandPost"@en ;
+    skos:altLabel "CP"@en ;
+    skos:altLabel "지휘부"@ko .
+
+mil:TacticalOperationsCenter
+    a owl:Class ;
+    rdfs:subClassOf mil:Location ;
+    rdfs:label "전술작전센터"@ko ;
+    rdfs:label "TacticalOperationsCenter"@en ;
+    skos:altLabel "TOC"@en ;
+    skos:altLabel "작전센터"@ko .
+
+mil:AssemblyArea
+    a owl:Class ;
+    rdfs:subClassOf mil:Location ;
+    rdfs:label "집결지"@ko ;
+    rdfs:label "AssemblyArea"@en ;
+    skos:altLabel "AA"@en ;
+    skos:altLabel "집결"@ko .
+
+
+# ── 장비 ────────────────────────────────────────────
+
+mil:Equipment
+    a owl:Class ;
+    rdfs:subClassOf mil:MilitaryEntity ;
+    rdfs:label "장비"@ko ;
+    rdfs:label "Equipment"@en ;
+    skos:altLabel "무기"@ko .
+
+mil:ArmoredVehicle
+    a owl:Class ;
+    rdfs:subClassOf mil:Equipment ;
+    rdfs:label "장갑차"@ko ;
+    rdfs:label "ArmoredVehicle"@en ;
+    skos:altLabel "APC"@en ;
+    skos:altLabel "IFV"@en .
+
+mil:Tank
+    a owl:Class ;
+    rdfs:subClassOf mil:Equipment ;
+    rdfs:label "전차"@ko ;
+    rdfs:label "Tank"@en ;
+    skos:altLabel "MBT"@en ;
+    skos:altLabel "K1"@ko ;
+    skos:altLabel "K2"@ko .
+
+
+# ── 문서 ────────────────────────────────────────────
+
+mil:Order
+    a owl:Class ;
+    rdfs:subClassOf mil:Document ;
+    rdfs:label "명령"@ko ;
+    rdfs:label "Order"@en ;
+    skos:altLabel "작전명령"@ko ;
+    skos:altLabel "OPORD"@en ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty mil:issuedBy ;
+        owl:someValuesFrom mil:Commander
+    ] .
+
+mil:Report
+    a owl:Class ;
+    rdfs:subClassOf mil:Document ;
+    rdfs:label "보고"@ko ;
+    rdfs:label "Report"@en ;
+    skos:altLabel "보고서"@ko ;
+    skos:altLabel "상황보고"@ko ;
+    skos:altLabel "SITREP"@en ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty mil:reportedBy ;
+        owl:someValuesFrom mil:Soldier
+    ] .
+
+mil:OperationPlan
+    a owl:Class ;
+    rdfs:subClassOf mil:Document ;
+    rdfs:label "작전계획"@ko ;
+    rdfs:label "OperationPlan"@en ;
+    skos:altLabel "작계"@ko ;
+    skos:altLabel "OPLAN"@en .
+
+
+# ════════════════════════════════════════════════════
+#  Individuals (예시 개체)
+# ════════════════════════════════════════════════════
+
+# ── 인원 ────────────────────────────────────────────
+
+mil:ind_홍길동
+    a owl:NamedIndividual, mil:Commander ;
+    rdfs:label "홍길동"@ko ;
+    mil:rank "대령"^^xsd:string ;
+    mil:commands mil:ind_3사단 ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+mil:ind_김철수
+    a owl:NamedIndividual, mil:OperationsOfficer ;
+    rdfs:label "김철수"@ko ;
+    mil:rank "중령"^^xsd:string ;
+    mil:belongsTo mil:ind_3사단 ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+mil:ind_이영희
+    a owl:NamedIndividual, mil:IntelligenceOfficer ;
+    rdfs:label "이영희"@ko ;
+    mil:rank "소령"^^xsd:string ;
+    mil:belongsTo mil:ind_3사단 ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+
+# ── 부대 ────────────────────────────────────────────
+
+mil:ind_3사단
+    a owl:NamedIndividual, mil:Division ;
+    rdfs:label "3사단"@ko ;
+    owl:sameAs mil:ind_3div ;
+    mil:strength "15000"^^xsd:integer ;
+    mil:hasMission mil:ind_수색정찰임무 ;
+    mil:locatedAt mil:ind_철원진지 ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+mil:ind_3div
+    a owl:NamedIndividual, mil:Division ;
+    rdfs:label "3rd Division"@en .
+
+mil:ind_1여단
+    a owl:NamedIndividual, mil:Brigade ;
+    rdfs:label "1여단"@ko ;
+    mil:assignedTo mil:ind_3사단 ;
+    mil:strength "4000"^^xsd:integer ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+mil:ind_포병대대
+    a owl:NamedIndividual, mil:FireSupportUnit, mil:Battalion ;
+    rdfs:label "포병대대"@ko ;
+    mil:assignedTo mil:ind_3사단 ;
+    mil:supports mil:ind_1여단 ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+
+# ── 임무 ────────────────────────────────────────────
+
+mil:ind_수색정찰임무
+    a owl:NamedIndividual, mil:ReconMission ;
+    rdfs:label "수색정찰임무"@ko ;
+    mil:missionType "수색정찰"^^xsd:string ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+mil:ind_방어임무_A
+    a owl:NamedIndividual, mil:DefenseMission ;
+    rdfs:label "철원 방어임무"@ko ;
+    mil:missionType "진지방어"^^xsd:string ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+
+# ── 위치 ────────────────────────────────────────────
+
+mil:ind_철원진지
+    a owl:NamedIndividual, mil:Location ;
+    rdfs:label "철원 진지"@ko ;
+    mil:gridCoordinate "38PQK123456"^^xsd:string ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+mil:ind_TOC_A
+    a owl:NamedIndividual, mil:TacticalOperationsCenter ;
+    rdfs:label "3사단 TOC"@ko ;
+    mil:gridCoordinate "38PQK234567"^^xsd:string ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+
+# ── 문서 ────────────────────────────────────────────
+
+mil:ind_작전명령_001
+    a owl:NamedIndividual, mil:Order ;
+    rdfs:label "작전명령 001호"@ko ;
+    mil:issuedBy mil:ind_홍길동 ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
+
+mil:ind_상황보고_001
+    a owl:NamedIndividual, mil:Report ;
+    rdfs:label "상황보고 001호"@ko ;
+    mil:reportedBy mil:ind_김철수 ;
+    mil:reportDate "2026-04-14T06:00:00Z"^^xsd:dateTime ;
+    prov:wasAttributedTo "manual" ;
+    prov:generatedAtTime "2026-04-14T00:00:00Z"^^xsd:dateTime .
