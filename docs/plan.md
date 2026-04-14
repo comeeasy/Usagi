@@ -2562,3 +2562,337 @@ interface SubgraphPreviewPanelProps {
 - [x] **C34-3** `SubgraphSelector` 개선 (피커 교체)
 - [x] **C34-4** `SubgraphPreviewPanel` 컴포넌트
 - [x] **C34-5** `ReasonerPage` 탭 레이아웃 + 연결
+
+---
+
+---
+
+# 군사문서 온톨로지 매핑 애플리케이션
+
+**작성일:** 2026-04-14
+**버전:** 1.0
+
+## 목표
+
+기존 온톨로지 플랫폼(Jena Fuseki + owlready2 HermiT) 위에 두 가지 기능을 추가한다.
+
+1. **Term Normalizer**: 군사 은어·약어·비표준어 → 온톨로지 표준 클래스/개체 IRI 매핑
+2. **JSON Ingester**: JSON 문서(key→class, value→individual) 자동 변환 + 관계 추론 + 정합성 검증
+
+---
+
+## 아키텍처 개요
+
+```
+입력 (군사 용어 / JSON 문서)
+        │
+        ▼
+┌─────────────────────────────────────────────┐
+│  Term Normalizer                             │
+│  ① 사전 정확 매칭 (military_terms.json)      │
+│  ② SPARQL rdfs:label + skos:altLabel 검색   │
+│  ③ Vector Similarity (fastembed, 기존)      │
+│  ④ LLM fallback (Claude API, 선택적)        │
+└────────────────────┬────────────────────────┘
+                     │ class IRI
+                     ▼
+┌─────────────────────────────────────────────┐
+│  JSON Ingester                               │
+│  Step 1. key → Class IRI (Term Normalizer)  │
+│  Step 2. value → Individual 생성/조회       │
+│  Step 3. Class Restriction 파싱 → Relation  │
+│          추론 (TBox someValuesFrom 등)       │
+│  Step 4. HermiT Reasoner 정합성 검증        │
+│  Step 5. 결과 반환 (triples + violations)   │
+└────────────────────┬────────────────────────┘
+                     │
+                     ▼
+            Jena Fuseki (기존 스토어)
+```
+
+---
+
+## 구현 순서
+
+### Phase 1 — Term Normalizer (백엔드)
+
+**목표:** 임의 문자열 → 온톨로지 클래스/개체 IRI 반환 서비스
+
+#### 작업 목록
+
+| ID | 작업 | 파일 |
+|----|------|------|
+| M1-1 | `skos:altLabel` 읽기/쓰기 메서드를 `OntologyStore`에 추가 | `backend/services/ontology_store.py` |
+| M1-2 | 군사 초기 사전 파일 작성 (약어→표준어 매핑) | `backend/data/military_terms.json` |
+| M1-3 | `TermNormalizerService` 구현 (4단계 폴백 체인) | `backend/services/term_normalizer.py` |
+| M1-4 | `/ontologies/{id}/normalize` POST 엔드포인트 | `backend/api/normalize.py` |
+| M1-5 | `/ontologies/{id}/terms/altlabel` CRUD 엔드포인트 | `backend/api/normalize.py` |
+| M1-6 | MCP 도구 `normalize_term` 추가 | `backend/app_mcp/tools.py` |
+
+#### `TermNormalizerService` 내부 구조
+
+```python
+class TermNormalizerService:
+    async def normalize(
+        self,
+        ontology_id: str,
+        term: str,
+        kind: Literal["concept", "individual", "any"] = "any",
+        threshold: float = 0.75,
+    ) -> NormalizeResult:
+        # 1. 사전 정확 매칭
+        # 2. SPARQL label + altLabel CONTAINS
+        # 3. Vector cosine similarity (기존 VectorIndexManager)
+        # 4. LLM fallback (신뢰도 < threshold 시)
+        ...
+
+@dataclass
+class NormalizeResult:
+    iri: str | None          # 매칭된 클래스/개체 IRI
+    label: str | None
+    score: float             # 0.0~1.0
+    source: str              # "dict" | "sparql" | "vector" | "llm"
+    candidates: list[dict]   # 상위 3개 후보 (검토용)
+    requires_review: bool    # score < threshold
+```
+
+---
+
+### Phase 2 — JSON Ingester (백엔드)
+
+**목표:** JSON 문서 한 건 → 온톨로지 트리플 + 정합성 검증 결과
+
+#### 작업 목록
+
+| ID | 작업 | 파일 |
+|----|------|------|
+| M2-1 | TBox restriction 파서 구현 (someValuesFrom, allValuesFrom, cardinality) | `backend/services/json_ingester.py` |
+| M2-2 | JSON → Individual 생성 로직 (기존 `add_individual` 재사용) | `backend/services/json_ingester.py` |
+| M2-3 | Relation 추론 로직 (TBox → 후보 property 목록 → confidence 점수) | `backend/services/json_ingester.py` |
+| M2-4 | HermiT Reasoner 호출 + 위반 집계 (기존 `ReasonerService` 재사용) | `backend/services/json_ingester.py` |
+| M2-5 | `/ontologies/{id}/ingest/json` POST 엔드포인트 (동기) | `backend/api/ingest.py` |
+| M2-6 | MCP 도구 `ingest_json_document` 추가 | `backend/app_mcp/tools.py` |
+
+#### 처리 흐름 상세
+
+```
+입력: { "지휘관": "홍길동", "부대": "3사단", "임무": "수색정찰" }
+
+Step 1. Key 정규화
+  "지휘관" → :CommanderRole  (score: 0.92, source: "dict")
+  "부대"   → :MilitaryUnit   (score: 0.88, source: "sparql")
+  "임무"   → :Mission        (score: 0.81, source: "vector")
+
+Step 2. Individual 생성
+  :ind_홍길동   rdf:type :CommanderRole
+  :ind_3사단    rdf:type :MilitaryUnit
+  :ind_수색정찰 rdf:type :Mission
+
+Step 3. Relation 추론 (TBox 파싱)
+  TBox 조회: :CommanderRole someValuesFrom :MilitaryUnit (property: :commands)
+             :MilitaryUnit someValuesFrom :Mission       (property: :hasMission)
+  → :ind_홍길동 :commands :ind_3사단        (confidence: 0.87)
+  → :ind_3사단 :hasMission :ind_수색정찰   (confidence: 0.81)
+
+Step 4. HermiT 검증
+  → violations: []
+  → inferred: [:ind_홍길동 rdf:type :Agent]  (상위 클래스 추론)
+
+Step 5. 결과
+  {
+    "individuals": [...],
+    "relations": [...],
+    "violations": [],
+    "inferred": [...],
+    "review_required": [{"key": "임무", "score": 0.81}]
+  }
+```
+
+#### API 명세
+
+```
+POST /ontologies/{ontology_id}/ingest/json
+Body:
+{
+  "document": { "key": "value", ... },
+  "source_label": "훈련보고서_001",     // optional: provenance
+  "dry_run": false,                       // true → 트리플 저장 안 함
+  "run_reasoner": true
+}
+
+Response:
+{
+  "status": "ok" | "review_required" | "violation",
+  "individuals_created": [...],
+  "relations_asserted": [...],
+  "violations": [...],
+  "inferred_axioms": [...],
+  "mapping_details": {
+    "지휘관": { "iri": "...", "score": 0.92, "source": "dict" },
+    ...
+  }
+}
+```
+
+---
+
+### Phase 3 — 프론트엔드 UI
+
+**목표:** Term Manager + JSON Ingester 화면
+
+#### 작업 목록
+
+| ID | 작업 | 파일 |
+|----|------|------|
+| M3-1 | 사이드바에 "문서 수집" 메뉴 항목 추가 | `frontend/src/components/Sidebar.tsx` |
+| M3-2 | `TermManagerPage` — altLabel CRUD UI | `frontend/src/pages/ontology/TermManagerPage.tsx` |
+| M3-3 | `JsonIngesterPage` — JSON 입력 → 매핑 미리보기 → 확인 → 저장 | `frontend/src/pages/ontology/JsonIngesterPage.tsx` |
+| M3-4 | `MappingPreview` 컴포넌트 — key/value별 매칭 결과 테이블 | `frontend/src/components/ingest/MappingPreview.tsx` |
+| M3-5 | `IngestionResult` 컴포넌트 — 생성된 트리플 + 위반 목록 | `frontend/src/components/ingest/IngestionResult.tsx` |
+| M3-6 | API 클라이언트 함수 추가 | `frontend/src/api/ingest.ts` |
+
+#### `JsonIngesterPage` 레이아웃
+
+```
+┌─────────────────────────────────────────────────────┐
+│ [JSON 입력 (CodeMirror)]   │  [매핑 미리보기]        │
+│                             │                         │
+│  {                          │  key      → class (IRI) │
+│    "지휘관": "홍길동",       │  지휘관   → :Commander  │
+│    "부대": "3사단"           │  부대     → :MilitUnit  │
+│  }                          │  ✓ 신뢰도 높음          │
+│                             │  ⚠ 검토 필요: 임무 0.81 │
+│  [dry_run ☑]  [추론 ☑]     │                         │
+│  [저장 실행]                │  [결과 패널]            │
+│                             │  생성된 트리플 3건      │
+│                             │  위반 없음              │
+│                             │  추론된 공리 2건        │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+### Phase 4 — LLM Fallback (선택적)
+
+Phase 1~3 완료 후 Vector search 신뢰도가 낮은 케이스를 위한 Claude API 연동.
+
+| ID | 작업 | 파일 |
+|----|------|------|
+| M4-1 | Claude API 클라이언트 래퍼 | `backend/services/llm_client.py` |
+| M4-2 | `TermNormalizerService`에 LLM fallback 분기 추가 | `backend/services/term_normalizer.py` |
+| M4-3 | LLM 응답 캐시 (온톨로지별, TTL 1h) | `backend/services/term_normalizer.py` |
+
+---
+
+## 테스트 전략
+
+### 단위 테스트 (pytest)
+
+| 테스트 파일 | 대상 | 주요 케이스 |
+|------------|------|------------|
+| `tests/test_term_normalizer.py` | `TermNormalizerService` | 사전 매칭 정확도, SPARQL 매칭, 폴백 순서, 임계값 미달 시 review 플래그 |
+| `tests/test_json_ingester.py` | `JsonIngesterService` | 정상 문서, key 매핑 실패 케이스, TBox 없는 클래스, dry_run 동작 |
+| `tests/test_tbox_parser.py` | TBox restriction 파서 | someValuesFrom, allValuesFrom, minCardinality, 빈 restriction |
+
+### 통합 테스트 (pytest + Fuseki)
+
+| 테스트 파일 | 대상 | 주요 케이스 |
+|------------|------|------------|
+| `tests/integration/test_normalize_api.py` | `POST /normalize` | 실제 Fuseki 연결, altLabel 등록 후 검색 |
+| `tests/integration/test_ingest_api.py` | `POST /ingest/json` | 트리플 실제 저장 확인, Reasoner 위반 감지 |
+
+### 테스트 데이터
+
+- `tests/fixtures/military_ontology.ttl` — 테스트용 온톨로지 (10개 클래스, 5개 property, restriction 포함)
+- `tests/fixtures/sample_documents/` — 정상/비정상 JSON 문서 샘플 5종
+
+### 수동 검증 체크리스트 (각 Phase 완료 시)
+
+**Phase 1 완료 기준:**
+- [ ] `POST /normalize` 에 "지휘관", "작전참모", "OPCON" 입력 → 각각 올바른 IRI 반환
+- [ ] altLabel 등록 → SPARQL 검색으로 조회 가능
+- [ ] 미등록 용어 → `requires_review: true`, `score < 0.75`
+
+**Phase 2 완료 기준:**
+- [ ] 샘플 JSON 3종 수집 → Fuseki에 트리플 저장 확인 (SPARQL SELECT)
+- [ ] TBox restriction 있는 클래스 → 관계 자동 추론 확인
+- [ ] `dry_run: true` → 저장 없이 결과만 반환
+- [ ] 상호 배제 클래스(disjointWith) 위반 JSON → violations에 포함
+
+**Phase 3 완료 기준:**
+- [ ] 브라우저에서 JSON 붙여넣기 → 매핑 미리보기 렌더링
+- [ ] "저장 실행" → 생성된 트리플이 그래프 뷰에 표시
+- [ ] 위반 발생 시 빨간색 경고 패널 표시
+
+---
+
+## 파일 변경 요약
+
+### 신규 파일
+
+| 파일 | 역할 |
+|------|------|
+| `backend/services/term_normalizer.py` | Term Normalizer 서비스 |
+| `backend/services/json_ingester.py` | JSON Ingester 서비스 |
+| `backend/api/normalize.py` | Term 정규화/altLabel API |
+| `backend/api/ingest.py` | JSON 수집 API |
+| `backend/data/military_terms.json` | 군사 용어 초기 사전 |
+| `frontend/src/pages/ontology/TermManagerPage.tsx` | Term Manager UI |
+| `frontend/src/pages/ontology/JsonIngesterPage.tsx` | JSON Ingester UI |
+| `frontend/src/components/ingest/MappingPreview.tsx` | 매핑 미리보기 |
+| `frontend/src/components/ingest/IngestionResult.tsx` | 수집 결과 표시 |
+| `frontend/src/api/ingest.ts` | API 클라이언트 |
+| `tests/test_term_normalizer.py` | 단위 테스트 |
+| `tests/test_json_ingester.py` | 단위 테스트 |
+| `tests/integration/test_normalize_api.py` | 통합 테스트 |
+| `tests/integration/test_ingest_api.py` | 통합 테스트 |
+
+### 기존 파일 수정
+
+| 파일 | 수정 내용 |
+|------|-----------|
+| `backend/services/ontology_store.py` | `skos:altLabel` 읽기/쓰기 메서드 추가 |
+| `backend/app_mcp/tools.py` | `normalize_term`, `ingest_json_document` 도구 추가 |
+| `backend/main.py` | `normalize`, `ingest` 라우터 등록 |
+| `frontend/src/components/Sidebar.tsx` | "문서 수집" 메뉴 추가 |
+| `frontend/src/App.tsx` | 신규 페이지 라우트 추가 |
+
+---
+
+## 작업 체크리스트
+
+### Phase 1 — Term Normalizer
+
+- [ ] **M1-1** `OntologyStore.add_alt_label()` / `get_alt_labels()` 메서드
+- [ ] **M1-2** `military_terms.json` 초기 사전 작성 (50개 이상)
+- [ ] **M1-3** `TermNormalizerService` (dict → SPARQL → vector 3단계)
+- [ ] **M1-4** `POST /ontologies/{id}/normalize` 엔드포인트
+- [ ] **M1-5** `POST/GET /ontologies/{id}/terms/altlabel` 엔드포인트
+- [ ] **M1-6** MCP 도구 `normalize_term`
+- [ ] **M1-T** 단위 테스트 + 수동 검증
+
+### Phase 2 — JSON Ingester
+
+- [ ] **M2-1** TBox restriction 파서
+- [ ] **M2-2** JSON → Individual 생성 로직
+- [ ] **M2-3** Relation 추론 로직
+- [ ] **M2-4** Reasoner 호출 + 위반 집계
+- [ ] **M2-5** `POST /ontologies/{id}/ingest/json` 엔드포인트
+- [ ] **M2-6** MCP 도구 `ingest_json_document`
+- [ ] **M2-T** 단위 테스트 + 통합 테스트 + 수동 검증
+
+### Phase 3 — 프론트엔드
+
+- [ ] **M3-1** 사이드바 메뉴 추가
+- [ ] **M3-2** `TermManagerPage`
+- [ ] **M3-3** `JsonIngesterPage`
+- [ ] **M3-4** `MappingPreview` 컴포넌트
+- [ ] **M3-5** `IngestionResult` 컴포넌트
+- [ ] **M3-6** API 클라이언트 함수
+- [ ] **M3-T** 브라우저 수동 검증
+
+### Phase 4 — LLM Fallback (선택)
+
+- [ ] **M4-1** `llm_client.py` Claude API 래퍼
+- [ ] **M4-2** `TermNormalizerService` LLM 분기
+- [ ] **M4-3** LLM 응답 캐시
